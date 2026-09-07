@@ -1,0 +1,74 @@
+/* Custom Scrollbars */
+::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+::-webkit-scrollbar-track {
+  background: rgba(15, 23, 42, 0.6);
+}
+::-webkit-scrollbar-thumb {
+  background: rgba(51, 65, 85, 0.8);
+  border-radius: 9999px;
+}
+::-webkit-scrollbar-thumb:hover {
+  background: rgba(99, 102, 241, 0.8);
+}
+
+/* Tab Transitions */
+.nav-tab.active {
+  background: rgba(30, 41, 59, 0.9);
+  color: #ffffff;
+  border: 1px solid rgba(99, 102, 241, 0.4);
+  box-shadow: 0 4px 12px -2px rgba(99, 102, 241, 0.12);
+}
+
+/* Chat Markdown Styling */
+.chat-prose {
+  font-size: 0.875rem;
+  line-height: 1.6;
+}
+.chat-prose h1, .chat-prose h2, .chat-prose h3 {
+  font-weight: 700;
+  color: #f8fafc;
+  margin-top: 0.5rem;
+  margin-bottom: 0.25rem;
+}
+.chat-prose h3 {
+  font-size: 0.95rem;
+}
+.chat-prose ul {
+  list-style-type: disc;
+  padding-left: 1.25rem;
+  margin-top: 0.25rem;
+  margin-bottom: 0.5rem;
+}
+.chat-prose li {
+  margin-bottom: 0.25rem;
+}
+.chat-prose strong {
+  color: #818cf8;
+}
+.chat-prose code {
+  background: rgba(15, 23, 42, 0.8);
+  color: #38bdf8;
+  padding: 0.1rem 0.3rem;
+  border-radius: 0.25rem;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+  font-size: 0.8em;
+}
+.chat-prose blockquote {
+  border-left: 3px solid #6366f1;
+  padding-left: 0.75rem;
+  color: #94a3b8;
+  font-style: italic;
+  margin: 0.5rem 0;
+}
+
+/* Pulse animation for running task */
+@keyframes spin-slow {
+  from { transform: rotate(0deg); }
+  to { transform: rotate(360deg); }
+}
+.animate-spin-slow {
+  animation: spin-slow 2s linear infinite;
+}

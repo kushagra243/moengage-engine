@@ -25,3 +25,6 @@ data/logs/
 
 # market data cache
 data/cache/
+
+# learned/verified/discovered endpoint state is per-workspace local state
+data/endpoints.*.json

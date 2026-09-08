@@ -14,6 +14,8 @@ import base64
 import json
 import re
 import time
+import uuid
+from datetime import date, timedelta
 from typing import Any, Dict, List, Optional
 
 from ..database import get_setting
@@ -88,6 +90,9 @@ class PublicAPI:
         for k, v in (path_vars or {}).items():
             path = path.replace("{" + k + "}", str(v))
         url = self.host + path
+        # core-services campaign APIs reject any body without a caller-supplied request_id
+        if path.startswith("/core-services/") and isinstance(body, dict) and "request_id" not in body:
+            body = {**body, "request_id": str(uuid.uuid4())}
         headers = self._headers(ep)
         if write:
             audit("moengage.public_write", {"endpoint": name, "url": url}, actor="executor")
@@ -113,18 +118,53 @@ class PublicAPI:
         return self.call("test_connection", body={}, write=False)
 
     def campaigns_search(self, page: int = 1, page_size: int = 50, filters: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
-        body = {"page": page, "page_size": page_size}
+        body: Dict[str, Any] = {"page": page, "limit": min(max(int(page_size), 1), 15)}   # API caps limit at 15
         if filters:
             body.update(filters)
         return self.call("campaigns_search", body=body)
 
-    def campaign_stats(self, campaign_ids: List[str], start: Optional[str] = None, end: Optional[str] = None) -> Dict[str, Any]:
-        body: Dict[str, Any] = {"campaign_ids": campaign_ids[:10]}
-        if start:
-            body["start_date"] = start
-        if end:
-            body["end_date"] = end
+    def campaigns_search_paged(self, max_items: int = 150, filters: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
+        """campaigns_search caps limit at 15, so walk pages until the workspace runs out."""
+        rows: List[Dict[str, Any]] = []
+        status = 200
+        for page in range(1, 41):
+            r = self.campaigns_search(page=page, page_size=15, filters=filters)
+            status = r.get("status", status)
+            batch = r.get("data")
+            if not isinstance(batch, list) or not batch:
+                break
+            rows.extend(batch)          # pages can return fewer than `limit` and still have successors
+            if len(rows) >= max_items:
+                break
+        return {"status": status, "data": rows[:max_items], "endpoint": "campaigns_search", "pages_walked": page}
+
+    def campaign_stats(self, campaign_ids: List[str], start: Optional[str] = None, end: Optional[str] = None,
+                       attribution_type: str = "TOTAL_CONVERSIONS", metric_type: str = "TOTAL") -> Dict[str, Any]:
+        """start_date, end_date, attribution_type and metric_type are all mandatory; window <=30 days."""
+        today = date.today()
+        end = end or today.isoformat()
+        start = start or (today - timedelta(days=29)).isoformat()
+        ids = campaign_ids[:10]
+        body: Dict[str, Any] = {"campaign_ids": ids, "start_date": start, "end_date": end,
+                                "attribution_type": attribution_type, "metric_type": metric_type,
+                                "offset": 0, "limit": max(len(ids), 1)}
         return self.call("campaign_stats", body=body)
+
+    def campaign_stats_map(self, campaign_ids: List[str], start: Optional[str] = None, end: Optional[str] = None) -> Dict[str, Dict[str, Any]]:
+        """{campaign_id: performance_stats} for many campaigns; the API takes 10 ids per call."""
+        out: Dict[str, Dict[str, Any]] = {}
+        for i in range(0, len(campaign_ids), 10):
+            try:
+                r = self.campaign_stats(campaign_ids[i:i + 10], start, end)
+            except PublicAPIError:
+                continue
+            for cid, entries in ((r.get("data") or {}).get("data") or {}).items():
+                node: Any = entries[0] if isinstance(entries, list) and entries else None
+                for k in ("platforms", "ALL_PLATFORMS", "locales", "all_locale", "variations", "all_variations", "performance_stats"):
+                    node = node.get(k) if isinstance(node, dict) else None
+                if isinstance(node, dict):
+                    out[cid] = node
+        return out
 
     def segments_list(self, name: Optional[str] = None) -> Dict[str, Any]:
         return self.call("segments_list", params={"name": name} if name else None)

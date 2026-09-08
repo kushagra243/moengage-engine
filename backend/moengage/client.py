@@ -10,6 +10,9 @@ Live calls NEVER fall back to demo data: DataUnavailable carries the reason.
 """
 from __future__ import annotations
 import json
+import logging
+import threading
+import time
 from typing import Any, Dict, List, Optional
 
 from ..database import get_setting
@@ -17,6 +20,20 @@ from ..security import redact
 from . import mock, registry
 from .public_api import PublicAPI, PublicAPIError
 from .session import DashboardSession, SessionError, cookie_summary, parse_cookies
+
+log = logging.getLogger("moengage.client")
+
+# campaign-stats costs one API call per 10 campaigns (~12s for 60), and every tab that
+# lists campaigns pays it. Stats move hourly at most, so serve them from a short cache.
+_STATS_TTL = 600.0
+_stats_cache: Dict[str, Any] = {"key": "", "at": 0.0, "map": {}}
+
+# A full live campaign read is ~18 sequential API calls (18 pages + 6 stats batches, ~18s).
+# Cache the assembled list and hold a lock across the fetch, so a dashboard load and a
+# background poll arriving together share one fetch instead of racing two.
+_LIST_TTL = 300.0
+_list_cache: Dict[str, Any] = {"at": 0.0, "rows": []}
+_list_lock = threading.Lock()
 
 
 class DataUnavailable(RuntimeError):
@@ -48,6 +65,38 @@ def _tag(rows: List[Dict[str, Any]], src: str) -> List[Dict[str, Any]]:
     for r in rows:
         r["_source"] = src
     return rows
+
+
+def normalize_campaign(r: Dict[str, Any]) -> Dict[str, Any]:
+    """
+    core-services campaign rows nest their identity under basic_details and carry no
+    metrics; flatten to the keys the rest of the app reads. Metrics stay absent rather
+    than zero so audits can tell "no data" from "performed badly".
+    """
+    if "basic_details" not in r:
+        return r
+    bd = r.get("basic_details") or {}
+    seg = r.get("segmentation_details") or {}
+    names = [f.get("name") for f in ((seg.get("included_filters") or {}).get("filters") or []) if isinstance(f, dict) and f.get("name")]
+    # Whitelist, don't copy: campaign_content carries full email HTML (~1.1MB across 150 rows),
+    # which alone overflows an agent tool response before any metrics are reached.
+    out: Dict[str, Any] = {"_source": r.get("_source", "")}
+    out.update({
+        "id": r.get("campaign_id") or r.get("id", ""),
+        "name": bd.get("name") or r.get("campaign_id", ""),
+        "channel": str(r.get("channel", "")).title(),
+        "status": r.get("status", ""),
+        "target_segment": names[0] if names else ("All Users" if seg.get("is_all_user_campaign") else ""),
+        "last_run": r.get("sent_time") or r.get("created_at", ""),
+        "delivery_type": r.get("campaign_delivery_type", ""),
+        "tags": bd.get("tags") or [],
+        "created_by": r.get("created_by", ""),
+        "content_type": bd.get("content_type", ""),
+        "conversion_goals": [g.get("name") for g in (r.get("conversion_goal_details") or {}).get("goals", []) if isinstance(g, dict) and g.get("name")],
+        "is_all_user_campaign": bool(seg.get("is_all_user_campaign")),
+        "segment_count": len(names),
+    })
+    return out
 
 
 class MoEngageClient:
@@ -141,11 +190,49 @@ class MoEngageClient:
         raise DataUnavailable(role, " | ".join(errors))
 
     # ── reads ───────────────────────────────────────────────────────────
+    STATS_LIMIT = 60          # 10 ids per stats call; keeps a dashboard load to ~6 requests
+
+    def _merge_stats(self, rows: List[Dict[str, Any]]) -> None:
+        """Campaign search carries no performance data; fold in campaign-stats where available."""
+        ids = [r["id"] for r in rows[:self.STATS_LIMIT] if r.get("id")]
+        if not ids:
+            return
+        key = "|".join(sorted(ids))
+        now = time.time()
+        if _stats_cache["key"] == key and now - _stats_cache["at"] < _STATS_TTL:
+            stats = _stats_cache["map"]
+        else:
+            try:
+                stats = self.api().campaign_stats_map(ids)
+            except Exception as e:                  # stats are additive; never fail the list read
+                log.warning("campaign stats unavailable: %s", redact(str(e)))
+                return
+            _stats_cache.update({"key": key, "at": now, "map": stats})
+        for r in rows:
+            p = stats.get(r.get("id"))
+            if not p:
+                continue
+            r["stats_source"] = "live:api"
+            for dst, src in (("sent_count", "sent"), ("delivered_count", "delivered"), ("opened_count", "open"),
+                             ("clicks", "click"), ("attempted_count", "attempted"), ("ctr", "ctr"),
+                             ("delivery_rate", "delivery_rate"), ("open_rate", "open_rate"),
+                             ("conversion_rate", "ctor"), ("bounce_rate", "bounce_rate")):
+                if p.get(src) is not None:
+                    r[dst] = p[src]
+
     def get_campaigns(self, status_filter: Optional[str] = None, channel_filter: Optional[str] = None) -> List[Dict[str, Any]]:
         if self.mock_mode:
             rows = mock.campaigns()
         else:
-            rows, _ = self._read("campaign_list", lambda: self.api().campaigns_search(page_size=100), "campaigns")
+            with _list_lock:                # collapses concurrent callers onto one fetch
+                if time.time() - _list_cache["at"] < _LIST_TTL and _list_cache["rows"]:
+                    rows = _list_cache["rows"]
+                else:
+                    rows, _ = self._read("campaign_list", lambda: self.api().campaigns_search_paged(), "campaigns")
+                    rows = [normalize_campaign(r) for r in rows]
+                    self._merge_stats(rows)
+                    _list_cache.update({"at": time.time(), "rows": rows})
+        rows = [dict(r) for r in rows]      # callers filter/mutate; never hand out the cached objects
         if status_filter:
             rows = [r for r in rows if str(r.get("status", r.get("state", ""))).lower() == status_filter.lower()]
         if channel_filter:

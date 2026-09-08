@@ -6,6 +6,7 @@ from __future__ import annotations
 import json
 import logging
 import os
+import re
 from datetime import datetime
 from typing import Any, Dict, List, Optional
 
@@ -135,9 +136,12 @@ def update_settings(payload: SettingsPayload):
         v = str(v)
         if is_secret_key(k) and v == "":
             continue                    # empty secret field = leave unchanged
-        if k == "moengage_dc" and v and not (v.isdigit() and 1 <= len(v) <= 3):
-            raise HTTPException(400, "data centre must be digits, e.g. 03")
-        if k == "moengage_region" and not (v.endswith(".moengage.com") and "/" not in v and " " not in v):
+        if k == "moengage_dc" and v:
+            m = re.fullmatch(r"(?:api|dashboard)?-?0*(\d{1,3})(?:\.moengage\.com)?", v.strip(), re.I)
+            if not m:
+                raise HTTPException(400, "data centre must be digits, e.g. 03 (api-03 and dashboard-03 also accepted)")
+            v = m.group(1).zfill(2)
+        if k == "moengage_region" and v and not (v.endswith(".moengage.com") and "/" not in v and " " not in v):
             raise HTTPException(400, "region must be a *.moengage.com host")
         if k == "llm_base_url" and not (v.startswith("https://") or v.startswith("http://127.0.0.1") or v.startswith("http://localhost")):
             raise HTTPException(400, "LLM base URL must be https:// (or a loopback http:// server)")

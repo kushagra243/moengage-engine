@@ -13,6 +13,9 @@ Keychain, are never logged, and never enter an LLM prompt.
 
 ## Quick start
 
+Setting this up on a fresh Mac with the Claude Code login as the model?
+Follow [SETUP-MAC.md](SETUP-MAC.md) (10 minutes, no API keys).
+
 ```bash
 python3 start.py          # creates .venv (Python ≥ 3.10), installs deps, serves http://127.0.0.1:8080
 ```

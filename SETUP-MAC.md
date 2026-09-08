@@ -11,17 +11,48 @@ python3 --version                 # need 3.10 or newer; if not: brew install pyt
 node --version                    # only needed for Claude Code below; if missing: brew install node
 ```
 
-## 2. Clone and start
+## 2. Clone and set up (one command)
 
 ```bash
-git clone https://github.com/kushagra243/moengage-engine.git
-cd moengage-engine
-python3 start.py
+git clone https://github.com/kushagra243/moengage-engine.git && cd moengage-engine && ./setup.sh
 ```
 
-First run creates `.venv`, installs dependencies and serves the console at
-**http://127.0.0.1:8080** (loopback only). Leave this terminal open; use a
-second one for the commands below.
+`setup.sh` is idempotent: it finds or installs Python ≥ 3.10, creates `.venv`,
+installs dependencies, initialises the encrypted store, installs Claude Code
+if missing, checks the Claude login, sets the engine to run the agent
+**headlessly through the Claude CLI** (`claude -p`, no API key), runs the
+tests, prints the MoEngage steps, and starts the console at
+**http://127.0.0.1:8080**. Flags: `--no-start`, `--openrouter`,
+`--model=claude-opus-5`.
+
+### Or let Claude Code do the whole setup for you
+
+The repo ships a project command, `/setup`. After the clone, run it
+interactively inside Claude Code:
+
+```bash
+cd moengage-engine && claude
+# then type:  /setup
+```
+
+or fully headless, no prompts (Claude runs the script, starts the server,
+verifies the model, and tells you exactly what to paste for MoEngage):
+
+```bash
+cd moengage-engine && claude -p "/setup" --permission-mode acceptEdits \
+  --allowedTools "Bash(./setup.sh*),Bash(./cli.py*),Bash(curl*),Bash(nohup*),Bash(claude*),Bash(npm*),Bash(brew*),Read,Edit"
+```
+
+The only two things it cannot do for you are `claude login` (needs your
+browser) and copying your MoEngage headers; it will stop and ask for each.
+
+If you prefer to do it by hand, the manual steps follow.
+
+```bash
+python3 start.py          # manual start; first run creates .venv and installs deps
+```
+
+Leave that terminal open; use a second one for the commands below.
 
 On first start the engine creates its secret key in the macOS Keychain
 (item `moengage-engine`). macOS may ask you to allow access once.

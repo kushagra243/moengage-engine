@@ -90,3 +90,39 @@ def test_har_learner_keeps_structure_drops_secrets():
     assert registry.is_usable("campaign_list") and registry.resolve("segment_create")["method"] == "POST"
     st = registry.registry_status()
     assert st["usable_reads"] >= 1 and st["usable_writes"] >= 1
+
+
+def test_parse_credentials_from_devtools_header_block():
+    from backend.moengage.session import parse_credentials
+    block = """:authority: dashboard-03.moengage.com
+:method: GET
+accept: application/json
+authorization: Bearer eyJhbGciOiJIUzI1NiJ9.eyJzdWIiOiJ1c2VyIn0.abcdefghijklmnopqrstuvwxyz0123456789
+cookie: sessionid=abc12345; csrftoken=tok98765
+moe-appkey: APPKEY123
+moetraceid: 1234
+refreshtoken: rt-ABCDEFGHIJKLMNOP
+"""
+    c = parse_credentials(block)
+    assert c["cookies"] == {"sessionid": "abc12345", "csrftoken": "tok98765"}
+    assert c["access_token"].startswith("eyJ") and c["refresh_token"] == "rt-ABCDEFGHIJKLMNOP" and c["app_key"] == "APPKEY123"
+    j = parse_credentials('{"bearer":"eyJx.yyy.zzz","refresh_token":"r1","app_key":"A1"}')
+    assert j["access_token"] == "eyJx.yyy.zzz" and j["refresh_token"] == "r1" and j["app_key"] == "A1"
+    assert parse_credentials("a=b; c=d")["cookies"] == {"a": "b", "c": "d"}
+
+
+def test_discovery_classification_and_candidates(isolated_db):
+    import importlib, json as _json, os
+    disc = importlib.import_module("backend.moengage.discover")
+    assert disc._classify_path("/getLoggedInUserData") == "whoami"
+    assert disc._classify_path("/segmentation/all-segments/custom-segments") == "segment_list"
+    assert disc._classify_path("/segmentation/create") == "segment_create"
+    assert disc._classify_path("/campaigns/all") == "campaign_list"
+    assert disc._classify_path("/flows/all") == "flow_list"
+    assert disc._classify_path("/session/2fa/update") is None
+    disc.DISCOVERED_PATH = os.path.join(isolated_db, "endpoints.discovered.json")
+    disc._save({"region": "dashboard-01.moengage.com", "prefixes": ["/v4", "/v3"], "roles": {"campaign_list": [{"path": "/campaigns/all", "seen": 14}]}})
+    cands = disc.candidates_for("campaign_list", "dashboard-01.moengage.com")
+    assert [c["path"] for c in cands][:3] == ["/campaigns/all", "/v4/campaigns/all", "/v3/campaigns/all"]
+    reg = registry.get_registry()["dashboard"]["campaign_list"]
+    assert any((c if isinstance(c, str) else c["path"]) == "/campaigns/all" for c in reg["candidates"])

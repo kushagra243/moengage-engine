@@ -28,6 +28,8 @@ PREFIX = "enc:v1:"
 # rest, redacted from logs and never returned by /api/settings.
 SECRET_KEYS = frozenset({
     "moengage_cookies",
+    "moengage_access_token",
+    "moengage_refresh_token",
     "moengage_api_key",
     "moengage_data_api_key",
     "moengage_segmentation_key",

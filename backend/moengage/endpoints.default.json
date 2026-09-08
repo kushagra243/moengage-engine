@@ -1,61 +1,520 @@
 {
   "_comment": "Endpoint registry. 'public' = documented server-to-server APIs on api-{dc}.moengage.com (HTTP Basic: Workspace ID as username, feature key as password; MOE-APPKEY header where noted). Sources: github.com/moengage/moengage-documentation OpenAPI specs (api/data/data.yaml, api/custom-segments/custom-segments.yaml, api/campaigns/campaigns.yaml + campaign-draft.yaml, api/stats-report/stats-report.yaml, api/flows/flows.yaml, api/inform/inform.yaml, api/business-events/...). 'dashboard' = cookie-session endpoints: undocumented; they start 'unknown' and become usable only via HAR import (learned) or read-only probing of 'candidates' (verified).",
   "public": {
-    "test_connection":        {"method": "POST",  "path": "/v1/integrations/authentication",            "key": "data",        "appkey_header": true,  "status": "documented", "doc": "https://www.moengage.com/docs/api/data/data-overview"},
-    "data_track_event":       {"method": "POST",  "path": "/v1/event/{app_id}",                         "key": "data",        "appkey_header": false, "status": "documented", "doc": "https://www.moengage.com/docs/api/data/data-overview"},
-    "data_update_user":       {"method": "POST",  "path": "/v1/customer/{app_id}",                      "key": "data",        "appkey_header": false, "status": "documented", "doc": "https://www.moengage.com/docs/api/data/data-overview"},
-    "data_get_user":          {"method": "POST",  "path": "/v1/customers/export",                       "key": "data",        "appkey_header": false, "status": "documented", "doc": "https://www.moengage.com/docs/api/data/data-overview"},
-    "cohort_sync":            {"method": "POST",  "path": "/v1/integrations/cohortsync",                "key": "segmentation","appkey_header": true,  "status": "documented", "doc": "https://www.moengage.com/docs/api/custom-segments/custom-segments-overview", "note": "Add/remove existing users to a custom segment; auto-creates the segment."},
-    "segments_list":          {"method": "GET",   "path": "/v3/custom-segments",                        "key": "segmentation","appkey_header": true,  "status": "documented", "doc": "https://www.moengage.com/docs/api/custom-segments/custom-segments-overview"},
-    "segment_get":            {"method": "GET",   "path": "/v3/custom-segments/{id}",                   "key": "segmentation","appkey_header": true,  "status": "documented", "doc": "https://www.moengage.com/docs/api/custom-segments/custom-segments-overview"},
-    "segment_create":         {"method": "POST",  "path": "/v3/custom-segments",                        "key": "segmentation","appkey_header": true,  "status": "documented", "doc": "https://www.moengage.com/docs/api/custom-segments/custom-segments-overview", "note": "Filter (dynamic) segment."},
-    "segment_update":         {"method": "PATCH", "path": "/v3/custom-segments/{id}",                   "key": "segmentation","appkey_header": true,  "status": "documented", "doc": "https://www.moengage.com/docs/api/custom-segments/custom-segments-overview"},
-    "file_segment_create":    {"method": "POST",  "path": "/v2/custom-segments/file-segment",           "key": "segmentation","appkey_header": false, "dbname_header": true, "status": "documented", "doc": "https://www.moengage.com/docs/api/custom-segments/custom-segments-overview", "note": "Takes a CSV *URL*, async with callback."},
-    "campaigns_search":       {"method": "POST",  "path": "/core-services/v1/campaigns/search",         "key": "campaigns",   "appkey_header": true,  "status": "documented", "doc": "https://www.moengage.com/docs/api/campaigns/campaigns-overview"},
-    "campaign_stats":         {"method": "POST",  "path": "/core-services/v1/campaign-stats",           "key": "campaigns",   "appkey_header": true,  "status": "documented", "doc": "https://www.moengage.com/docs/api/stats-report/stats-report-overview", "note": "<=10 campaign ids per call, <=30 day window."},
-    "campaign_status_v1":     {"method": "POST",  "path": "/core-services/v1/campaigns/status",         "key": "campaigns",   "appkey_header": true,  "status": "documented", "doc": "https://www.moengage.com/docs/api/campaigns/campaigns-overview", "note": "stop/pause/resume"},
-    "campaign_publish_v1":    {"method": "PATCH", "path": "/core-services/v1/campaigns/{id}",           "key": "campaigns",   "appkey_header": true,  "status": "documented", "doc": "https://www.moengage.com/docs/api/campaigns/campaigns-overview", "note": "Publishing a v5 draft is done via this v1 PATCH for now."},
-    "campaign_create_v5":     {"method": "POST",  "path": "/v5/campaigns",                              "key": "campaigns",   "appkey_header": true,  "status": "documented", "doc": "https://www.moengage.com/docs/api/campaigns/campaigns-overview", "note": "Creates a DRAFT; build incrementally with PATCH."},
-    "campaign_get_v5":        {"method": "GET",   "path": "/v5/campaigns/{id}",                         "key": "campaigns",   "appkey_header": true,  "status": "documented", "doc": "https://www.moengage.com/docs/api/campaigns/campaigns-overview"},
-    "campaign_update_v5":     {"method": "PATCH", "path": "/v5/campaigns/{id}",                         "key": "campaigns",   "appkey_header": true,  "status": "documented", "doc": "https://www.moengage.com/docs/api/campaigns/campaigns-overview"},
-    "campaign_validate_v5":   {"method": "POST",  "path": "/v5/campaigns/{id}/validate",                "key": "campaigns",   "appkey_header": true,  "status": "documented", "doc": "https://www.moengage.com/docs/api/campaigns/campaigns-overview"},
-    "campaign_status_v5":     {"method": "PATCH", "path": "/v5/campaigns/{id}/status",                  "key": "campaigns",   "appkey_header": true,  "status": "documented", "doc": "https://www.moengage.com/docs/api/campaigns/campaigns-overview"},
-    "campaign_test_v5":       {"method": "POST",  "path": "/v5/campaigns/test",                         "key": "campaigns",   "appkey_header": true,  "status": "documented", "doc": "https://www.moengage.com/docs/api/campaigns/campaigns-overview"},
-    "campaigns_search_v5":    {"method": "POST",  "path": "/v5/campaigns/search",                       "key": "campaigns",   "appkey_header": true,  "status": "documented", "doc": "https://www.moengage.com/docs/api/campaigns/campaigns-overview"},
-    "flows_search":           {"method": "POST",  "path": "/v5/flows/search",                           "key": "campaigns",   "appkey_header": true,  "status": "documented", "doc": "https://www.moengage.com/docs/api", "note": "Read/control only; flows cannot be created via public API."},
-    "flow_get":               {"method": "GET",   "path": "/v5/flows/{id}",                             "key": "campaigns",   "appkey_header": true,  "status": "documented", "doc": "https://www.moengage.com/docs/api"},
-    "flow_status":            {"method": "PATCH", "path": "/v5/flows/{id}/status",                      "key": "campaigns",   "appkey_header": true,  "status": "documented", "doc": "https://www.moengage.com/docs/api", "note": "pause/resume/stop/retire/archive"},
-    "business_events_list":   {"method": "GET",   "path": "/v5/business-events",                        "key": "campaigns",   "appkey_header": true,  "status": "documented", "doc": "https://www.moengage.com/docs/api"},
-    "business_event_trigger": {"method": "POST",  "path": "/v5/business-events/triggers",               "key": "campaigns",   "appkey_header": true,  "status": "documented", "doc": "https://www.moengage.com/docs/api", "note": "Fires campaigns/flows attached to a business event."},
-    "analytics_dashboards":   {"method": "GET",   "path": "/v5/analytics/dashboards",                   "key": "campaigns",   "appkey_header": true,  "status": "documented", "doc": "https://www.moengage.com/docs/api", "note": "Needs Dashboard & Analyze permission on the key."},
-    "inform_send":            {"method": "POST",  "path": "/v1.0/alerts/send",                          "key": "inform",      "appkey_header": true,  "status": "documented", "doc": "https://www.moengage.com/docs/api"}
+    "test_connection": {
+      "method": "POST",
+      "path": "/v1/integrations/authentication",
+      "key": "data",
+      "appkey_header": true,
+      "status": "documented",
+      "doc": "https://www.moengage.com/docs/api/data/data-overview"
+    },
+    "data_track_event": {
+      "method": "POST",
+      "path": "/v1/event/{app_id}",
+      "key": "data",
+      "appkey_header": false,
+      "status": "documented",
+      "doc": "https://www.moengage.com/docs/api/data/data-overview"
+    },
+    "data_update_user": {
+      "method": "POST",
+      "path": "/v1/customer/{app_id}",
+      "key": "data",
+      "appkey_header": false,
+      "status": "documented",
+      "doc": "https://www.moengage.com/docs/api/data/data-overview"
+    },
+    "data_get_user": {
+      "method": "POST",
+      "path": "/v1/customers/export",
+      "key": "data",
+      "appkey_header": false,
+      "status": "documented",
+      "doc": "https://www.moengage.com/docs/api/data/data-overview"
+    },
+    "cohort_sync": {
+      "method": "POST",
+      "path": "/v1/integrations/cohortsync",
+      "key": "segmentation",
+      "appkey_header": true,
+      "status": "documented",
+      "doc": "https://www.moengage.com/docs/api/custom-segments/custom-segments-overview",
+      "note": "Add/remove existing users to a custom segment; auto-creates the segment."
+    },
+    "segments_list": {
+      "method": "GET",
+      "path": "/v3/custom-segments",
+      "key": "segmentation",
+      "appkey_header": true,
+      "status": "documented",
+      "doc": "https://www.moengage.com/docs/api/custom-segments/custom-segments-overview"
+    },
+    "segment_get": {
+      "method": "GET",
+      "path": "/v3/custom-segments/{id}",
+      "key": "segmentation",
+      "appkey_header": true,
+      "status": "documented",
+      "doc": "https://www.moengage.com/docs/api/custom-segments/custom-segments-overview"
+    },
+    "segment_create": {
+      "method": "POST",
+      "path": "/v3/custom-segments",
+      "key": "segmentation",
+      "appkey_header": true,
+      "status": "documented",
+      "doc": "https://www.moengage.com/docs/api/custom-segments/custom-segments-overview",
+      "note": "Filter (dynamic) segment."
+    },
+    "segment_update": {
+      "method": "PATCH",
+      "path": "/v3/custom-segments/{id}",
+      "key": "segmentation",
+      "appkey_header": true,
+      "status": "documented",
+      "doc": "https://www.moengage.com/docs/api/custom-segments/custom-segments-overview"
+    },
+    "file_segment_create": {
+      "method": "POST",
+      "path": "/v2/custom-segments/file-segment",
+      "key": "segmentation",
+      "appkey_header": false,
+      "dbname_header": true,
+      "status": "documented",
+      "doc": "https://www.moengage.com/docs/api/custom-segments/custom-segments-overview",
+      "note": "Takes a CSV *URL*, async with callback."
+    },
+    "campaigns_search": {
+      "method": "POST",
+      "path": "/core-services/v1/campaigns/search",
+      "key": "campaigns",
+      "appkey_header": true,
+      "status": "documented",
+      "doc": "https://www.moengage.com/docs/api/campaigns/campaigns-overview"
+    },
+    "campaign_stats": {
+      "method": "POST",
+      "path": "/core-services/v1/campaign-stats",
+      "key": "campaigns",
+      "appkey_header": true,
+      "status": "documented",
+      "doc": "https://www.moengage.com/docs/api/stats-report/stats-report-overview",
+      "note": "<=10 campaign ids per call, <=30 day window."
+    },
+    "campaign_status_v1": {
+      "method": "POST",
+      "path": "/core-services/v1/campaigns/status",
+      "key": "campaigns",
+      "appkey_header": true,
+      "status": "documented",
+      "doc": "https://www.moengage.com/docs/api/campaigns/campaigns-overview",
+      "note": "stop/pause/resume"
+    },
+    "campaign_publish_v1": {
+      "method": "PATCH",
+      "path": "/core-services/v1/campaigns/{id}",
+      "key": "campaigns",
+      "appkey_header": true,
+      "status": "documented",
+      "doc": "https://www.moengage.com/docs/api/campaigns/campaigns-overview",
+      "note": "Publishing a v5 draft is done via this v1 PATCH for now."
+    },
+    "campaign_create_v5": {
+      "method": "POST",
+      "path": "/v5/campaigns",
+      "key": "campaigns",
+      "appkey_header": true,
+      "status": "documented",
+      "doc": "https://www.moengage.com/docs/api/campaigns/campaigns-overview",
+      "note": "Creates a DRAFT; build incrementally with PATCH."
+    },
+    "campaign_get_v5": {
+      "method": "GET",
+      "path": "/v5/campaigns/{id}",
+      "key": "campaigns",
+      "appkey_header": true,
+      "status": "documented",
+      "doc": "https://www.moengage.com/docs/api/campaigns/campaigns-overview"
+    },
+    "campaign_update_v5": {
+      "method": "PATCH",
+      "path": "/v5/campaigns/{id}",
+      "key": "campaigns",
+      "appkey_header": true,
+      "status": "documented",
+      "doc": "https://www.moengage.com/docs/api/campaigns/campaigns-overview"
+    },
+    "campaign_validate_v5": {
+      "method": "POST",
+      "path": "/v5/campaigns/{id}/validate",
+      "key": "campaigns",
+      "appkey_header": true,
+      "status": "documented",
+      "doc": "https://www.moengage.com/docs/api/campaigns/campaigns-overview"
+    },
+    "campaign_status_v5": {
+      "method": "PATCH",
+      "path": "/v5/campaigns/{id}/status",
+      "key": "campaigns",
+      "appkey_header": true,
+      "status": "documented",
+      "doc": "https://www.moengage.com/docs/api/campaigns/campaigns-overview"
+    },
+    "campaign_test_v5": {
+      "method": "POST",
+      "path": "/v5/campaigns/test",
+      "key": "campaigns",
+      "appkey_header": true,
+      "status": "documented",
+      "doc": "https://www.moengage.com/docs/api/campaigns/campaigns-overview"
+    },
+    "campaigns_search_v5": {
+      "method": "POST",
+      "path": "/v5/campaigns/search",
+      "key": "campaigns",
+      "appkey_header": true,
+      "status": "documented",
+      "doc": "https://www.moengage.com/docs/api/campaigns/campaigns-overview"
+    },
+    "flows_search": {
+      "method": "POST",
+      "path": "/v5/flows/search",
+      "key": "campaigns",
+      "appkey_header": true,
+      "status": "documented",
+      "doc": "https://www.moengage.com/docs/api",
+      "note": "Read/control only; flows cannot be created via public API."
+    },
+    "flow_get": {
+      "method": "GET",
+      "path": "/v5/flows/{id}",
+      "key": "campaigns",
+      "appkey_header": true,
+      "status": "documented",
+      "doc": "https://www.moengage.com/docs/api"
+    },
+    "flow_status": {
+      "method": "PATCH",
+      "path": "/v5/flows/{id}/status",
+      "key": "campaigns",
+      "appkey_header": true,
+      "status": "documented",
+      "doc": "https://www.moengage.com/docs/api",
+      "note": "pause/resume/stop/retire/archive"
+    },
+    "business_events_list": {
+      "method": "GET",
+      "path": "/v5/business-events",
+      "key": "campaigns",
+      "appkey_header": true,
+      "status": "documented",
+      "doc": "https://www.moengage.com/docs/api"
+    },
+    "business_event_trigger": {
+      "method": "POST",
+      "path": "/v5/business-events/triggers",
+      "key": "campaigns",
+      "appkey_header": true,
+      "status": "documented",
+      "doc": "https://www.moengage.com/docs/api",
+      "note": "Fires campaigns/flows attached to a business event."
+    },
+    "analytics_dashboards": {
+      "method": "GET",
+      "path": "/v5/analytics/dashboards",
+      "key": "campaigns",
+      "appkey_header": true,
+      "status": "documented",
+      "doc": "https://www.moengage.com/docs/api",
+      "note": "Needs Dashboard & Analyze permission on the key."
+    },
+    "inform_send": {
+      "method": "POST",
+      "path": "/v1.0/alerts/send",
+      "key": "inform",
+      "appkey_header": true,
+      "status": "documented",
+      "doc": "https://www.moengage.com/docs/api"
+    }
   },
   "dashboard": {
-    "whoami":            {"auth": "cookie", "status": "unknown", "candidates": ["/v4/user/info", "/v3/user/me", "/v1/user/profile", "/api/v1/user/profile"]},
-    "app_info":          {"auth": "cookie", "status": "unknown", "candidates": ["/v4/app/info", "/api/v1/app/info", "/v3/apps/{app_id}"]},
-    "campaign_list":     {"auth": "cookie", "status": "unknown", "candidates": ["/v4/campaigns/all", "/v3/campaigns", "/v4/campaigns", "/api/v1/campaigns"]},
-    "campaign_detail":   {"auth": "cookie", "status": "unknown", "candidates": []},
-    "campaign_stats":    {"auth": "cookie", "status": "unknown", "candidates": []},
-    "campaign_create":   {"auth": "cookie", "status": "unknown", "candidates": []},
-    "campaign_pause":    {"auth": "cookie", "status": "unknown", "candidates": []},
-    "campaign_resume":   {"auth": "cookie", "status": "unknown", "candidates": []},
-    "segment_list":      {"auth": "cookie", "status": "unknown", "candidates": ["/v4/segments/all", "/v3/segments", "/v4/segments", "/api/v1/segments"]},
-    "segment_detail":    {"auth": "cookie", "status": "unknown", "candidates": []},
-    "segment_estimate":  {"auth": "cookie", "status": "unknown", "candidates": []},
-    "segment_create":    {"auth": "cookie", "status": "unknown", "candidates": []},
-    "segment_update":    {"auth": "cookie", "status": "unknown", "candidates": []},
-    "flow_list":         {"auth": "cookie", "status": "unknown", "candidates": [{"method": "GET", "path": "/v4/flows/all", "params": {"app_id": "{app_id}"}, "source": "github.com/Ozybug/campaign-intelligence-dashboard (unofficial, used with Basic auth)"}, "/v3/flows", "/v4/flows"]},
-    "flow_detail":       {"auth": "cookie", "status": "unknown", "candidates": []},
-    "flow_create":       {"auth": "cookie", "status": "unknown", "candidates": [], "note": "Dashboard-only in MoEngage; must be captured from a HAR."},
-    "user_attributes":   {"auth": "cookie", "status": "unknown", "candidates": ["/v4/segmentation/attributes", "/v1/segment/attributes", "/api/v1/attributes/user"]},
-    "events":            {"auth": "cookie", "status": "unknown", "candidates": ["/v4/segmentation/actions", "/v1/segment/actions", "/api/v1/events"]},
-    "event_attributes":  {"auth": "cookie", "status": "unknown", "candidates": ["/v1/segment/action-attributes"]},
-    "analytics_overview":{"auth": "cookie", "status": "unknown", "candidates": []}
+    "whoami": {
+      "auth": "cookie",
+      "status": "candidate",
+      "candidates": [
+        {
+          "method": "GET",
+          "path": "/getLoggedInUserData",
+          "source": "bundle"
+        },
+        {
+          "method": "GET",
+          "path": "/user/info/",
+          "source": "bundle"
+        },
+        "/v4/user/info",
+        "/v3/user/me",
+        "/v1/user/profile",
+        "/api/v1/user/profile"
+      ]
+    },
+    "app_info": {
+      "auth": "cookie",
+      "status": "candidate",
+      "candidates": [
+        {
+          "method": "GET",
+          "path": "/apps/settings",
+          "source": "bundle"
+        },
+        {
+          "method": "GET",
+          "path": "/campaign_types",
+          "params": {
+            "active": "true"
+          },
+          "source": "bundle"
+        },
+        "/v4/app/info",
+        "/api/v1/app/info",
+        "/v3/apps/{app_id}"
+      ]
+    },
+    "campaign_list": {
+      "auth": "cookie",
+      "status": "candidate",
+      "candidates": [
+        {
+          "method": "GET",
+          "path": "/campaigns/all",
+          "source": "bundle"
+        },
+        {
+          "method": "POST",
+          "path": "/campaigns/all",
+          "source": "bundle"
+        },
+        "/v4/campaigns/all",
+        "/v3/campaigns",
+        "/v4/campaigns",
+        "/api/v1/campaigns"
+      ]
+    },
+    "campaign_detail": {
+      "auth": "cookie",
+      "status": "candidate",
+      "candidates": [
+        {
+          "method": "GET",
+          "path": "/campaign/info/{id}",
+          "source": "bundle"
+        },
+        {
+          "method": "GET",
+          "path": "/v3/campaign/info/{id}",
+          "source": "bundle"
+        }
+      ]
+    },
+    "campaign_stats": {
+      "auth": "cookie",
+      "status": "candidate",
+      "candidates": [
+        {
+          "method": "GET",
+          "path": "/v1/stats/performance_stats/summary",
+          "source": "bundle"
+        },
+        {
+          "method": "POST",
+          "path": "/v1/stats/performance_stats/summary",
+          "source": "bundle"
+        },
+        {
+          "method": "POST",
+          "path": "/v1/campaign/stats-client/performance/summary/periodic/modified",
+          "source": "bundle"
+        }
+      ]
+    },
+    "campaign_create": {
+      "auth": "cookie",
+      "status": "candidate",
+      "candidates": [
+        {
+          "method": "POST",
+          "path": "/v1.0/campaigns/draft",
+          "source": "bundle"
+        },
+        {
+          "method": "POST",
+          "path": "/v3/campaigns/inapp/v3/campaign",
+          "source": "bundle"
+        }
+      ]
+    },
+    "campaign_pause": {
+      "auth": "cookie",
+      "status": "unknown",
+      "candidates": []
+    },
+    "campaign_resume": {
+      "auth": "cookie",
+      "status": "unknown",
+      "candidates": []
+    },
+    "segment_list": {
+      "auth": "cookie",
+      "status": "candidate",
+      "candidates": [
+        {
+          "method": "GET",
+          "path": "/segmentation/all-segments/custom-segments",
+          "source": "bundle"
+        },
+        {
+          "method": "GET",
+          "path": "/segmentation/all-segments/custom-segments/",
+          "source": "bundle"
+        },
+        "/v4/segments/all",
+        "/v3/segments",
+        "/v4/segments",
+        "/api/v1/segments"
+      ]
+    },
+    "segment_detail": {
+      "auth": "cookie",
+      "status": "unknown",
+      "candidates": []
+    },
+    "segment_estimate": {
+      "auth": "cookie",
+      "status": "unknown",
+      "candidates": []
+    },
+    "segment_create": {
+      "auth": "cookie",
+      "status": "candidate",
+      "candidates": [
+        {
+          "method": "POST",
+          "path": "/segmentation/create",
+          "source": "bundle"
+        },
+        {
+          "method": "POST",
+          "path": "/segmentation/all-segments/custom-segments",
+          "source": "bundle"
+        }
+      ]
+    },
+    "segment_update": {
+      "auth": "cookie",
+      "status": "unknown",
+      "candidates": []
+    },
+    "flow_list": {
+      "auth": "cookie",
+      "status": "candidate",
+      "candidates": [
+        {
+          "method": "GET",
+          "path": "/flows/all",
+          "source": "bundle"
+        },
+        {
+          "method": "GET",
+          "path": "/v4/flows/all",
+          "params": {
+            "app_id": "{app_id}"
+          },
+          "source": "bundle+github"
+        },
+        "/v3/flows",
+        "/v4/flows"
+      ]
+    },
+    "flow_detail": {
+      "auth": "cookie",
+      "status": "unknown",
+      "candidates": []
+    },
+    "flow_create": {
+      "auth": "cookie",
+      "status": "candidate",
+      "candidates": [
+        {
+          "method": "POST",
+          "path": "/v1/flows/draft",
+          "source": "bundle"
+        },
+        {
+          "method": "POST",
+          "path": "/v3/journey/",
+          "source": "bundle"
+        }
+      ],
+      "note": "Dashboard-only in MoEngage; must be captured from a HAR."
+    },
+    "user_attributes": {
+      "auth": "cookie",
+      "status": "candidate",
+      "candidates": [
+        {
+          "method": "GET",
+          "path": "/v1/data/metadata/user-attributes/bulk",
+          "source": "bundle"
+        },
+        "/v4/segmentation/attributes",
+        "/v1/segment/attributes",
+        "/api/v1/attributes/user"
+      ]
+    },
+    "events": {
+      "auth": "cookie",
+      "status": "candidate",
+      "candidates": [
+        {
+          "method": "GET",
+          "path": "/user-events",
+          "source": "bundle"
+        },
+        "/v4/segmentation/actions",
+        "/v1/segment/actions",
+        "/api/v1/events"
+      ]
+    },
+    "event_attributes": {
+      "auth": "cookie",
+      "status": "unknown",
+      "candidates": [
+        "/v1/segment/action-attributes"
+      ]
+    },
+    "analytics_overview": {
+      "auth": "cookie",
+      "status": "candidate",
+      "candidates": [
+        {
+          "method": "GET",
+          "path": "/analytics/v2/",
+          "source": "bundle"
+        },
+        {
+          "method": "GET",
+          "path": "/api/analytics/v4/dashboards",
+          "source": "bundle"
+        }
+      ]
+    }
   },
   "notes": {
-    "keys": "Settings → Account → API keys on the dashboard. Data key (Data API), Segmentation key (custom segments, cohort sync), Campaigns/Reports key (campaign search/stats/create/status, flows, business events, analytics), Inform key.",
-    "dc": "dashboard-01 ↔ api-01 (US), -02 EU, -03 India, -04 US, -05 SG, -06 ID, -101. Push API host is pushapi-{dc}.",
+    "keys": "Settings \u2192 Account \u2192 API keys on the dashboard. Data key (Data API), Segmentation key (custom segments, cohort sync), Campaigns/Reports key (campaign search/stats/create/status, flows, business events, analytics), Inform key.",
+    "dc": "dashboard-01 \u2194 api-01 (US), -02 EU, -03 India, -04 US, -05 SG, -06 ID, -101. Push API host is pushapi-{dc}.",
     "session": "Dashboard idle timeout 24h, hard limit 60 days; an internal ~2h JWT is used by the SPA. Cookie transport is therefore best-effort; API keys are the stable path.",
-    "how_to_capture": "Integration tab → Import HAR. Only structure is kept; secrets are dropped."
+    "how_to_capture": "Integration tab \u2192 Import HAR. Only structure is kept; secrets are dropped.",
+    "dashboard_auth": "The dashboard SPA sends Authorization: Bearer <jwt> + RefreshToken + MoeTraceId + MOE-APPKEY and appends ?api=1; it refreshes via GET /session/refresh. Paste the request headers from DevTools (or cookies) in Settings; candidates come from the public app bundle and are verified read-only."
   }
 }

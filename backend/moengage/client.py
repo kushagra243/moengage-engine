@@ -72,7 +72,8 @@ class MoEngageClient:
         return self._session
 
     def has_cookies(self) -> bool:
-        return bool(parse_cookies(get_setting("moengage_cookies", "")))
+        """True when any dashboard credential is present (cookies and/or bearer token)."""
+        return bool(parse_cookies(get_setting("moengage_cookies", "")) or get_setting("moengage_access_token", "").strip())
 
     # ── status ──────────────────────────────────────────────────────────
     def verify_session(self) -> Dict[str, Any]:

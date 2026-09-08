@@ -234,8 +234,8 @@ def verify(session, roles: Optional[List[str]] = None, try_candidates: bool = Tr
             for c in ep.get("candidates") or []:
                 if isinstance(c, str):
                     cands.append(("GET", c, {}))
-                elif isinstance(c, dict) and c.get("method", "GET").upper() == "GET":
-                    cands.append(("GET", c["path"], c.get("params") or {}))
+                elif isinstance(c, dict) and c.get("method", "GET").upper() in ("GET", "POST"):
+                    cands.append((c.get("method", "GET").upper(), c["path"], c.get("params") or {}))
         if not cands:
             registry.record_verification(role, False, None, None, None, "no GET path or candidates; import a HAR capture")
             results[role] = {"ok": False, "detail": "no candidates"}
@@ -247,14 +247,24 @@ def verify(session, roles: Optional[List[str]] = None, try_candidates: bool = Tr
                     p = p.replace("{" + k + "}", v)
             if "{" in p:
                 tried.append(f"{p} (unresolved var)"); continue
+            params = {k: (v.replace("{app_id}", session.app_id) if isinstance(v, str) else v) for k, v in params.items()}
+            if any(isinstance(v, str) and "{" in v for v in params.values()):
+                tried.append(f"{p} (unresolved param)"); continue
             try:
-                resp = session.probe_get(p, params=params)
+                if method == "POST":
+                    resp = session.request_raw("POST", session.base_url + p, params=params, json_body={}, write=True, timeout=15.0)
+                else:
+                    resp = session.probe_get(p, params=params)
+                if resp.status_code == 405:
+                    # path exists but wants POST; list endpoints often do. Read roles only, empty JSON body.
+                    resp = session.request_raw("POST", session.base_url + p, params=params, json_body={}, write=True, timeout=15.0)
+                    method = "POST"
             except Exception as e:
-                tried.append(f"{p} → {redact(str(e))[:80]}")
-                if "session rejected" in str(e) or "expired" in str(e):
-                    results[role] = {"ok": False, "detail": str(e)}
-                    registry.record_verification(role, False, method, p, None, str(e))
-                    break
+                msg = redact(str(e))
+                tried.append(f"{p} → {msg[:80]}")
+                if "session rejected" in msg or "expired" in msg:
+                    # the path answered with 401/403: it exists, the credentials were refused
+                    tried[-1] = f"{p} → auth rejected (path exists)"
                 continue
             ctype = resp.headers.get("content-type", "")
             if 200 <= resp.status_code < 300 and "json" in ctype:

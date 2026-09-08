@@ -58,6 +58,22 @@ def get_registry() -> Dict[str, Any]:
         cur.update({k: v for k, v in ep.items() if k != "status"})
         cur["status"] = "learned"
         cur["learned_at"] = learned.get("learned_at")
+    # discovered (public bundle) candidates, appended after the defaults
+    try:
+        from .discover import candidates_for
+        from ..database import get_setting
+        region = get_setting("moengage_region", "dashboard-01.moengage.com")
+        for role in list(roles.keys()):
+            extra = candidates_for(role, region)
+            if extra:
+                cur = roles[role]
+                cur.setdefault("candidates", [])
+                have = {c if isinstance(c, str) else c.get("path") for c in cur["candidates"]}
+                cur["candidates"] = list(cur["candidates"]) + [c for c in extra if c["path"] not in have]
+                if cur.get("status") == "unknown":
+                    cur["status"] = "candidate"
+    except Exception:
+        pass
     verified = _load(VERIFIED_PATH)
     for role, v in (verified.get("roles") or {}).items():
         cur = roles.setdefault(role, {"auth": "cookie", "candidates": []})

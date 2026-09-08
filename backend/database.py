@@ -101,6 +101,8 @@ def init_db():
     # Default settings if not already present
     default_settings = {
         "moengage_cookies": "",
+        "moengage_access_token": "",
+        "moengage_refresh_token": "",
         "moengage_region": "dashboard-01.moengage.com",
         "moengage_app_id": "",
         "moengage_db_name": "",

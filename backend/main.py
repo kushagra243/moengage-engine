@@ -142,16 +142,27 @@ def update_settings(payload: SettingsPayload):
         if k == "llm_base_url" and not (v.startswith("https://") or v.startswith("http://127.0.0.1") or v.startswith("http://localhost")):
             raise HTTPException(400, "LLM base URL must be https:// (or a loopback http:// server)")
         if k == "moengage_cookies":
+            from .moengage.session import parse_credentials
             try:
-                parsed = parse_cookies(v)
+                cred = parse_credentials(v)
             except Exception as e:
-                raise HTTPException(400, f"cookie format not recognised: {redact(str(e))}")
-            if not parsed:
-                raise HTTPException(400, "no cookies found in the pasted text")
-            v = json.dumps(parsed)      # normalise to JSON object
+                raise HTTPException(400, f"credential format not recognised: {redact(str(e))}")
+            if cred["access_token"]:
+                set_setting("moengage_access_token", cred["access_token"]); saved.append("moengage_access_token")
+            if cred["refresh_token"]:
+                set_setting("moengage_refresh_token", cred["refresh_token"]); saved.append("moengage_refresh_token")
+            if cred["app_key"] and not get_setting("moengage_app_id", ""):
+                set_setting("moengage_app_id", cred["app_key"]); saved.append("moengage_app_id")
+            if not cred["cookies"]:
+                if cred["access_token"]:
+                    continue            # tokens only: nothing to store under cookies
+                raise HTTPException(400, "no cookies or bearer token found in the pasted text")
+            v = json.dumps(cred["cookies"])      # normalise to JSON object
         set_setting(k, v)
         saved.append(k)
-    return {"success": True, "saved": saved, "rejected": rejected}
+    if any(k in ("moengage_cookies", "moengage_access_token", "moengage_refresh_token") for k in saved) and get_setting("mock_mode", "true").lower() != "true":
+        _background_verify()
+    return {"success": True, "saved": saved, "rejected": rejected, "auto_verify": any(k in ("moengage_cookies", "moengage_access_token", "moengage_refresh_token") for k in saved)}
 
 
 @app.post("/api/settings/clear-secret")
@@ -170,7 +181,7 @@ def auth_test():
     if not moe.mock_mode:
         api = PublicAPI()
         out["public_api"] = api.probe() if api.app_id else {"ok": None, "detail": "Workspace ID not set"}
-        if moe.has_cookies():
+        if moe.has_cookies() or get_setting("moengage_access_token", ""):
             try:
                 out["cookie_verify"] = har_capture.verify(DashboardSession(), roles=["whoami", "campaign_list", "segment_list", "flow_list"])
             except Exception as e:
@@ -211,12 +222,48 @@ def integration_har_json(payload: HarPayload):
 
 @app.post("/api/integration/verify")
 def integration_verify(payload: VerifyPayload):
-    if not get_setting("moengage_cookies", ""):
-        raise HTTPException(400, "no session cookies configured")
+    if not (get_setting("moengage_cookies", "") or get_setting("moengage_access_token", "")):
+        raise HTTPException(400, "no session credentials configured (cookies or bearer token)")
     try:
         return har_capture.verify(DashboardSession(), roles=payload.roles, try_candidates=payload.try_candidates)
     except SessionError as e:
         raise HTTPException(400, str(e))
+
+
+class DiscoverPayload(BaseModel):
+    verify: bool = True
+
+
+@app.post("/api/integration/discover")
+def integration_discover(payload: DiscoverPayload):
+    from .moengage import discover as disc
+    region = get_setting("moengage_region", "dashboard-01.moengage.com")
+    try:
+        out = disc.discover(region)
+    except Exception as e:
+        raise HTTPException(502, f"discovery failed: {redact(str(e))}")
+    result: Dict[str, Any] = {"discovery": {k: v for k, v in out.items() if k != "per_chunk_sample"}}
+    if payload.verify and (get_setting("moengage_cookies", "") or get_setting("moengage_access_token", "")):
+        try:
+            result["verify"] = har_capture.verify(DashboardSession(), try_candidates=True)
+        except Exception as e:
+            result["verify_error"] = redact(str(e))
+    result["registry"] = registry_status()
+    return result
+
+
+def _background_verify():
+    """After cookies/tokens are saved: discover once (if never done) and probe read roles. Never raises."""
+    import threading
+    def run():
+        try:
+            from .moengage import discover as disc
+            if not disc.discovered():
+                disc.discover(get_setting("moengage_region", "dashboard-01.moengage.com"))
+            har_capture.verify(DashboardSession(), try_candidates=True)
+        except Exception as e:
+            logging.getLogger("moengage").info("background verify: %s", redact(str(e)))
+    threading.Thread(target=run, daemon=True, name="auto-verify").start()
 
 
 @app.post("/api/integration/probe-keys")

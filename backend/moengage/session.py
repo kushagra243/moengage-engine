@@ -17,11 +17,12 @@ import logging
 import re
 import threading
 import time
+import uuid
 from collections import deque
 from typing import Any, Dict, Optional, Tuple
 from urllib.parse import urlencode
 
-from ..database import get_setting
+from ..database import get_setting, set_setting
 from ..security import guarded_session, redact, audit
 from . import registry
 
@@ -79,6 +80,57 @@ def parse_cookies(raw: str) -> Dict[str, str]:
     return out
 
 
+def parse_credentials(raw: str) -> Dict[str, Any]:
+    """
+    Accepts anything copied from DevTools: a Cookie header, a whole 'Request Headers'
+    block, a JSON with bearer/refresh_token (the dashboard's localStorage userData),
+    or a cookie-editor export. Returns {cookies, access_token, refresh_token, app_key}.
+    """
+    raw = (raw or "").strip()
+    out: Dict[str, Any] = {"cookies": {}, "access_token": "", "refresh_token": "", "app_key": ""}
+    if not raw:
+        return out
+    if raw.startswith(("{", "[")):
+        try:
+            data = json.loads(raw)
+        except Exception:
+            data = None
+        if isinstance(data, dict) and any(k in data for k in ("bearer", "refresh_token", "accessToken", "access_token")):
+            out["access_token"] = str(data.get("bearer") or data.get("accessToken") or data.get("access_token") or "")
+            out["refresh_token"] = str(data.get("refresh_token") or data.get("refreshToken") or "")
+            out["app_key"] = str(data.get("app_key") or data.get("appKey") or "")
+            if isinstance(data.get("cookies"), (dict, list)):
+                out["cookies"] = parse_cookies(json.dumps(data["cookies"]))
+            return out
+        out["cookies"] = parse_cookies(raw)
+        return out
+    # header block?
+    lines = [l for l in raw.splitlines() if l.strip()]
+    hdr_like = sum(1 for l in lines if re.match(r"^\s*:?[A-Za-z0-9-]+:\s*\S", l)) >= 2
+    if hdr_like:
+        for l in lines:
+            m = re.match(r"^\s*:?([A-Za-z0-9-]+):\s*(.*)$", l)
+            if not m:
+                continue
+            k, v = m.group(1).lower(), m.group(2).strip()
+            if k == "cookie":
+                out["cookies"].update(parse_cookies(v))
+            elif k == "authorization" and v.lower().startswith("bearer "):
+                out["access_token"] = v[7:].strip()
+            elif k == "refreshtoken":
+                out["refresh_token"] = v
+            elif k == "moe-appkey":
+                out["app_key"] = v
+        return out
+    out["cookies"] = parse_cookies(raw)
+    for k, v in list(out["cookies"].items()):
+        if k.lower() in ("accesstoken", "bearer", "access_token") and v.startswith("eyJ"):
+            out["access_token"] = out["access_token"] or v
+        if k.lower() in ("refresh_token", "refreshtoken"):
+            out["refresh_token"] = out["refresh_token"] or v
+    return out
+
+
 def cookie_summary(cookies: Dict[str, str]) -> Dict[str, Any]:
     """Names only. Never values."""
     names = sorted(cookies.keys())
@@ -100,9 +152,11 @@ class DashboardSession:
         self.app_id = (app_id if app_id is not None else get_setting("moengage_app_id", "")).strip()
         self.db_name = (db_name if db_name is not None else get_setting("moengage_db_name", "")).strip()
         self.cookies = cookies if cookies is not None else parse_cookies(get_setting("moengage_cookies", ""))
+        self.access_token = get_setting("moengage_access_token", "").strip()
+        self.refresh_token = get_setting("moengage_refresh_token", "").strip()
         self.http = guarded_session("moengage")
         for k, v in self.cookies.items():
-            self.http.cookies.set(k, v, domain=self.region)
+            self.http.cookies.set(k, v, domain=".moengage.com")   # dashboard + any api host under moengage.com
         self.http.headers.update(self._headers())
         self.rpm = int(get_setting("moengage_max_rpm", "30") or 30)
         self.min_gap = float(get_setting("moengage_min_gap_s", "0.6") or 0.6)
@@ -121,11 +175,18 @@ class DashboardSession:
         for cname, hname in CSRF_COOKIE_TO_HEADER.items():
             if cname in self.cookies:
                 h[hname] = self.cookies[cname]
-        # Authorization from a JWT-looking cookie, if present (some tenants use bearer)
-        for k, v in self.cookies.items():
-            if re.search(r"jwt|token|auth", k, re.I) and v.startswith("eyJ"):
-                h["Authorization"] = f"Bearer {v}"
-                break
+        # The dashboard SPA authenticates with a bearer JWT + refresh token (see discover.py notes).
+        tok = self.access_token
+        if not tok:
+            for k, v in self.cookies.items():
+                if re.search(r"jwt|token|auth|bearer", k, re.I) and v.startswith("eyJ"):
+                    tok = v; break
+        if tok:
+            h["Authorization"] = f"Bearer {tok}"
+        if self.refresh_token:
+            h["RefreshToken"] = self.refresh_token
+        h["MoeTraceId"] = str(uuid.uuid4())
+        h["page"] = "campaigns"
         # Headers learned from HAR: names always; values from settings if they were redacted
         reg = registry.get_registry()
         for name, value in (reg.get("extra_headers") or {}).items():
@@ -139,7 +200,32 @@ class DashboardSession:
 
     @property
     def authenticated(self) -> bool:
-        return bool(self.cookies)
+        return bool(self.cookies or self.access_token)
+
+    def refresh_session(self) -> bool:
+        """GET /session/refresh?api=1 with the RefreshToken header (as the SPA does); stores new tokens encrypted."""
+        if not self.refresh_token:
+            return False
+        try:
+            r = self.http.get(self.base_url + "/session/refresh", params={"api": "1"}, timeout=15, allow_redirects=False)
+            if r.status_code != 200:
+                return False
+            data = r.json().get("data") if "json" in r.headers.get("content-type", "") else None
+            if not isinstance(data, dict):
+                return False
+            new_tok = data.get("bearer") or data.get("accessToken") or data.get("access_token")
+            new_ref = data.get("refresh_token") or data.get("refreshToken")
+            if new_tok:
+                self.access_token = new_tok; set_setting("moengage_access_token", new_tok)
+                self.http.headers["Authorization"] = f"Bearer {new_tok}"
+            if new_ref:
+                self.refresh_token = new_ref; set_setting("moengage_refresh_token", new_ref)
+                self.http.headers["RefreshToken"] = new_ref
+            audit("moengage.session_refreshed", {"rotated_refresh": bool(new_ref)}, actor="system")
+            return bool(new_tok)
+        except Exception as e:
+            log.info("refresh failed: %s", redact(str(e)))
+            return False
 
     # ── request building (used by previews) ─────────────────────────────
     def build(self, role: str, params: Optional[Dict[str, Any]] = None, body: Optional[Dict[str, Any]] = None, path_vars: Optional[Dict[str, str]] = None) -> Dict[str, Any]:
@@ -190,12 +276,22 @@ class DashboardSession:
     def request_raw(self, method: str, url: str, params=None, json_body=None, write: bool = False, timeout: float = 30.0):
         if method.upper() != "GET" and not write:
             raise WriteBlocked(f"{method} {url} blocked: writes require an approved proposal")
-        if not self.cookies:
-            raise SessionError("no MoEngage session cookies configured")
+        if not (self.cookies or self.access_token):
+            raise SessionError("no MoEngage session credentials configured (cookies and/or bearer token)")
+        params = dict(params or {})
+        params.setdefault("api", "1")          # the dashboard marks XHR calls this way
         self._pace()
+        self.http.headers["MoeTraceId"] = str(uuid.uuid4())
         resp = self.http.request(method.upper(), url, params=params, json=json_body, timeout=timeout, allow_redirects=False)
+        if resp.status_code == 401 and self.refresh_token and not getattr(self, "_refreshing", False):
+            self._refreshing = True
+            try:
+                if self.refresh_session():
+                    resp = self.http.request(method.upper(), url, params=params, json=json_body, timeout=timeout, allow_redirects=False)
+            finally:
+                self._refreshing = False
         if resp.status_code in (401, 403) or (resp.is_redirect and LOGIN_MARKERS.search(resp.headers.get("location", ""))):
-            raise SessionError(f"session rejected (HTTP {resp.status_code}); refresh cookies from the dashboard")
+            raise SessionError(f"session rejected (HTTP {resp.status_code}); paste fresh dashboard credentials (Authorization/RefreshToken headers or cookies)")
         ctype = resp.headers.get("content-type", "")
         if "text/html" in ctype and LOGIN_MARKERS.search(resp.text[:4000] or ""):
             raise SessionError("session expired (login page returned); refresh cookies")

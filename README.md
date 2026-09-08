@@ -113,10 +113,26 @@ status, flows, business events), **Inform** (transactional alerts). Data
 centre is derived from the dashboard host (`dashboard-03` → `api-03`) or set
 explicitly.
 
-### Cookie session: capture once, verify, use
+### Dashboard session: paste once, the engine does the rest
 
-Dashboard endpoints ship as *unknown*. They become usable only after you show
-the engine what your dashboard actually calls:
+The dashboard SPA authenticates its API calls with a short-lived Bearer JWT
+plus a `RefreshToken` header (and cookies), and renews the JWT via
+`/session/refresh`. So the simplest working setup is:
+
+1. Log in to MoEngage. DevTools → Network → click any dashboard request
+   (e.g. `campaigns/all`) → **Request Headers** → select all → copy.
+2. Settings → Integration → *Session cookies* → paste the whole block → Save.
+   The engine extracts `cookie`, `authorization: Bearer …`, `refreshtoken`
+   and `moe-appkey` from it (a plain Cookie header or a cookie-editor export
+   also works). Everything is stored encrypted.
+3. On save the engine automatically **discovers** the dashboard's API paths
+   from its public JavaScript bundle (258 paths in ~4 s, no auth needed),
+   classifies them into roles, and **probes the read roles** with your
+   credentials. The Integration tab shows what answered. With a refresh
+   token present, the engine renews the JWT itself when it expires.
+
+If a role still shows *unknown* or *failed* after that, a HAR capture teaches
+it exactly:
 
 1. Log in to MoEngage. DevTools → Network → tick **Preserve log**.
 2. Click through: campaigns list → one campaign → its analytics; segments →
@@ -128,10 +144,12 @@ the engine what your dashboard actually calls:
 The learner keeps URLs, methods, header *names*, query keys and JSON shape
 only. Cookie/authorization values are dropped; opaque header values are
 blanked and must be re-entered as settings (then encrypted). The HAR is never
-stored. Afterwards **Verify endpoints** probes read endpoints (GET only) with
-your session and records which respond. Write endpoints are never probed;
-they are exercised only when you approve a proposal, and the proposal shows
-the exact request first.
+stored. Afterwards **Verify endpoints** probes read endpoints with your session
+(GET, or an empty-body POST for list endpoints that reject GET) and records
+which respond. Write endpoints are never probed; they are exercised only when
+you approve a proposal, and the proposal shows the exact request first.
+*Discover from dashboard bundle* can be re-run at any time; it only reads
+string literals from public JavaScript and never executes it.
 
 ## What runs every day
 

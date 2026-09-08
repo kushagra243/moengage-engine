@@ -44,3 +44,19 @@ def test_hard_rules_without_history():
     assert any(e["method"] == "hard_rule_delivery" for e in rep["anomalies"])
     assert "fresh" in rep["campaigns_with_insufficient_history"]
     assert len(get_history("fresh", "fresh")) == 1
+
+
+def test_weekend_seasonality_does_not_cause_false_alarms():
+    random.seed(5)
+    today = date.today()
+    for i in range(35, 0, -1):
+        d = today - timedelta(days=i)
+        lift = 1.08 if d.weekday() >= 5 else 1.0
+        record_snapshot([_camp("S", 12.0 * lift * random.gauss(1, 0.05))], source="season", snapshot_date=d.isoformat())
+    lift = 1.08 if today.weekday() >= 5 else 1.0
+    record_snapshot([_camp("S", 12.0 * lift * 0.96)], source="season", snapshot_date=today.isoformat())   # ordinary 4% dip
+    rep = detect_anomalies(source="season", persist=False)
+    assert not [e for e in rep["anomalies"] if e["campaign_id"] == "S" and e["metric"] in ("ctr", "opened_count")], rep["anomalies"]
+    record_snapshot([_camp("S", 12.0 * lift * 0.55)], source="season", snapshot_date=today.isoformat())   # real 45% collapse
+    rep = detect_anomalies(source="season", persist=False)
+    assert any(e["campaign_id"] == "S" and e["metric"] == "ctr" and e["severity"] == "critical" for e in rep["anomalies"])

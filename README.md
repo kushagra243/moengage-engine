@@ -53,6 +53,25 @@ strict JSON protocol. If the login lapses, the LLM probe reports
 "OAuth session expired" and `claude login` fixes it. Nothing else changes:
 the same redaction, tool set and approval gate apply.
 
+### Simulated model (exercise the agent loop with no key at all)
+
+`tools/sim_llm.py` is a local OpenAI-compatible server that is *not* a model:
+it is a scripted marketer that drives the real tool protocol (status →
+programme audit → anomalies → market hooks → segment + campaign proposals with
+a full goal brief) and writes its answer from the actual tool results. Every
+reply is labelled `[SIMULATED MODEL]`.
+
+```bash
+.venv/bin/python tools/sim_llm.py &            # 127.0.0.1:8791
+./cli.py set llm_provider openai_compatible
+./cli.py set llm_base_url http://127.0.0.1:8791/v1
+./cli.py set llm_model sim/marketer-v1
+./cli.py set-key llm --value sim
+./cli.py chat "Audit the programme and propose a reactivation campaign"
+```
+
+Switch back to a real model by changing the provider/base URL/key in Settings.
+
 ### Mock walkthrough (no MoEngage access, no LLM key)
 
 Demo/mock mode is on by default. This exercises every non-LLM path end to end:

@@ -79,7 +79,7 @@ def _quartiles(xs: List[float]):
     return q(0.25), q(0.75)
 
 
-def _score_point(x: float, hist: List[float], policy: Dict[str, Any], kind: str, metric_name: str = "") -> Optional[Dict[str, Any]]:
+def _score_point(x: float, hist: List[float], policy: Dict[str, Any], kind: str, metric_name: str = "", floor_hist: Optional[List[float]] = None) -> Optional[Dict[str, Any]]:
     """Return anomaly details or None."""
     vals = list(hist)
     if kind == "volume":
@@ -91,6 +91,11 @@ def _score_point(x: float, hist: List[float], policy: Dict[str, Any], kind: str,
     mad = _mad(tv, med)
     q1, q3 = _quartiles(tv)
     iqr = q3 - q1
+    if floor_hist and len(floor_hist) >= 7:
+        fv = [math.log1p(max(v, 0.0)) for v in floor_hist] if kind == "volume" else list(floor_hist)
+        fmed = statistics.median(fv); fmad = _mad(fv, fmed); fq1, fq3 = _quartiles(fv)
+        mad = max(mad, 0.6 * fmad)              # a weekday subset may not be tighter than 60% of the full window
+        iqr = max(iqr, 0.6 * (fq3 - fq1))
 
     modz = None
     scale = mad
@@ -189,13 +194,14 @@ def detect_anomalies(source: str = "live", snapshot_date: Optional[str] = None, 
                     continue   # today's rate is not measurable enough to judge
             res = None
             if len(hist_vals) >= policy["min_history"]:
-                # day-of-week restriction when plenty of history
+                full_vals = list(hist_vals)
+                # day-of-week restriction when plenty of history (>= 6 same-weekday points), floored by the full window
                 if len(hist_vals) >= policy["dow_min_points"]:
                     dow = datetime.fromisoformat(snapshot_date).weekday()
                     same = [float(r[metric]) for r in prior if r.get(metric) is not None and datetime.fromisoformat(r["snapshot_date"]).weekday() == dow]
-                    if len(same) >= 4:
+                    if len(same) >= 6:
                         hist_vals = same
-                res = _score_point(x, hist_vals, policy, kind, metric)
+                res = _score_point(x, hist_vals, policy, kind, metric, floor_hist=full_vals)
                 if res:
                     res["confidence"] = "high" if len(hist_vals) >= 14 else "medium"
             else:

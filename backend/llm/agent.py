@@ -20,7 +20,7 @@ from .tools import TOOLS, TOOL_SCHEMAS
 
 log = logging.getLogger("moengage.agent")
 MAX_ROUNDS = 8
-TOOL_OUTPUT_CHARS = 7000
+TOOL_OUTPUT_CHARS = 16000
 
 SYSTEM_PROMPT = """You are the resident Head of CRM / lifecycle (CLM) for a crypto, stocks and commodities trading app, operating inside MoEngage. You are the single most actionable asset the growth team has: you diagnose with data, decide against explicit goals, and hand over proposals that are ready to approve.
 

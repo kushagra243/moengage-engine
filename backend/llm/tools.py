@@ -108,9 +108,13 @@ def market_news(category: Optional[str] = None, query: Optional[str] = None, lim
     return out
 
 
-def market_campaign_hooks() -> Dict[str, Any]:
+def market_campaign_hooks(limit: int = 8) -> Dict[str, Any]:
     from ..market import campaign_hooks
-    return campaign_hooks()
+    h = campaign_hooks()
+    keep = ("id", "trigger", "asset_class", "segments", "clm_stages", "channel", "angle", "copy_direction", "timing", "guardrails", "kpi")
+    return {"regime": h.get("regime"), "angle_policy": h.get("angle_policy"), "compliance": h.get("compliance"),
+            "hooks": [{k: hk.get(k) for k in keep} for hk in (h.get("hooks") or [])[:limit]], "blocked_hook_ids": h.get("blocked_hook_ids"),
+            "total_hooks": len(h.get("hooks") or [])}
 
 
 def moengage_guidance(topic: str) -> Dict[str, Any]:
@@ -295,7 +299,7 @@ TOOL_SCHEMAS: List[Dict[str, Any]] = [
     _fn("campaign_history", "Daily metric snapshots for one campaign.", {"campaign_id": STR, "days": {"type": "integer"}}, ["campaign_id"]),
     _fn("market_snapshot", "Crypto regime + movers, equities/commodities/macro quotes, Fear & Greed, INR marks, high-impact calendar, data gaps.", {"force": {"type": "boolean"}}),
     _fn("market_news", "Headlines by category (crypto|stocks|commodities|macro|regulatory) or a keyword query. Risk-flagged headlines included.", {"category": STR, "query": STR, "limit": {"type": "integer"}}),
-    _fn("market_campaign_hooks", "Market-derived campaign hooks with segments, angle, timing, guardrails, and the angle policy for today's regime."),
+    _fn("market_campaign_hooks", "Market-derived campaign hooks with segments, angle, timing, guardrails, and the angle policy for today's regime.", {"limit": {"type": "integer"}}),
     _fn("moengage_guidance", "Search the local MoEngage/CLM playbooks (channels, lifecycle stages, segmentation, measurement, market intelligence).", {"topic": STR}, ["topic"]),
     _fn("integration_status", "Which dashboard endpoints are learned/verified/unknown and what is needed to unlock them."),
     _fn("list_proposals", "Pending/approved/executed proposals in the approval queue.", {"status": STR}),

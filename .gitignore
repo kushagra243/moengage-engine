@@ -1,0 +1,30 @@
+# virtualenvs / python
+.venv/
+.venv*/
+__pycache__/
+*.pyc
+.pytest_cache/
+.mypy_cache/
+
+# local state — contains encrypted secrets, snapshots, approvals. Never commit.
+data/*.db
+data/*.db-journal
+data/*.db-wal
+data/*.db-shm
+data/secret.key
+data/captures/
+data/logs/
+
+# env / secrets
+.env
+.env.*
+*.har
+
+# OS
+.DS_Store
+
+# market data cache
+data/cache/
+
+# learned/verified/discovered endpoint state is per-workspace local state
+data/endpoints.*.json

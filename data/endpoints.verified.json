@@ -1,0 +1,103 @@
+{
+  "roles": {
+    "campaign_list": {
+      "ok": false,
+      "method": null,
+      "path": null,
+      "http_status": null,
+      "detail": "/campaigns/all \u2192 auth rejected (path exists); /campaigns/all \u2192 auth rejected (path exists); /v4/campaigns/all \u2192 200 text/html; /v3/campaigns \u2192 301 text/html; /v4/campaigns \u2192 200 text/html; /api/v1/campaigns \u2192 auth rejected (path exists); /v3/campaigns/all \u2192 301 text/html; /v2/campaigns/all \u2192 auth re",
+      "sample_keys": [],
+      "checked_at": "2026-09-08T04:00:20.203736+00:00"
+    },
+    "campaign_detail": {
+      "ok": false,
+      "method": null,
+      "path": null,
+      "http_status": null,
+      "detail": "/campaign/info/{id} (unresolved var); /v3/campaign/info/{id} (unresolved var); /campaigns/info/ \u2192 auth rejected (path exists); /v4/campaigns/info/ \u2192 200 text/html; /v3/campaigns/info/ \u2192 301 text/html; /v2/campaigns/info/ \u2192 auth rejected (path exists); /api/campaigns/info/ \u2192 auth rejected (path exist",
+      "sample_keys": [],
+      "checked_at": "2026-09-08T04:01:26.814984+00:00"
+    },
+    "campaign_stats": {
+      "ok": false,
+      "method": null,
+      "path": null,
+      "http_status": null,
+      "detail": "/v1/stats/performance_stats/summary \u2192 auth rejected (path exists); /v1/stats/performance_stats/summary \u2192 auth rejected (path exists); /v1/campaign/stats-client/performance/summary/periodic/modified \u2192 auth rejected (path exists); /v4/v1/campaign/stats-client/performance/summary/periodic/modified \u2192 20",
+      "sample_keys": [],
+      "checked_at": "2026-09-08T04:03:15.164778+00:00"
+    },
+    "segment_list": {
+      "ok": false,
+      "method": null,
+      "path": null,
+      "http_status": null,
+      "detail": "/segmentation/all-segments/custom-segments \u2192 auth rejected (path exists); /segmentation/all-segments/custom-segments/ \u2192 auth rejected (path exists); /v4/segments/all \u2192 200 text/html; /v3/segments \u2192 301 text/html; /v4/segments \u2192 200 text/html; /api/v1/segments \u2192 auth rejected (path exists); /v4/segme",
+      "sample_keys": [],
+      "checked_at": "2026-09-08T04:03:27.094293+00:00"
+    },
+    "segment_detail": {
+      "ok": false,
+      "method": null,
+      "path": null,
+      "http_status": null,
+      "detail": "no GET path or candidates; import a HAR capture",
+      "sample_keys": [],
+      "checked_at": "2026-09-08T04:03:27.095927+00:00"
+    },
+    "segment_estimate": {
+      "ok": false,
+      "method": null,
+      "path": null,
+      "http_status": null,
+      "detail": "no GET path or candidates; import a HAR capture",
+      "sample_keys": [],
+      "checked_at": "2026-09-08T04:03:27.096775+00:00"
+    },
+    "flow_list": {
+      "ok": false,
+      "method": null,
+      "path": null,
+      "http_status": null,
+      "detail": "/flows/all \u2192 auth rejected (path exists); /v4/flows/all \u2192 200 text/html; /v3/flows \u2192 301 text/html; /v4/flows \u2192 200 text/html; /v3/flows/all \u2192 301 text/html; /v2/flows/all \u2192 auth rejected (path exists); /api/flows/all \u2192 auth rejected (path exists); /api/v1/flows/all \u2192 auth rejected (path exists); /v",
+      "sample_keys": [],
+      "checked_at": "2026-09-08T04:03:32.523168+00:00"
+    },
+    "flow_detail": {
+      "ok": false,
+      "method": null,
+      "path": null,
+      "http_status": null,
+      "detail": "no GET path or candidates; import a HAR capture",
+      "sample_keys": [],
+      "checked_at": "2026-09-08T04:03:32.527103+00:00"
+    },
+    "user_attributes": {
+      "ok": false,
+      "method": null,
+      "path": null,
+      "http_status": null,
+      "detail": "/v1/data/metadata/user-attributes/bulk \u2192 auth rejected (path exists); /v4/segmentation/attributes \u2192 200 text/html; /v1/segment/attributes \u2192 auth rejected (path exists); /api/v1/attributes/user \u2192 auth rejected (path exists); /v4/v1/data/metadata/user-attributes/bulk \u2192 200 text/html; /v3/v1/data/metad",
+      "sample_keys": [],
+      "checked_at": "2026-09-08T04:04:23.848113+00:00"
+    },
+    "events": {
+      "ok": false,
+      "method": null,
+      "path": null,
+      "http_status": null,
+      "detail": "/user-events \u2192 auth rejected (path exists); /v4/segmentation/actions \u2192 200 text/html; /v1/segment/actions \u2192 auth rejected (path exists); /api/v1/events \u2192 auth rejected (path exists); /campaign_user_actions \u2192 auth rejected (path exists); /v4/campaign_user_actions \u2192 200 text/html; /v3/campaign_user_ac",
+      "sample_keys": [],
+      "checked_at": "2026-09-08T04:05:14.618650+00:00"
+    },
+    "event_attributes": {
+      "ok": false,
+      "method": null,
+      "path": null,
+      "http_status": null,
+      "detail": "/v1/segment/action-attributes \u2192 auth rejected (path exists)",
+      "sample_keys": [],
+      "checked_at": "2026-09-08T04:05:15.617596+00:00"
+    }
+  }
+}

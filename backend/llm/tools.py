@@ -142,14 +142,16 @@ def list_proposals(status: Optional[str] = None) -> Dict[str, Any]:
 
 # ── CLM doctrine tools (deterministic) ────────────────────────────────────────
 TRANSITIONS = [
-    ("acquired_verified", "Acquired → Verified", ["kyc", "verify", "verification", "signup", "sign-up", "welcome", "onboard"]),
-    ("verified_funded", "Verified → Funded", ["deposit", "fund", "add money", "bank", "upi", "first deposit"]),
-    ("funded_activated", "Funded → Activated", ["first trade", "activation", "activate", "start trading", "first order", "onboarding guide", "guide"]),
-    ("activated_habitual", "Activated → Habitual", ["second", "habit", "streak", "daily", "watchlist", "alert", "price drop", "wishlist"]),
-    ("habitual_core", "Habitual → Core", ["vip", "loyalty", "tier", "points", "fee", "premium", "graduat", "futures", "product"]),
-    ("slipping", "Slipping → recovered", ["slipping", "declin", "review", "portfolio review", "check-in", "checkin"]),
-    ("dormant_activated", "Dormant → Activated", ["reactivat", "winback", "win-back", "dormant", "inactive", "miss you", "come back"]),
-    ("promotional", "Promotional / broadcast", ["sale", "flash", "offer", "discount", "% off", "festival", "weekend"]),
+    # order matters: more specific first; matched on word boundaries
+    ("dormant_activated", "Dormant → Activated", [r"re-?activat", r"win-?back", r"dormant", r"inactive", r"miss you", r"come back", r"lapsed"]),
+    ("intent_dropoff", "Intent drop-off → converted", [r"cart", r"abandon", r"checkout", r"drop-?off", r"unfinished", r"incomplete order", r"pending order"]),
+    ("acquired_verified", "Acquired → Verified", [r"\bkyc\b", r"verif", r"sign-?up", r"welcome", r"onboard"]),
+    ("verified_funded", "Verified → Funded", [r"deposit", r"\bfund", r"add money", r"\bbank\b", r"\bupi\b"]),
+    ("funded_activated", "Funded → Activated", [r"first trade", r"\bactivat", r"start trading", r"first order", r"getting started", r"guide"]),
+    ("activated_habitual", "Activated → Habitual", [r"second", r"habit", r"streak", r"daily", r"watchlist", r"\balert", r"price drop", r"wishlist"]),
+    ("habitual_core", "Habitual → Core", [r"\bvip\b", r"loyalty", r"\btier", r"points", r"\bfee", r"premium", r"graduat", r"futures", r"cross-?sell"]),
+    ("slipping", "Slipping → recovered", [r"slipping", r"declin", r"portfolio review", r"check-?in"]),
+    ("promotional", "Promotional / broadcast", [r"\bsale\b", r"flash", r"offer", r"discount", r"% off", r"festival", r"weekend", r"blast"]),
 ]
 REQUIRED_GOAL = ["transition", "hypothesis", "primary_kpi", "target", "guardrail_metric", "control_group_pct", "measurement_window_days", "kill_criteria"]
 KPI_BY_TRANSITION = {
@@ -157,13 +159,14 @@ KPI_BY_TRANSITION = {
     "funded_activated": ["first_trade_rate_7d"], "activated_habitual": ["second_trade_within_7d", "sessions_per_week", "alert_adoption_rate"],
     "habitual_core": ["products_per_user", "weekly_active_weeks_4w", "fee_tier_upgrade_rate"], "slipping": ["trade_frequency_recovery_14d"],
     "dormant_activated": ["reactivation_rate_14d"], "churned": ["reactivation_rate_30d"], "promotional": ["conversion_rate", "incremental_gmv_vs_holdout"],
+    "intent_dropoff": ["recovery_rate_24h", "checkout_completion_rate"],
 }
 
 
 def _classify_campaign(c: Dict[str, Any]) -> str:
     text = " ".join(str(c.get(k, "")) for k in ("name", "target_segment", "description", "campaign_name")).lower()
     for tid, _, kws in TRANSITIONS:
-        if any(k in text for k in kws):
+        if any(re.search(k, text) for k in kws):
             return tid
     return "unmapped"
 

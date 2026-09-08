@@ -1,278 +1,179 @@
 #!/usr/bin/env python3
-import sys
-import os
-import json
+"""moengage-engine CLI — same engine as the UI, for terminal use and scripts."""
 import argparse
-from datetime import datetime
+import getpass
+import json
+import os
+import sys
 
-# Ensure project root is in sys.path
-PROJECT_ROOT = os.path.dirname(os.path.abspath(__file__))
-sys.path.insert(0, PROJECT_ROOT)
+ROOT = os.path.dirname(os.path.abspath(__file__))
+sys.path.insert(0, ROOT)
 
-from backend.database import init_db, get_all_settings, set_setting, get_journeys
-from backend.moengage_client import MoEngageClient
-from backend.clm_intelligence import CLMIntelligenceEngine
-from backend.local_brain import LocalIntelligenceBrain
+from backend.database import init_db, set_setting, get_setting  # noqa: E402
+from backend.security import install_log_redaction  # noqa: E402
 
-# Initialize database
 init_db()
+install_log_redaction()
 
-# Terminal ANSI Color Helpers
-class C:
-    RESET = "\033[0m"
-    BOLD = "\033[1m"
-    DIM = "\033[2m"
-    RED = "\033[31m"
-    GREEN = "\033[32m"
-    YELLOW = "\033[33m"
-    BLUE = "\033[34m"
-    MAGENTA = "\033[35m"
-    CYAN = "\033[36m"
-    WHITE = "\033[37m"
 
-def print_banner():
-    print(f"{C.BOLD}{C.CYAN}========================================================================{C.RESET}")
-    print(f"{C.BOLD}{C.CYAN}       MOENGAGE AUTONOMOUS AGENT (ANTIGRAVITY LOCAL ENGINE)             {C.RESET}")
-    print(f"{C.DIM}          100% Local • Zero External API Keys • Session Cookie Powered  {C.RESET}")
-    print(f"{C.BOLD}{C.CYAN}========================================================================{C.RESET}\n")
+def _print(obj):
+    print(json.dumps(obj, indent=2, default=str))
 
-def cmd_status(args):
-    print_banner()
-    moe = MoEngageClient()
-    status = moe.verify_session()
-    settings = get_all_settings()
 
-    print(f"{C.BOLD}--- MoEngage Connection Status ---{C.RESET}")
-    if status.get("valid"):
-        mode_label = f"{C.YELLOW}[MOCK/DEMO MODE]{C.RESET}" if status.get("mode") == "mock" else f"{C.GREEN}[LIVE CONNECTED]{C.RESET}"
-        print(f"Status:      {mode_label}")
-        print(f"User:        {C.BOLD}{status.get('user')}{C.RESET}")
-        print(f"Workspace:   {status.get('workspace')}")
-        print(f"Cluster:     {status.get('region')}")
-        print(f"Message:     {status.get('message')}")
-    else:
-        print(f"Status:      {C.RED}[DISCONNECTED / EXPIRED]{C.RESET}")
-        print(f"Message:     {status.get('message')}")
-        print(f"\n{C.YELLOW}💡 To configure your session cookies:{C.RESET}")
-        print(f"   ./cli.py set-cookies \"<paste_your_cookie_string>\"")
+def cmd_status(a):
+    from backend.moengage import MoEngageClient, registry_status
+    from backend.llm import llm_settings
+    c = MoEngageClient()
+    cfg = llm_settings()
+    _print({"moengage": c.verify_session(), "integration": {k: v for k, v in registry_status().items() if k != "roles"},
+            "llm": {"provider": cfg["provider"], "model": cfg["model"], "configured": bool(cfg["api_key"]) or cfg["provider"] == "claude_cli"}})
 
-    print(f"\n{C.BOLD}--- AI Engine Status ---{C.RESET}")
-    print(f"AI Brain:    {C.GREEN}Antigravity Local Engine (Active, No API Key Needed){C.RESET}")
-    print(f"Environment: Local SQLite ({os.path.join(PROJECT_ROOT, 'data', 'agent.db')})")
 
-def cmd_campaigns(args):
-    print_banner()
-    moe = MoEngageClient()
-    campaigns = moe.get_campaigns(channel_filter=args.channel, status_filter=args.status)
+def cmd_set_cookies(a):
+    raw = a.value or (open(a.file).read() if a.file else getpass.getpass("Paste cookie header / JSON (hidden): "))
+    from backend.moengage.session import parse_cookies, cookie_summary
+    parsed = parse_cookies(raw)
+    if not parsed:
+        sys.exit("no cookies parsed")
+    set_setting("moengage_cookies", json.dumps(parsed))
+    _print({"saved": True, "cookies": cookie_summary(parsed)})
 
-    print(f"{C.BOLD}MoEngage Campaigns ({len(campaigns)} Found):{C.RESET}\n")
-    header = f"{'CAMPAIGN NAME':<32} {'CHANNEL':<8} {'CTR':<8} {'DELIVERY':<10} {'CONVERSIONS':<12} {'REVENUE':<10}"
-    print(f"{C.DIM}{header}{C.RESET}")
-    print("-" * 84)
 
-    for c in campaigns:
-        name = c['name'][:30]
-        chan = c['channel']
-        ctr = f"{c['ctr']}%"
-        deliv = f"{c['delivery_rate']}%"
-        conv = f"{c.get('conversions', 0):,}"
-        rev = f"${c.get('revenue_generated', 0):,.0f}"
+def cmd_set_key(a):
+    key_map = {"data": "moengage_data_api_key", "segmentation": "moengage_segmentation_key", "campaigns": "moengage_campaign_key", "inform": "moengage_inform_key", "llm": "llm_api_key"}
+    k = key_map[a.kind]
+    v = a.value or getpass.getpass(f"{a.kind} key (hidden): ")
+    set_setting(k, v)
+    print(f"saved {k} (encrypted)")
 
-        # Color code CTR
-        ctr_color = C.GREEN if c['ctr'] >= 8.0 else (C.YELLOW if c['ctr'] >= 3.0 else C.RED)
-        print(f"{C.BOLD}{name:<32}{C.RESET} {chan:<8} {ctr_color}{ctr:<8}{C.RESET} {deliv:<10} {conv:<12} {C.GREEN}{rev:<10}{C.RESET}")
 
-def cmd_segments(args):
-    print_banner()
-    moe = MoEngageClient()
-    segments = moe.get_segments()
+def cmd_set(a):
+    if not a.key.startswith(("moengage_", "llm_", "market_", "schedule_", "mock_mode")):
+        sys.exit("refusing unknown setting")
+    set_setting(a.key, a.value)
+    print(f"{a.key} = {a.value if 'key' not in a.key and 'cookie' not in a.key else '<hidden>'}")
 
-    print(f"{C.BOLD}MoEngage Customer Segments ({len(segments)} Active):{C.RESET}\n")
-    for idx, s in enumerate(segments, 1):
-        reach = f"~{s.get('estimated_reach', 0):,} users" if s.get('estimated_reach') else "Dynamic"
-        print(f"{C.CYAN}{idx}. {s['name']}{C.RESET} ({C.YELLOW}{reach}{C.RESET}) [{s.get('type', 'Segment')}]")
-        print(f"   {C.DIM}Description:{C.RESET} {s.get('description', 'N/A')}")
-        crit = s.get('criteria', {})
-        crit_str = json.dumps(crit) if isinstance(crit, dict) else str(crit)
-        print(f"   {C.DIM}Criteria:{C.RESET}    {crit_str}\n")
 
-def cmd_create_segment(args):
-    print_banner()
-    name = args.name.strip()
-    desc = args.description.strip() if args.description else f"Created via Antigravity CLI for {name}"
-    
-    criteria = {}
-    if args.criteria:
-        try:
-            criteria = json.loads(args.criteria)
-        except Exception:
-            criteria = {"filter_text": args.criteria}
-    else:
-        # Default smart criteria
-        criteria = {
-            "event_filter": "Added to Cart >= 1 in last 24 hours",
-            "exclusion_filter": "Purchase Completed >= 1 in last 24 hours"
-        }
+def cmd_learn(a):
+    from backend.moengage import capture
+    with open(a.har) as f:
+        text = f.read()
+    _print(capture.learn(text, app_id=get_setting("moengage_app_id", ""), db_name=get_setting("moengage_db_name", "")))
 
-    print(f"Creating Segment in MoEngage...")
-    print(f"• Name:        {C.BOLD}{name}{C.RESET}")
-    print(f"• Description: {desc}")
-    print(f"• Criteria:    {json.dumps(criteria, indent=2)}")
 
-    moe = MoEngageClient()
-    result = moe.create_segment(name=name, description=desc, criteria=criteria)
+def cmd_verify(a):
+    from backend.moengage import capture
+    from backend.moengage.session import DashboardSession
+    _print(capture.verify(DashboardSession(), roles=a.roles or None))
 
-    if result.get("success"):
-        print(f"\n{C.GREEN}✅ SUCCESS: Segment '{name}' successfully registered!{C.RESET}")
-        print(f"Segment ID: {C.CYAN}{result.get('segment_id')}{C.RESET}")
-        print(f"Status:     {result.get('status')}")
-    else:
-        print(f"\n{C.RED}❌ FAILED: {result.get('message', 'Unknown error')}{C.RESET}")
 
-def cmd_clm_board(args):
-    print_banner()
-    engine = CLMIntelligenceEngine()
-    board = engine.get_full_board()
-    score = board.get("health_scorecard", {})
+def cmd_probe_keys(a):
+    from backend.moengage.public_api import PublicAPI
+    _print(PublicAPI().probe())
 
-    print(f"{C.BOLD}--- 📈 CLM WAR ROOM SCORECARD ---{C.RESET}")
-    print(f"Retention Health Index:     {C.GREEN}{score.get('overall_retention_index')} / 100{C.RESET}")
-    print(f"Average Campaign CTR:       {C.CYAN}{score.get('average_ctr')}%{C.RESET}")
-    print(f"Push Deliverability:        {C.GREEN}{score.get('average_delivery_rate')}%{C.RESET}")
-    print(f"Tracked Attributed Revenue: {C.GREEN}${score.get('total_tracked_revenue', 0):,.2f}{C.RESET}")
-    print(f"Unlocked GMV Opportunity:   {C.YELLOW}+${score.get('unlocked_gmv_potential', 0):,.2f}{C.RESET}")
-    print(f"Lifecycle Automation:       {C.MAGENTA}{score.get('clm_coverage_pct')}% of stages active{C.RESET}\n")
 
-    print(f"{C.BOLD}--- 🔍 ACTIVE CAMPAIGN AUDIT VERDICTS ---{C.RESET}")
-    for a in board.get("audited_campaigns", []):
-        verdict_color = C.GREEN if "SCALE" in a['verdict'] else (C.RED if "FATIGUE" in a['verdict'] or "DELIVERABILITY" in a['verdict'] else C.YELLOW)
-        print(f"• {C.BOLD}{a['name']}{C.RESET} ({a['channel']}): {verdict_color}[{a['verdict']}]{C.RESET} (CTR: {a['ctr']}%)")
-        print(f"  {C.DIM}Action:{C.RESET} {a['recommendation']}\n")
+def cmd_campaigns(a):
+    from backend.moengage import MoEngageClient, DataUnavailable
+    try:
+        rows = MoEngageClient().get_campaigns()
+        for r in rows:
+            print(f"- {r.get('name')} [{r.get('channel')}] {r.get('status')}  ctr={r.get('ctr')} src={r.get('_source')}")
+    except DataUnavailable as e:
+        print("unavailable:", e)
 
-    print(f"{C.BOLD}--- 💡 'WHAT ELSE CAN BE DONE?' (GROWTH DOCTOR) ---{C.RESET}")
-    for idx, opp in enumerate(board.get("opportunities", []), 1):
-        print(f"{C.YELLOW}{idx}. {opp['title']}{C.RESET} ({opp['pillar']})")
-        print(f"   Problem:  {opp['problem']}")
-        print(f"   Solution: {opp['what_to_do']}")
-        print(f"   Lift:     {C.GREEN}{opp['estimated_lift']}{C.RESET}\n")
 
-def cmd_query(args):
-    print_banner()
-    question = " ".join(args.question).strip()
-    if not question:
-        print("Please enter a question, e.g. ./cli.py query \"Audit top campaigns\"")
-        return
+def cmd_segments(a):
+    from backend.moengage import MoEngageClient, DataUnavailable
+    try:
+        for r in MoEngageClient().get_segments():
+            print(f"- {r.get('name')} ({r.get('estimated_reach', '?')}) src={r.get('_source')}")
+    except DataUnavailable as e:
+        print("unavailable:", e)
 
-    print(f"{C.DIM}Analyzing MoEngage data with Antigravity Local Engine...{C.RESET}\n")
-    brain = LocalIntelligenceBrain()
-    response = brain.chat_query(question)
-    print(response.get("reply", "No response generated."))
 
-def cmd_draft(args):
-    print_banner()
-    stage = args.stage or "at_risk"
-    engine = CLMIntelligenceEngine()
-    draft = engine.generate_draft_clm_campaign(stage)
+def cmd_snapshot(a):
+    from backend.moengage import MoEngageClient
+    from backend.anomaly import record_snapshot, detect_anomalies
+    c = MoEngageClient()
+    snap = record_snapshot(c.get_campaigns(), source=c.mode, snapshot_date=a.date)
+    _print({"snapshot": snap, "anomalies": detect_anomalies(source=c.mode, snapshot_date=a.date)})
 
-    print(f"{C.BOLD}CLM Draft Campaign ({draft['clm_stage']}):{C.RESET}")
-    print(f"• Campaign Name:   {C.CYAN}{draft['campaign_name']}{C.RESET}")
-    print(f"• Channel:         {draft['channel']}")
-    print(f"• Target Audience: {draft['target_segment_name']}")
-    print(f"• Trigger:         {draft['trigger_condition']}")
-    print(f"• Expected Impact: {C.GREEN}{draft['expected_impact']}{C.RESET}\n")
 
-    for v in draft.get("ab_variants", []):
-        print(f"{C.BOLD}{v['variant_label']}:{C.RESET}")
-        print(f"  Title: {C.YELLOW}{v['title']}{C.RESET}")
-        print(f"  Body:  {v['body']}")
-        print(f"  CTA:   [{v['cta']}]\n")
+def cmd_anomalies(a):
+    from backend.moengage import MoEngageClient
+    from backend.anomaly import detect_anomalies
+    _print(detect_anomalies(source=MoEngageClient().mode, persist=False))
 
-def cmd_set_cookies(args):
-    cookies = args.cookies.strip()
-    set_setting("moengage_cookies", cookies)
-    set_setting("mock_mode", "false")
-    print(f"{C.GREEN}✅ MoEngage session cookies saved successfully! Testing connection...{C.RESET}")
-    moe = MoEngageClient()
-    print(moe.verify_session())
 
-def cmd_daily_run(args):
-    print_banner()
-    print(f"{C.DIM}Triggering local daily intelligence run...{C.RESET}")
-    brain = LocalIntelligenceBrain()
-    report = brain.run_daily_synthesis()
+def cmd_market(a):
+    from backend.market import market_context
+    ctx = market_context(force=a.force)
+    print(ctx["narrative"])
+    if a.hooks:
+        for h in ctx["hooks"]["hooks"]:
+            print(f"\n[{h['id']}] {h['trigger']}\n  segments: {h['segments']}\n  channel: {h['channel']} | angle: {h['angle']} | timing: {h['timing']}")
 
-    print(f"\n{C.BOLD}Executive Summary:{C.RESET}")
-    print(report.get("executive_summary", ""))
 
-    print(f"\n{C.BOLD}Top 3 Insights:{C.RESET}")
-    for ins in report.get("top_insights", []):
-        print(f"• {ins}")
+def cmd_chat(a):
+    from backend.llm.agent import MarketerAgent
+    out = MarketerAgent().chat(" ".join(a.message), persist=not a.no_persist)
+    print(out["reply"])
+    if out.get("tool_used"):
+        print("\n[tools]", ", ".join(out["tool_used"]), "| model:", out.get("model"))
 
-    print(f"\n{C.BOLD}Recommended Segments:{C.RESET}")
-    for s in report.get("segments", []):
-        print(f"• {C.CYAN}{s['name']}{C.RESET}: {s.get('description')}")
 
-    print(f"\n{C.BOLD}Campaign Ideas:{C.RESET}")
-    for c in report.get("campaign_ideas", []):
-        print(f"• {C.YELLOW}{c['title']}{C.RESET} ({c['channel']}) -> {c['body']}")
+def cmd_approvals(a):
+    from backend import approvals
+    from backend.moengage.executors import register_all
+    register_all()
+    if a.action == "list":
+        for p in approvals.list_proposals(status=a.status):
+            print(f"#{p['id']} [{p['status']}] {p['kind']}: {p['title']}")
+    elif a.action == "show":
+        _print(approvals.get_proposal(a.id))
+    elif a.action == "approve":
+        _print(approvals.approve_and_execute(a.id, decided_by="cli", note=a.note or ""))
+    elif a.action == "reject":
+        _print(approvals.reject(a.id, note=a.note or "", decided_by="cli"))
+
+
+def cmd_daily_run(a):
+    from backend.moengage.executors import register_all
+    from backend.scheduler import scheduler_service
+    register_all()
+    r = scheduler_service.trigger_run(trigger_type="cli")
+    print(r.get("summary") or r)
+    if a.full:
+        _print(r)
+
+
+def cmd_audit_log(a):
+    from backend.security.audit import tail, verify_chain
+    _print({"chain": verify_chain(), "entries": tail(a.n)})
+
 
 def main():
-    parser = argparse.ArgumentParser(
-        description="MoEngage Local Autonomous Agent CLI (Antigravity Engine)",
-        formatter_class=argparse.RawDescriptionHelpFormatter
-    )
-    subparsers = parser.add_subparsers(dest="command", help="Available subcommands")
+    p = argparse.ArgumentParser(description="moengage-engine CLI")
+    sp = p.add_subparsers(dest="cmd", required=True)
+    sp.add_parser("status").set_defaults(fn=cmd_status)
+    s = sp.add_parser("set-cookies"); s.add_argument("--value"); s.add_argument("--file"); s.set_defaults(fn=cmd_set_cookies)
+    s = sp.add_parser("set-key"); s.add_argument("kind", choices=["data", "segmentation", "campaigns", "inform", "llm"]); s.add_argument("--value"); s.set_defaults(fn=cmd_set_key)
+    s = sp.add_parser("set"); s.add_argument("key"); s.add_argument("value"); s.set_defaults(fn=cmd_set)
+    s = sp.add_parser("learn", help="import a HAR capture"); s.add_argument("har"); s.set_defaults(fn=cmd_learn)
+    s = sp.add_parser("verify", help="probe dashboard endpoints read-only"); s.add_argument("roles", nargs="*"); s.set_defaults(fn=cmd_verify)
+    sp.add_parser("probe-keys").set_defaults(fn=cmd_probe_keys)
+    sp.add_parser("campaigns").set_defaults(fn=cmd_campaigns)
+    sp.add_parser("segments").set_defaults(fn=cmd_segments)
+    s = sp.add_parser("snapshot"); s.add_argument("--date"); s.set_defaults(fn=cmd_snapshot)
+    sp.add_parser("anomalies").set_defaults(fn=cmd_anomalies)
+    s = sp.add_parser("market"); s.add_argument("--force", action="store_true"); s.add_argument("--hooks", action="store_true"); s.set_defaults(fn=cmd_market)
+    s = sp.add_parser("chat"); s.add_argument("message", nargs="+"); s.add_argument("--no-persist", action="store_true"); s.set_defaults(fn=cmd_chat)
+    s = sp.add_parser("approvals"); s.add_argument("action", choices=["list", "show", "approve", "reject"]); s.add_argument("id", nargs="?", type=int); s.add_argument("--status"); s.add_argument("--note"); s.set_defaults(fn=cmd_approvals)
+    s = sp.add_parser("daily-run"); s.add_argument("--full", action="store_true"); s.set_defaults(fn=cmd_daily_run)
+    s = sp.add_parser("audit-log"); s.add_argument("-n", type=int, default=30); s.set_defaults(fn=cmd_audit_log)
+    a = p.parse_args()
+    a.fn(a)
 
-    # status
-    p_status = subparsers.add_parser("status", help="Check MoEngage session & engine status")
-    p_status.set_defaults(func=cmd_status)
-
-    # campaigns
-    p_camp = subparsers.add_parser("campaigns", help="Fetch running campaigns and performance metrics")
-    p_camp.add_argument("--channel", help="Filter by channel (Push, Email, In-App)")
-    p_camp.add_argument("--status", help="Filter by status (Active, Paused)")
-    p_camp.set_defaults(func=cmd_campaigns)
-
-    # segments
-    p_seg = subparsers.add_parser("segments", help="List active customer segments and rules")
-    p_seg.set_defaults(func=cmd_segments)
-
-    # create-segment
-    p_cseg = subparsers.add_parser("create-segment", help="Create a customer segment in MoEngage")
-    p_cseg.add_argument("--name", required=True, help="Segment name")
-    p_cseg.add_argument("--description", help="Segment description")
-    p_cseg.add_argument("--criteria", help="Criteria JSON string or filter description")
-    p_cseg.set_defaults(func=cmd_create_segment)
-
-    # clm-board
-    p_clm = subparsers.add_parser("clm-board", help="View full CLM Intelligence War Room and Campaign Audits")
-    p_clm.set_defaults(func=cmd_clm_board)
-
-    # query
-    p_query = subparsers.add_parser("query", help="Ask questions about MoEngage data via Antigravity local engine")
-    p_query.add_argument("question", nargs="+", help="Natural language query")
-    p_query.set_defaults(func=cmd_query)
-
-    # draft-campaign
-    p_draft = subparsers.add_parser("draft-campaign", help="Generate production A/B draft campaigns")
-    p_draft.add_argument("--stage", choices=["onboarding", "activation", "at_risk", "retention", "winback"], default="at_risk")
-    p_draft.set_defaults(func=cmd_draft)
-
-    # set-cookies
-    p_cookies = subparsers.add_parser("set-cookies", help="Update MoEngage browser session cookies")
-    p_cookies.add_argument("cookies", help="Raw Cookie header string copied from DevTools")
-    p_cookies.set_defaults(func=cmd_set_cookies)
-
-    # daily-run
-    p_run = subparsers.add_parser("daily-run", help="Run the automated daily intelligence process locally")
-    p_run.set_defaults(func=cmd_daily_run)
-
-    args = parser.parse_args()
-    if not args.command:
-        parser.print_help()
-        sys.exit(1)
-
-    args.func(args)
 
 if __name__ == "__main__":
     main()

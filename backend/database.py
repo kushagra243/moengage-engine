@@ -103,8 +103,23 @@ def init_db():
         "moengage_cookies": "",
         "moengage_region": "dashboard-01.moengage.com",
         "moengage_app_id": "",
-        "gemini_api_key": os.getenv("GEMINI_API_KEY", ""),
-        "gemini_model": "gemini-2.5-flash",
+        "moengage_db_name": "",
+        "moengage_dc": "",
+        "moengage_data_api_key": "",
+        "moengage_segmentation_key": "",
+        "moengage_campaign_key": "",
+        "moengage_inform_key": "",
+        "llm_provider": "openrouter",
+        "llm_base_url": "https://openrouter.ai/api/v1",
+        "llm_model": "anthropic/claude-sonnet-4.5",
+        "llm_api_key": os.getenv("OPENROUTER_API_KEY", ""),
+        "llm_temperature": "0.3",
+        "llm_max_tokens": "2000",
+        "market_universe": "BTC,ETH,SOL,XRP,BNB,DOGE,ADA,AVAX,LINK,TON,SUI,APT,ARB,OP,NEAR,INJ,SEI,PEPE,WIF,TIA",
+        "market_equities": "^GSPC,^NDX,^NSEI,^NSEBANK,^BSESN,COIN,MSTR,HOOD",
+        "market_commodities": "GC=F,SI=F,CL=F,BZ=F,NG=F,HG=F",
+        "market_macro": "DX-Y.NYB,^TNX,^VIX,INR=X",
+        "market_region": "IN",
         "schedule_time": "09:00",
         "schedule_enabled": "true",
         "mock_mode": "true"  # Defaults to true so users have working experience instantly
@@ -119,32 +134,71 @@ def init_db():
     conn.commit()
     conn.close()
 
+def _secrets():
+    from .security.secrets import secret_store, is_secret_key
+    return secret_store, is_secret_key
+
 def get_setting(key: str, default: str = "") -> str:
     conn = get_db()
     cursor = conn.cursor()
     cursor.execute("SELECT value FROM settings WHERE key = ?", (key,))
     row = cursor.fetchone()
     conn.close()
-    return row["value"] if row else default
+    if not row:
+        return default
+    val = row["value"] if row["value"] is not None else default
+    store, is_secret = _secrets()
+    if is_secret(key):
+        return store.decrypt(val)
+    return val
 
 def set_setting(key: str, value: str):
+    store, is_secret = _secrets()
+    stored = store.encrypt(value) if (is_secret(key) and value) else value
     conn = get_db()
     cursor = conn.cursor()
     cursor.execute("""
         INSERT INTO settings (key, value, updated_at)
         VALUES (?, ?, CURRENT_TIMESTAMP)
         ON CONFLICT(key) DO UPDATE SET value = excluded.value, updated_at = CURRENT_TIMESTAMP
-    """, (key, value))
+    """, (key, stored))
     conn.commit()
     conn.close()
+    if is_secret(key):
+        from .security import audit
+        audit("setting.secret_updated", {"key": key, "cleared": not bool(value)}, actor="user")
 
-def get_all_settings() -> Dict[str, str]:
+def get_all_settings(include_secrets: bool = False) -> Dict[str, str]:
+    """Non-secret settings, plus for each secret a boolean '<key>_set'. Raw secrets never leave this function unless include_secrets=True (internal use only)."""
     conn = get_db()
     cursor = conn.cursor()
     cursor.execute("SELECT key, value FROM settings")
     rows = cursor.fetchall()
     conn.close()
-    return {row["key"]: row["value"] for row in rows}
+    store, is_secret = _secrets()
+    out: Dict[str, str] = {}
+    for row in rows:
+        k, v = row["key"], row["value"]
+        if is_secret(k):
+            if include_secrets:
+                out[k] = store.decrypt(v or "")
+            out[k + "_set"] = "true" if v else "false"
+        else:
+            out[k] = v
+    return out
+
+def migrate_plaintext_secrets() -> int:
+    """Encrypt any legacy plaintext secret values in place. Returns count migrated."""
+    store, is_secret = _secrets()
+    conn = get_db()
+    rows = conn.execute("SELECT key, value FROM settings").fetchall()
+    n = 0
+    for r in rows:
+        if is_secret(r["key"]) and r["value"] and not store.is_encrypted(r["value"]):
+            conn.execute("UPDATE settings SET value=? WHERE key=?", (store.encrypt(r["value"]), r["key"]))
+            n += 1
+    conn.commit(); conn.close()
+    return n
 
 def save_daily_run(trigger_type: str, summary: str, report_data: Dict[str, Any]) -> int:
     conn = get_db()

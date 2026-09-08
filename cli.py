@@ -8,6 +8,9 @@ import sys
 
 ROOT = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, ROOT)
+_VPY = os.path.join(ROOT, ".venv", "bin", "python3")
+if os.path.exists(_VPY) and os.path.realpath(sys.executable) != os.path.realpath(_VPY):
+    os.execv(_VPY, [_VPY] + sys.argv)   # always run inside the project venv
 
 from backend.database import init_db, set_setting, get_setting  # noqa: E402
 from backend.security import install_log_redaction  # noqa: E402
@@ -116,7 +119,11 @@ def cmd_market(a):
 
 def cmd_chat(a):
     from backend.llm.agent import MarketerAgent
-    out = MarketerAgent().chat(" ".join(a.message), persist=not a.no_persist)
+    from backend.llm.provider import LLMError
+    try:
+        out = MarketerAgent().chat(" ".join(a.message), persist=not a.no_persist)
+    except LLMError as e:
+        sys.exit(f"LLM not available: {e}\n  → ./cli.py set-key llm   (OpenRouter / OpenAI-compatible)\n  → or: claude login && ./cli.py set llm_provider claude_cli")
     print(out["reply"])
     if out.get("tool_used"):
         print("\n[tools]", ", ".join(out["tool_used"]), "| model:", out.get("model"))

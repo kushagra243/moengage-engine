@@ -22,10 +22,57 @@ every API call must carry, so a page in another tab cannot drive the engine.
 
 Then in **Settings**:
 
-1. **LLM** — paste an OpenRouter key (or any OpenAI-compatible base URL + key;
-   Ollama/LM Studio work with an empty key), pick a model, click *Test LLM*.
+1. **LLM** — pick one of the provider options below and click *Test LLM*.
 2. **Integration** — see *Connecting to MoEngage* below. Turn off *Demo/mock mode*.
 3. Run *Test connection*, then *Verify endpoints*.
+
+### LLM provider options
+
+| Provider | When to use | Setup |
+|---|---|---|
+| `openrouter` (default) | Any frontier model by id, one key | Paste the key in Settings → LLM, set model (e.g. `anthropic/claude-sonnet-4.5`), *Load models* to browse. |
+| `openai_compatible` | OpenAI, Groq, Together, Ollama, LM Studio | Set base URL (`https://api.openai.com/v1`, `http://127.0.0.1:11434/v1` …) and key (empty for local servers). |
+| `claude_cli` | No API key: reuse the Claude Code login already on this device | See below. |
+
+**Claude CLI on a new device (no key needed)**
+
+```bash
+# 1. install Claude Code if it is not there yet
+npm install -g @anthropic-ai/claude-code
+# 2. log in once in a terminal (opens the browser)
+claude login
+# 3. sanity check: should answer without an auth error
+claude -p "reply with ok" --output-format json
+# 4. point the engine at it
+./cli.py set llm_provider claude_cli
+./cli.py set llm_model claude-sonnet-5
+```
+
+The engine drives `claude -p` headlessly and emulates tool calling through a
+strict JSON protocol. If the login lapses, the LLM probe reports
+"OAuth session expired" and `claude login` fixes it. Nothing else changes:
+the same redaction, tool set and approval gate apply.
+
+### Mock walkthrough (no MoEngage access, no LLM key)
+
+Demo/mock mode is on by default. This exercises every non-LLM path end to end:
+
+```bash
+./cli.py status                      # mode, transports, integration counts
+./cli.py campaigns                   # 6 simulated campaigns, tagged src=mock
+./cli.py snapshot                    # record today's metrics + run detection
+./cli.py anomalies                   # report (thin history → hard rules / peer checks)
+./cli.py market --hooks              # live regime, movers, news risk flags, campaign hooks
+./cli.py approvals list --status pending
+./cli.py daily-run                   # snapshot → anomalies → market → (brief if LLM set)
+./cli.py audit-log -n 10             # hash-chained audit trail
+```
+
+In the UI the same flow is Overview → *Record snapshot now* → Anomalies →
+Market → Approvals → *New proposal* (a `create_campaign` payload must include
+a `goal` block or it is refused) → Approve → Integration → audit log. Once an
+LLM is configured, the Agent tab and the daily brief light up; in mock mode
+the agent labels every number as simulated.
 
 The CLI mirrors the UI: `./cli.py status | set-key | set-cookies | learn | verify | campaigns | snapshot | anomalies | market | chat | approvals | daily-run | audit-log`.
 

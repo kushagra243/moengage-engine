@@ -65,6 +65,9 @@ Outbound HTTP only through `guarded_session` allowlists; the agent may not read 
 ## Campaign listening
 `backend/market/campaign_intel.py` → `/api/market/competitor-campaigns`, tool `competitor_campaigns`, terminal Intel "Campaigns detected" + App Store panel. Free channels only (exchange announcement APIs, Mudrex RSS, Google News per venue, App Store lookup/rank feeds); keyword classification; persisted 30 days; MATERIAL items feed actions/hooks with the counter SOP.
 
+## Market Feed layers and dossiers
+`backend/market/feed.py` (flash, biggest_news, top_oi, top_by_category, by_product — all from the cached context) and `backend/market/dossiers.py` (per-rival marketing dossier from intel + benchmarks + campaign listening + app ranks). Routes `/api/market/feed`, `/api/market/competitors/dossiers`, `/api/market/competitor/{venue}`; tools `market_flash`, `competitor_dossier`; terminal Market Feed and Intel modules render them.
+
 ## Hyperliquid vs CEX
 `backend/market/onchain_cex.py` → `/api/market/onchain-vs-cex`, tool `onchain_vs_cex`, terminal Intel panel. HL global stats + CMC CEX derivatives + DefiLlama OI (free) + Binance/Bybit/OKX per-coin OI and funding; optional Coinglass key (`market_coinglass_api_key`, encrypted).
 

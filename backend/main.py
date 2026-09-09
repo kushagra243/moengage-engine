@@ -923,6 +923,47 @@ def market_competitor_campaigns(hours: int = 48, venue: Optional[str] = None, fo
     return campaign_intel.campaigns(hours=hours, venue=venue, force=force)
 
 
+class AlertCampaign(BaseModel):
+    product: str
+    headline: str
+    detail: str = ""
+    sop_id: Optional[str] = None
+    segment_name: Optional[str] = None
+    dry_run: bool = False
+
+
+@app.post("/api/market/alert-campaign")
+def market_alert_campaign(payload: AlertCampaign, request: Request):
+    from . import sops
+    return sops.run_from_alert(payload.product, payload.headline, payload.detail, sop_id=payload.sop_id, segment_name=payload.segment_name, created_by=request_actor(request), dry_run=payload.dry_run)
+
+
+@app.get("/api/market/feed")
+def market_feed():
+    from .market import feed
+    from .market.context import _latest
+    ctx = _latest(6 * 3600) or {}
+    return {"flash": feed.flash(ctx), "news": feed.biggest_news(ctx), "top_oi": feed.top_oi(ctx), "by_category": feed.top_by_category(ctx), "by_product": feed.by_product(ctx), "generated_at": ctx.get("generated_at")}
+
+
+@app.get("/api/market/competitors/dossiers")
+def market_dossiers():
+    from .market import dossiers
+    return dossiers.all_dossiers()
+
+
+@app.get("/api/market/competitor/{venue}")
+def market_dossier(venue: str):
+    from .market import dossiers, competitors, benchmarks
+    from . import brain
+    try:
+        it = brain.intel()
+    except Exception:
+        it = {}
+    ci = competitors.intel({"crypto_markets": []}); bench = benchmarks.benchmarks()
+    return dossiers.dossier(venue, {**ci, "rivals": it.get("rivals") or []}, bench)
+
+
 @app.get("/api/market/onchain-vs-cex")
 def market_onchain_vs_cex(force: bool = False):
     from .market import onchain_cex

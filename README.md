@@ -97,7 +97,7 @@ Full detail, storage map and team hosting: [SETUP-MAC.md](SETUP-MAC.md), [HOSTIN
 - **Knobs** — the agent can change allowlisted settings on the spot (autopilot, schedule, refresh cadence, market universe, taxonomy codes, model temperature). Secrets and security settings are never in the list.
 - **Code** — *Change request* in the Agent tab (or ask the agent): the change is implemented on an isolated git branch by Claude Code headless (fallback: the configured model writes a diff), tests run, and the diff waits in Approvals. Approve = merge + automatic restart. Reject = branch discarded.
 - **API catalog** — every documented MoEngage API (131 operations, 32 OpenAPI specs) is vendored under `backend/knowledge/moengage-api/` and searchable: `GET /api/api-catalog?q=flow status`, or the agent's `moengage_api_reference` / `moengage_api_read` (read-safe calls only). Refresh with `.venv/bin/python tools/build_api_catalog.py`.
-- **Skills** — `.claude/skills/{moengage,moengage-api,moengage-engine,clm-operator}` are shared by Claude Code and the in-app agent. `CLAUDE.md` is the committed project memory, so a fresh clone on another Mac starts with full context and `./setup.sh` re-runs are instant.
+- **Skills** — ten skills under `.claude/skills/` are shared by Claude Code and the in-app agent: MoEngage product and API, this codebase, CLM doctrine, and six marketing skills for crypto spot/perps/tokenised perps (derivatives lifecycle, compliance copy by jurisdiction, event tracking plan, copywriting bank, analytics playbook, growth calendar). `CLAUDE.md` is the committed project memory, so a fresh clone on another Mac starts with full context and `./setup.sh` re-runs are instant.
 
 ## Connecting to MoEngage
 

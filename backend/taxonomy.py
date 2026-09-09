@@ -36,6 +36,11 @@ DEFAULT_CODES: Dict[str, Dict[str, str]] = {
     # product
     "FUTURES": "product:Futures", "SPOT": "product:Spot", "MARGIN": "product:Margin", "EARN": "product:Earn", "STAKING": "product:Earn",
     "OPTIONS": "product:Options", "INJ": "product:INJ (asset)", "TG": "product:Trading game / tournament", "BLOG": "content:Blog",
+    "PERP": "product:Perpetuals", "PERPS": "product:Perpetuals", "LEV": "product:Leverage", "LEVERAGE": "product:Leverage", "HL": "product:Hyperliquid perps",
+    "TOKENISED": "product:Tokenised equities (HL)", "TOKENIZED": "product:Tokenised equities (HL)", "XSTOCK": "product:Tokenised equities (HL)", "STOCKS": "product:Tokenised equities (HL)",
+    "GOLD": "product:Commodities (HL)", "XAU": "product:Commodities (HL)", "OIL": "product:Commodities (HL)", "SPX": "product:Indices (HL)", "NDX": "product:Indices (HL)",
+    "LIQ": "cohort:Liquidation recovery", "LIQUIDATED": "cohort:Liquidation recovery", "HEDGE": "message:Hedging education", "FUNDING": "message:Funding", "OI": "message:Open interest",
+    "LISTING": "message:New listing", "COMP": "message:Competition", "TOURNAMENT": "message:Competition", "AIRDROP": "message:Rewards", "POINTS": "message:Rewards", "REFERRAL": "message:Referral",
     # message type
     "REMINDER": "message:Reminder", "UPDATE": "message:Update", "EXPERTPICKS": "message:Expert picks", "EXPERTPICKSGTM": "message:Expert picks",
     "ALERT": "message:Alert", "PRICE": "message:Price", "DROP": "message:Price drop",

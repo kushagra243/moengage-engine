@@ -32,7 +32,7 @@ pkill -f start.py            # the server's cmdline is start.py, not uvicorn
 | approvals, executors | `backend/approvals.py`, `backend/moengage/executors.py`, `backend/devagent.py` (code_change) |
 | anomaly snapshots/detection/diagnosis, metric vocabulary | `backend/anomaly/*.py`, `backend/metrics.py` |
 | taxonomy, deep analysis, growth feed, hacks, autopilot, experiments | `backend/taxonomy.py`, `analysis.py`, `growth.py`, `hacks.py`, `autopilot.py`, `experiments.py` |
-| market data (Binance ∪ Hyperliquid universe) | `backend/market/*.py` |
+| market data (Binance ∪ Hyperliquid universe), listings + OI signals, hooks | `backend/market/exchanges.py`, `derivs.py`, `hooks.py`, `context.py` |
 | LLM provider, agent loop, tools | `backend/llm/provider.py`, `agent.py`, `tools.py` |
 | skills, guidance, API catalog | `backend/skills.py`, `guidance.py`, `api_catalog.py`, `backend/knowledge/` |
 | console | `frontend/index.html` (tabs), `app.js` (`loaders.<tab>`), `style.css` (tokens + HUD theme) |

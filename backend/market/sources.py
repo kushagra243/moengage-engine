@@ -270,6 +270,64 @@ NSE = {"^NSEI": "NIFTY 50", "^NSEBANK": "NIFTY BANK", "^BSESN": None}
 FRED = {"^TNX": "DGS10", "CL=F": "DCOILWTICO", "BZ=F": "DCOILBRENTEU", "NG=F": "DHHNGSP", "DX-Y.NYB": "DTWEXBGS", "INR=X": "DEXINUS", "^VIX": "VIXCLS"}
 
 
+# Finnhub (free key: 60 calls/min). Indices are premium on Finnhub, so use liquid ETF proxies and label them.
+FINNHUB_MAP = {
+    "^GSPC": ("SPY", "S&P 500 (SPY proxy)"), "^NDX": ("QQQ", "Nasdaq 100 (QQQ proxy)"), "^IXIC": ("QQQ", "Nasdaq (QQQ proxy)"), "^DJI": ("DIA", "Dow (DIA proxy)"),
+    "^NSEI": ("INDA", "India (INDA proxy)"), "^VIX": ("VIXY", "VIX (VIXY proxy)"), "GC=F": ("OANDA:XAU_USD", "Gold"), "SI=F": ("OANDA:XAG_USD", "Silver"),
+    "CL=F": ("OANDA:WTICO_USD", "WTI crude"), "BZ=F": ("OANDA:BCO_USD", "Brent crude"), "NG=F": ("OANDA:NATGAS_USD", "Natural gas"), "HG=F": ("OANDA:XCU_USD", "Copper"),
+    "INR=X": ("OANDA:USD_INR", "USD/INR"), "^TNX": ("OANDA:US10YB_USD", "US 10Y"), "DX-Y.NYB": ("OANDA:USD_INDEX", "Dollar index"),
+}
+
+
+def finnhub_key() -> str:
+    return get_setting("market_finnhub_key", "").strip()
+
+
+def _finnhub(symbol: str) -> Optional[Dict[str, Any]]:
+    key = finnhub_key()
+    if not key:
+        return None
+    fsym, label = FINNHUB_MAP.get(symbol, (symbol, NAMES.get(symbol, symbol)))
+    d = _json("https://finnhub.io/api/v1/quote", {"symbol": fsym, "token": key}, 10.0)
+    if not d or not d.get("c"):
+        return None
+    return {"symbol": symbol, "name": label, "price": d.get("c"), "chg_24h": round(float(d.get("dp") or 0), 2), "chg_7d": None, "chg_30d": None,
+            "currency": "INR" if symbol == "INR=X" else "USD", "source": f"finnhub:{fsym}", "prev_close": d.get("pc"), "as_of": d.get("t")}
+
+
+def finnhub_news(category: str = "general", limit: int = 15) -> List[Dict[str, Any]]:
+    key = finnhub_key()
+    if not key:
+        return []
+    def fetch():
+        try:
+            rows = _json("https://finnhub.io/api/v1/news", {"category": category, "token": key}, 12.0)
+            out = []
+            for r in rows[:limit]:
+                from datetime import datetime as _dt, timezone as _tz
+                out.append({"title": (r.get("headline") or "")[:200], "link": r.get("url"), "published": _dt.fromtimestamp(int(r.get("datetime") or 0), tz=_tz.utc).isoformat(),
+                            "source": f"{r.get('source') or 'Finnhub'} (API)", "sentiment": "neutral"})
+            return out
+        except Exception as e:
+            log.info("finnhub news failed: %s", redact(str(e))); return None
+    return cached(f"fh_news_{category}", fetch, 900) or []
+
+
+def finnhub_calendar() -> List[Dict[str, Any]]:
+    key = finnhub_key()
+    if not key:
+        return []
+    def fetch():
+        try:
+            d = _json("https://finnhub.io/api/v1/calendar/economic", {"token": key}, 12.0)
+            rows = d.get("economicCalendar") or []
+            return [{"title": r.get("event"), "country": r.get("country"), "date": r.get("time"), "impact": {"high": "High", "medium": "Medium", "low": "Low"}.get(str(r.get("impact")).lower(), r.get("impact")),
+                     "forecast": r.get("estimate"), "previous": r.get("prev")} for r in rows if str(r.get("impact")).lower() in ("high", "medium")][:80]
+        except Exception as e:
+            log.info("finnhub calendar failed: %s", redact(str(e))); return None
+    return cached("fh_calendar", fetch, 3600) or []
+
+
 def _yahoo(symbol: str) -> Optional[Dict[str, Any]]:
     d = _json(f"https://query1.finance.yahoo.com/v8/finance/chart/{symbol}", {"range": "1mo", "interval": "1d"}, 15.0)
     res = d["chart"]["result"][0]
@@ -369,6 +427,8 @@ def _fx_inr() -> Optional[Dict[str, Any]]:
 def quote(symbol: str) -> Optional[Dict[str, Any]]:
     def fetch():
         chain = []
+        if finnhub_key():
+            chain.append(_finnhub)          # keyed API first when available
         if symbol in CBOE:
             chain.append(_cboe)
         if symbol in NSE and NSE[symbol]:
@@ -401,6 +461,9 @@ def quotes(symbols: List[str]) -> List[Dict[str, Any]]:
 
 
 def econ_calendar() -> List[Dict[str, Any]]:
+    fh = finnhub_calendar()
+    if fh:
+        return fh
     def fetch():
         try:
             rows = _json("https://nfs.faireconomy.media/ff_calendar_thisweek.json")
@@ -409,3 +472,26 @@ def econ_calendar() -> List[Dict[str, Any]]:
         except Exception as e:
             log.info("calendar failed: %s", redact(str(e))); return None
     return cached("ff_calendar", fetch, 3600) or []
+
+
+def source_status() -> Dict[str, Any]:
+    """Which data sources are active, keyed, in backoff or blocked — for the Market tab's data panel."""
+    now = time.time()
+    def st(host):
+        return "backoff" if _BACKOFF.get(host, 0) > now else "ok"
+    keyed = {"finnhub": bool(finnhub_key()), "coingecko_demo": bool(get_setting("market_coingecko_key", ""))}
+    rows = [
+        {"name": "Finnhub", "kind": "API (keyed)", "covers": "equities, ETF index proxies, commodities/FX via OANDA, news, economic calendar", "active": keyed["finnhub"], "state": st("finnhub.io") if keyed["finnhub"] else "add market_finnhub_key (free, 60 calls/min)"},
+        {"name": "CoinGecko", "kind": "API" + (" (demo key)" if keyed["coingecko_demo"] else " (keyless, ~5/min)"), "covers": "crypto markets, global, trending, gold/silver via BTC/XAU", "active": True, "state": st("api.coingecko.com")},
+        {"name": "Binance / OKX", "kind": "API (keyless)", "covers": "daily candles for regime maths, funding", "active": True, "state": st("api.binance.com")},
+        {"name": "CoinPaprika", "kind": "API (keyless)", "covers": "crypto fallback", "active": True, "state": st("api.coinpaprika.com")},
+        {"name": "CBOE", "kind": "API (keyless)", "covers": "S&P 500, Nasdaq 100, VIX", "active": True, "state": st("cdn.cboe.com")},
+        {"name": "NSE India", "kind": "API (keyless)", "covers": "Nifty 50, Bank Nifty", "active": True, "state": st("www.nseindia.com")},
+        {"name": "Yahoo Finance", "kind": "API (keyless, IP-limited)", "covers": "any symbol; 7d/30d change", "active": True, "state": st("query1.finance.yahoo.com")},
+        {"name": "FRED", "kind": "API (keyless)", "covers": "yields, oil, gas, dollar index (daily)", "active": True, "state": st("fred.stlouisfed.org")},
+        {"name": "CoinDCX", "kind": "API (keyless)", "covers": "INR marks", "active": True, "state": st("api.coindcx.com")},
+        {"name": "alternative.me / CNN", "kind": "API (keyless)", "covers": "crypto and stocks Fear & Greed", "active": True, "state": st("api.alternative.me")},
+        {"name": "ForexFactory", "kind": "JSON (keyless)", "covers": "this week's macro calendar", "active": True, "state": st("nfs.faireconomy.media")},
+        {"name": "RSS", "kind": "feeds", "covers": "CoinDesk, Cointelegraph, The Block, Decrypt, Bloomberg, CNBC, WSJ, ET, LiveMint, BS, SEC, SEBI, RBI, Google News", "active": True, "state": "ok"},
+    ]
+    return {"keyed": keyed, "sources": rows}

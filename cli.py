@@ -211,6 +211,12 @@ def cmd_service(a):
             print("service not installed (run: ./cli.py service install)")
 
 
+def cmd_mock(a):
+    from backend.moengage import mock
+    if a.action == "seed":
+        _print(mock.seed_history(a.days, inject=not a.clean))
+
+
 def cmd_audit_log(a):
     from backend.security.audit import tail, verify_chain
     _print({"chain": verify_chain(), "entries": tail(a.n)})
@@ -234,6 +240,7 @@ def main():
     s = sp.add_parser("chat"); s.add_argument("message", nargs="+"); s.add_argument("--no-persist", action="store_true"); s.set_defaults(fn=cmd_chat)
     s = sp.add_parser("approvals"); s.add_argument("action", choices=["list", "show", "approve", "reject"]); s.add_argument("id", nargs="?", type=int); s.add_argument("--status"); s.add_argument("--note"); s.set_defaults(fn=cmd_approvals)
     s = sp.add_parser("daily-run"); s.add_argument("--full", action="store_true"); s.set_defaults(fn=cmd_daily_run)
+    s = sp.add_parser("mock", help="demo data: seed"); s.add_argument("action", choices=["seed"]); s.add_argument("--days", type=int, default=30); s.add_argument("--clean", action="store_true", help="no injected faults"); s.set_defaults(fn=cmd_mock)
     s = sp.add_parser("audit-log"); s.add_argument("-n", type=int, default=30); s.set_defaults(fn=cmd_audit_log)
     s = sp.add_parser("growth", help="growth feed: refresh | list | set"); s.add_argument("action", choices=["refresh", "list", "set"]); s.add_argument("id", nargs="?", type=int); s.add_argument("--status"); s.add_argument("--llm", action="store_true"); s.add_argument("-n", type=int, default=5); s.set_defaults(fn=cmd_growth)
     s = sp.add_parser("service", help="persistent background service (launchd): install | uninstall | status"); s.add_argument("action", choices=["install", "uninstall", "status"]); s.add_argument("--port"); s.set_defaults(fn=cmd_service)

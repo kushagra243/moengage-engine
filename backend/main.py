@@ -47,6 +47,14 @@ _migrated = migrate_plaintext_secrets()
 if _migrated:
     logging.getLogger("moengage").info("encrypted %d legacy plaintext secret(s)", _migrated)
 register_executors()
+# demo mode: make sure there is history to look at
+try:
+    if get_setting("mock_mode", "true").lower() == "true" and snapshot_count("mock") < 7:
+        from .moengage import mock as _mock
+        _mock.seed_history(30, inject=True)
+        logging.getLogger("moengage").info("mock mode: seeded 30 days of demo history")
+except Exception as _e:
+    logging.getLogger("moengage").info("mock seed skipped: %s", redact(str(_e)))
 scheduler_service.start()
 audit("app.start", {"secrets_backend": secret_store.status()["backend"]})
 
@@ -361,6 +369,18 @@ def anomaly_history(campaign_id: str, days: int = 60):
     return {"campaign_id": campaign_id, "history": get_history(campaign_id, MoEngageClient().mode, days)}
 
 
+@app.get("/api/anomaly/diagnose")
+def anomaly_diagnose_all(limit: int = 20):
+    from .anomaly.diagnose import diagnose_all
+    return {"source": MoEngageClient().mode, "campaigns": diagnose_all(MoEngageClient().mode, limit)}
+
+
+@app.get("/api/anomaly/diagnose/{campaign_id}")
+def anomaly_diagnose_one(campaign_id: str):
+    from .anomaly.diagnose import diagnose_campaign
+    return diagnose_campaign(campaign_id, MoEngageClient().mode)
+
+
 @app.get("/api/anomaly/events")
 def anomaly_events(limit: int = 50):
     return recent_events(limit, MoEngageClient().mode)
@@ -418,6 +438,41 @@ def approvals_reject(pid: int, payload: DecisionPayload):
         return approvals.reject(pid, note=payload.note, decided_by="user")
     except approvals.ApprovalError as e:
         raise HTTPException(400, str(e))
+
+
+# ── mock / demo walkthrough ────────────────────────────────────────────────────
+class MockSeed(BaseModel):
+    days: int = 30
+    inject: bool = True
+
+
+@app.post("/api/mock/seed")
+def mock_seed(payload: MockSeed):
+    if get_setting("mock_mode", "true").lower() != "true":
+        raise HTTPException(400, "seeding is only allowed in mock mode")
+    from .moengage import mock as _mock
+    return _mock.seed_history(max(7, min(90, payload.days)), inject=payload.inject)
+
+
+@app.get("/api/mock/walkthrough")
+def mock_walkthrough():
+    """Progress of the demo checklist, computed from state (no separate bookkeeping)."""
+    mode_mock = get_setting("mock_mode", "true").lower() == "true"
+    cfg = llm_settings()
+    latest = get_latest_daily_run()
+    props = approvals.list_proposals(limit=200)
+    steps = [
+        {"id": "history", "title": "Seed 30 days of campaign history", "done": snapshot_count("mock") >= 7, "action": "seed", "detail": f"{snapshot_count('mock')} days recorded"},
+        {"id": "anomalies", "title": "Detect outliers against each campaign's own baseline", "done": bool(recent_events(1, "mock")), "action": "snapshot", "detail": "critical / warning events appear in Anomalies"},
+        {"id": "market", "title": "Pull live market context and hooks", "done": bool(market_context(force=False).get("generated_at")), "action": "market", "detail": "regime, movers, headlines → hooks"},
+        {"id": "feed", "title": "Derive growth hacks from data (no model)", "done": (growth.counts().get("new", 0) + growth.counts().get("saved", 0) + growth.counts().get("proposed", 0)) > 0, "action": "feed", "detail": "Overview → Markets & growth hacks"},
+        {"id": "daily", "title": "Run the daily process", "done": latest is not None, "action": "daily", "detail": "snapshot → anomalies → market → feed → brief"},
+        {"id": "llm", "title": "Connect a model (Claude CLI or OpenRouter)", "done": bool(cfg["api_key"]) or cfg["provider"] == "claude_cli", "action": "settings", "detail": f"provider {cfg['provider']}"},
+        {"id": "agent", "title": "Ask the agent for an audit and a proposal", "done": any(p["created_by"] == "agent" for p in props), "action": "agent", "detail": "Agent tab; every idea is captured in the feed"},
+        {"id": "approve", "title": "Approve or reject a proposal", "done": any(p["status"] in ("executed", "rejected") for p in props), "action": "approvals", "detail": "nothing reaches MoEngage without this"},
+        {"id": "live", "title": "Go live: paste dashboard headers or API keys", "done": not mode_mock, "action": "settings", "detail": "Settings → Integration"},
+    ]
+    return {"mock_mode": mode_mock, "steps": steps, "done": sum(1 for s in steps if s["done"]), "total": len(steps)}
 
 
 # ── growth feed ────────────────────────────────────────────────────────────────

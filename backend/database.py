@@ -117,7 +117,9 @@ def init_db():
         "llm_api_key": os.getenv("OPENROUTER_API_KEY", ""),
         "llm_temperature": "0.3",
         "llm_max_tokens": "2000",
-        "market_universe": "BTC,ETH,SOL,XRP,BNB,DOGE,ADA,AVAX,LINK,TON,SUI,APT,ARB,OP,NEAR,INJ,SEI,PEPE,WIF,TIA",
+        "market_universe_mode": "either",   # either | both | hyperliquid | binance | manual — assets tradable on Binance USDT spot / Hyperliquid perps
+        "market_top_n": "60",
+        "market_universe": "BTC,ETH,SOL,XRP,BNB,DOGE,ADA,AVAX,LINK,TON,SUI,APT,ARB,OP,NEAR,INJ,SEI,PEPE,WIF,TIA",   # used only when mode=manual
         "market_equities": "^GSPC,^NDX,^NSEI,^NSEBANK,^BSESN,COIN,MSTR,HOOD",
         "market_commodities": "GC=F,SI=F,CL=F,BZ=F,NG=F,HG=F",
         "market_macro": "DX-Y.NYB,^TNX,^VIX,INR=X",

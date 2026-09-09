@@ -210,16 +210,21 @@ def generate_rule_ideas() -> Dict[str, Any]:
                               how="Pick the biggest promotional blast; give it a transition, an entry event and a holdout; retire the schedule.", channel="Push", angle="graduation", kpi="incremental_lift", effort="low", expected_impact="Same reach, honest attribution"))
     except Exception:
         pass
-    # anomalies → fixes / scale
+    # anomalies → fixes (with diagnosis) / scale
     try:
+        from .anomaly.diagnose import diagnose_campaign
         an = anomaly_report()
+        diag_cache: Dict[str, Dict[str, Any]] = {}
         for a in an.get("anomalies", [])[:6]:
             if a.get("impact") == "bad":
+                dg = diag_cache.setdefault(a["campaign_id"], diagnose_campaign(a["campaign_id"], c.mode))
+                cause = (dg.get("likely_causes") or [{}])[0]
+                opt = (dg.get("options") or [{}])[0]
                 ideas.append(dict(kind="fix", priority=85 if a["severity"] == "critical" else 65,
-                                  title=f"Investigate {a['metric']} drop on {a.get('campaign_name')}",
-                                  why=f"{a['metric']} {a['value']:g} vs baseline {a['baseline']:g} ({a['method']}, {a.get('confidence')} confidence, n={a.get('n_history', '?')}).",
-                                  how="Check deliverability (tokens, opt-outs), creative fatigue, audience drift and send-time collisions before adding volume. Pause if delivery < 80%.",
-                                  segment=a.get("campaign_name"), channel=a.get("channel", ""), angle="fix", kpi=a["metric"], effort="low", expected_impact="Stops the leak before it compounds", data=a))
+                                  title=f"Fix {a['metric']} on {a.get('campaign_name')}: {cause.get('cause', 'investigate')}",
+                                  why=f"{a['metric']} {a['value']:g} vs baseline {a['baseline']:g} ({a['method']}, {a.get('confidence')} confidence). {cause.get('evidence', '')} Check first: {cause.get('check_first', '')}",
+                                  how=f"{opt.get('action', '')}. {opt.get('how_in_moengage', '')} (effort {opt.get('effort')}, expected: {opt.get('expected_effect')}, risk: {opt.get('risk')})",
+                                  segment=a.get("campaign_name"), channel=a.get("channel", ""), angle="fix", kpi=a["metric"], effort=opt.get("effort", "low"), expected_impact=opt.get("expected_effect", ""), data={"anomaly": a, "headline": dg.get("headline")}))
             elif a.get("impact") == "good" and a["direction"] == "up":
                 ideas.append(dict(kind="growth_hack", priority=70, title=f"Scale what spiked: {a.get('campaign_name')} ({a['metric']})",
                                   why=f"{a['metric']} {a['value']:g} vs baseline {a['baseline']:g}. Positive outliers are where a lookalike expansion pays.",

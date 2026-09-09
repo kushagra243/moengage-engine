@@ -97,6 +97,18 @@ def headlines(category: Optional[str] = None, limit_per_feed: int = 10) -> Dict[
                 result["errors"].append(name)
             else:
                 per_cat[cat].extend(rows)
+    # keyed API news first (Finnhub) — merged and de-duplicated with RSS
+    try:
+        from .sources import finnhub_news
+        fh_map = {"crypto": "crypto", "stocks": "general", "macro": "forex", "commodities": "general"}
+        for cat in cats:
+            if cat in fh_map:
+                rows = finnhub_news(fh_map[cat], 12)
+                for r in rows:
+                    r["sentiment"] = "risk" if RISK_WORDS.search(r["title"]) else ("positive" if POS_WORDS.search(r["title"]) else "neutral")
+                per_cat[cat] = rows + per_cat[cat]
+    except Exception as e:
+        log.info("finnhub news merge: %s", redact(str(e)))
     seen = set()
     for cat in cats:
         items = []

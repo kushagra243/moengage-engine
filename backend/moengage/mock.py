@@ -80,3 +80,36 @@ def analytics() -> Dict[str, Any]:
 
 def whoami() -> Dict[str, Any]:
     return {"valid": True, "mode": "mock", "user": "demo.marketer@brand.com", "workspace": "Production-Retail-Demo", "_source": "mock"}
+
+
+def seed_history(days: int = 30, inject: bool = True, source: str = "mock") -> Dict[str, Any]:
+    """Write `days` of realistic daily snapshots (weekly seasonality + noise) so anomaly
+    detection, sparklines and the feed have something to work with in demo mode.
+    With inject=True the latest day carries three visible faults."""
+    from ..anomaly import record_snapshot, detect_anomalies
+    from ..anomaly.store import get_db
+    rnd = random.Random(20260907)
+    conn = get_db(); conn.execute("DELETE FROM campaign_snapshots WHERE source=?", (source,)); conn.execute("DELETE FROM anomaly_events WHERE source=?", (source,)); conn.commit(); conn.close()
+    base = campaigns()
+    today = datetime.now().date()
+    for i in range(days, 0, -1):
+        d = today - timedelta(days=i)
+        dow = 1.08 if d.weekday() >= 5 else 1.0
+        rows = []
+        for c in base:
+            f = rnd.gauss(1, 0.05); r = dict(c)
+            r["ctr"] = round(c["ctr"] * f * dow, 2); r["opened_count"] = int(c["opened_count"] * f * dow)
+            r["delivery_rate"] = round(c["delivery_rate"] + rnd.gauss(0, 0.4), 1)
+            r["conversion_rate"] = round(c["conversion_rate"] * rnd.gauss(1, 0.06), 2)
+            r["revenue_generated"] = round(c["revenue_generated"] * rnd.gauss(1, 0.08), 2)
+            rows.append(r)
+        record_snapshot(rows, source=source, snapshot_date=d.isoformat())
+    tod = [dict(c) for c in base]
+    if inject:
+        for c in tod:
+            if c["id"] == "cmp_002": c["ctr"] = 4.1; c["opened_count"] = 1650
+            if c["id"] == "cmp_004": c["delivery_rate"] = 71.0; c["delivered_count"] = 129504
+            if c["id"] == "cmp_006": c["revenue_generated"] = 214000.0
+    record_snapshot(tod, source=source)
+    rep = detect_anomalies(source=source, persist=True)
+    return {"days": days, "injected": inject, "critical": rep["critical"], "warnings": rep["warnings"]}

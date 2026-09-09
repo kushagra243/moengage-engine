@@ -106,15 +106,32 @@ def _news_hooks(news: Dict[str, Any]) -> List[Dict[str, Any]]:
     return out
 
 
+def _funding_hooks(md: Dict[str, Any], regime: str) -> List[Dict[str, Any]]:
+    out = []
+    for m in (md.get("crowded_long") or [])[:2]:
+        out.append({"id": f"funding_long_{m['symbol']}", "trigger": f"{m['symbol']} funding {m['funding_apr_pct']:+.0f}% APR with ${(m.get('oi_usd') or 0)/1e6:.0f}M OI — crowded long",
+                    "asset_class": "crypto", "regime": regime, "segments": [f"Users long {m['symbol']} perps", f"{m['symbol']} watchers with leverage history"], "clm_stages": ["Habitual", "Core"],
+                    "channel": "In-app + Push", "angle": "risk_education", "copy_direction": "State the funding rate as a cost they are paying and what a squeeze does to leveraged positions; link to position/risk screen. No directional call.",
+                    "timing": "Now; TTL 3h", "guardrails": ["no leverage upsell", "exclude loss-dormant", "1/day cap"], "kpi": "risk-tool opens; liquidation rate"})
+    for m in (md.get("crowded_short") or [])[:1]:
+        out.append({"id": f"funding_short_{m['symbol']}", "trigger": f"{m['symbol']} funding {m['funding_apr_pct']:+.0f}% APR — crowded short",
+                    "asset_class": "crypto", "regime": regime, "segments": [f"Users short {m['symbol']}"], "clm_stages": ["Habitual", "Core"], "channel": "In-app",
+                    "angle": "risk_education", "copy_direction": "Explain short-squeeze mechanics and the funding they receive/pay; link to risk tools.", "timing": "Now; TTL 3h",
+                    "guardrails": ["no directional language", "1/day cap"], "kpi": "risk-tool opens"})
+    return out
+
+
 def build_hooks(ctx: Dict[str, Any]) -> Dict[str, Any]:
     regime = ((ctx.get("crypto") or {}).get("regime") or {}).get("label", "unknown")
     policy = ANGLE_POLICY.get(regime, ANGLE_POLICY["unknown"])
     hooks: List[Dict[str, Any]] = []
     hooks += _news_hooks(ctx.get("news") or {})
     hooks += _regime_hooks(regime, ctx.get("fear_greed") or {})
+    hooks += _funding_hooks(ctx.get("crypto_movers_detail") or {}, regime)
     hooks += _mover_hooks(ctx.get("crypto_movers") or [], "crypto", regime)
-    hooks += _mover_hooks(ctx.get("equity_movers") or [], "equities", regime)
-    hooks += _mover_hooks(ctx.get("commodity_movers") or [], "commodities", regime)
+    hooks += _mover_hooks(ctx.get("equity_movers") or [], "equities (HL perps)", regime)
+    hooks += _mover_hooks(ctx.get("index_movers") or [], "indices (HL perps)", regime)
+    hooks += _mover_hooks(ctx.get("commodity_movers") or [], "commodities (HL perps)", regime)
     hooks += _calendar_hooks(ctx.get("calendar") or [])
     allowed = [h for h in hooks if h.get("angle") not in policy["block"]]
     blocked = [h["id"] for h in hooks if h.get("angle") in policy["block"]]

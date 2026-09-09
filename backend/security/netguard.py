@@ -96,7 +96,7 @@ class GuardedSession(requests.Session):
 # ── scope definitions ─────────────────────────────────────────────────────────
 MOENGAGE_HOSTS = ["*.moengage.com"]
 MARKET_HOSTS = [
-    "api.coingecko.com", "api.binance.com", "fapi.binance.com", "www.okx.com", "api.coindcx.com", "api.coincap.io", "rest.coincap.io",
+    "api.hyperliquid.xyz", "api.coingecko.com", "api.binance.com", "fapi.binance.com", "www.okx.com", "api.coindcx.com", "api.coincap.io", "rest.coincap.io",
     "query1.finance.yahoo.com", "query2.finance.yahoo.com", "stooq.com",
     "api.alternative.me", "nfs.faireconomy.media",
     "news.google.com", "feeds.feedburner.com", "www.coindesk.com", "coindesk.com",

@@ -43,6 +43,10 @@
             <button class="btn ghost sm" id="ov-refresh-btn" data-icon="refresh" title="Refresh"></button>
           </div>
         </div>
+        <div class="card mb" id="ov-walk" hidden>
+          <div class="card-head"><h3>Demo walkthrough</h3><div class="actions"><span class="small dim" id="ov-walk-meta"></span><button class="btn sm" id="ov-walk-seed" data-icon="zap">Re-seed 30 days</button><button class="btn ghost sm" id="ov-walk-hide">Hide</button></div></div>
+          <div id="ov-walk-steps" class="steps"></div>
+        </div>
         <div class="grid grid-5 mb" id="ov-tiles"></div>
         <div class="ov-grid">
           <div class="stack">
@@ -84,14 +88,13 @@
         <div class="chat-layout">
           <div>
             <div class="page-head" style="margin-bottom:8px">
-              <div><h2>Agent</h2><div class="sub">Tool-using assistant over your local data. Nothing leaves this machine except calls to the LLM provider you configure.</div></div>
+              <div><h2>Agent</h2><div class="sub">Every idea it produces is captured in the Markets &amp; growth hacks feed. <span class="mono dim" id="agent-model"></span></div></div>
               <div class="actions">
-                <span class="small dim mono" id="agent-model"></span>
-                <button class="btn sm" id="agent-clear-btn" data-icon="trash">Clear history</button>
+                <button class="btn ghost sm" id="agent-clear-btn" data-icon="trash">Clear</button>
               </div>
             </div>
             <div id="agent-llm-callout"></div>
-            <div class="quick" id="agent-quick"></div>
+            <div class="quick" id="agent-quick" hidden></div>
           </div>
           <div class="chat-log" id="chat-log"></div>
           <div class="composer">
@@ -121,14 +124,19 @@
           </div>
           <div id="an-report"></div>
         </div>
+        <div class="card mt">
+          <div class="card-head"><h3>Deep diagnosis — ranked</h3><span class="small dim">funnel stage that moved · likely causes · practical options</span></div>
+          <div id="an-diag-list"></div>
+        </div>
         <div class="grid grid-2 mt">
           <div class="card">
             <div class="card-head"><h3>Tracked campaigns</h3><span class="small dim" id="an-tracked-meta"></span></div>
             <div id="an-tracked"></div>
           </div>
           <div class="card">
-            <div class="card-head"><h3>History</h3><span class="small dim" id="an-history-title">Select a campaign</span></div>
+            <div class="card-head"><h3>History &amp; diagnosis</h3><span class="small dim" id="an-history-title">Select a campaign</span></div>
             <div id="an-history"></div>
+            <div id="an-diag"></div>
           </div>
         </div>
         <div class="card mt">

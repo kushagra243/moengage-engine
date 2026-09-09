@@ -540,6 +540,12 @@ def competitor_benchmarks(category: Optional[str] = None, force: bool = False) -
     return benchmarks.benchmarks(category, force=force)
 
 
+def competitor_campaigns(hours: int = 48, venue: Optional[str] = None, force: bool = False) -> Dict[str, Any]:
+    """What competitors are running right now (last N hours): announcements (Binance, Bybit, OKX, Bitget), blog posts, Google News per Indian venue, App Store release notes — classified (trading_competition, fee_promo, cashback_bonus, stock_perps, options, listing, product_launch, earn_apy, referral, festival_offer…) and ranked by impact with our counter SOP; plus App Store Finance rank / rating / version for us and rivals. Internal only."""
+    from ..market import campaign_intel
+    return campaign_intel.campaigns(hours=hours, venue=venue, force=force)
+
+
 def pair_battle(symbol: str) -> Dict[str, Any]:
     """One pair across every tracked venue: 24h volume, share, OI, funding, 24h change; whether we list it."""
     from ..market import competitors
@@ -774,6 +780,7 @@ TOOL_SCHEMAS: List[Dict[str, Any]] = [
     _fn("run_sop", "Run an SOP on a cohort: resolve segment (name or family → latest version), pre-flight, then one approval-gated proposal per step. Write variants_by_step per crypto-copywriting; dry_run first to see the plan.", {"sop_id": STR, "segment_name": STR, "start_date": STR, "variants_by_step": OBJ, "dry_run": {"type": "boolean"}}, ["sop_id"]),
     _fn("competitor_intel", "Internal competitive picture vs tracked Indian/global venues: volume table, pair battles (our share), surges elsewhere, listing gaps, our edges, funding edges, ranked actions with owner + SOP. Internal only.", {"force": {"type": "boolean"}}),
     _fn("competitor_benchmarks", "Category leaderboards (spot / perps / options / commodities_tokenised) across Indian and global venues with our gap multiple and pair-level targets to match. Internal.", {"category": {"type": "string", "enum": ["spot", "perps", "options", "commodities_tokenised"]}, "force": {"type": "boolean"}}),
+    _fn("competitor_campaigns", "Competitor campaigns detected in the last N hours from announcements, blogs, news and App Store notes — type, impact, counter SOP; App Store ranks. Internal.", {"hours": {"type": "integer"}, "venue": STR, "force": {"type": "boolean"}}),
     _fn("pair_battle", "One pair across all tracked venues: volume share, OI, funding, change; whether we list it.", {"symbol": STR}, ["symbol"]),
     _fn("web3_trending", "Trending on-chain tokens on our Web3 chains (quality-gated, unverified, paid boosts separate). Data for analysis; copy never picks tokens or names the data venue.", {"chain": STR, "force": {"type": "boolean"}}),
     _fn("product_cohorts", "Families grouped by product affinity with reach/performance and the product treatment matrix (pillars, cadence, never-list, cross-sell on intent, SOPs, Tier-0 lens)."),
@@ -812,5 +819,5 @@ TOOLS: Dict[str, Callable[..., Dict[str, Any]]] = {
     "north_star": _safe(north_star), "set_north_star": _safe(set_north_star), "comms_limits": _safe(comms_limits), "set_comms_limits": _safe(set_comms_limits), "peace_index": _safe(peace_index),
     "guardrail_monitor": _safe(guardrail_monitor), "write_flight_plan": _safe(write_flight_plan), "flight_plans": _safe(flight_plans),
     "segment_study": _safe(segment_study), "define_nomenclature": _safe(define_nomenclature), "list_sops": _safe(list_sops), "sop_detail": _safe(sop_detail), "define_sop": _safe(define_sop), "run_sop": _safe(run_sop), "sop_runs": _safe(sop_runs), "channel_matrix": _safe(channel_matrix),
-    "competitor_intel": _safe(competitor_intel), "competitor_benchmarks": _safe(competitor_benchmarks), "pair_battle": _safe(pair_battle), "web3_trending": _safe(web3_trending), "product_cohorts": _safe(product_cohorts), "announcement_lenses": _safe(announcement_lenses), "request_data": _safe(request_data), "data_requests": _safe(data_requests),
+    "competitor_intel": _safe(competitor_intel), "competitor_benchmarks": _safe(competitor_benchmarks), "competitor_campaigns": _safe(competitor_campaigns), "pair_battle": _safe(pair_battle), "web3_trending": _safe(web3_trending), "product_cohorts": _safe(product_cohorts), "announcement_lenses": _safe(announcement_lenses), "request_data": _safe(request_data), "data_requests": _safe(data_requests),
 }

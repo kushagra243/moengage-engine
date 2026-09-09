@@ -62,6 +62,9 @@ Heavy work goes to the free bulk tier (`llm_model_bulk=auto-free`): autopilot, d
 ## Privacy defaults (real workspace data is involved)
 Outbound HTTP only through `guarded_session` allowlists; the agent may not read per-user endpoints (`api_catalog.is_pii_endpoint`: customer export, cards, experiences, preferences, GDPR, archival) — they are blocked in `call_documented` and flagged in the catalog; `redact()` masks keys, tokens, cookies, emails, Indian phone numbers, PAN and Aadhaar before anything reaches logs, prompts or the model; OpenRouter requests carry `provider.data_collection=deny` by default (`llm_data_collection`) so prompts never go to providers that store or train on them — free models that require data collection are skipped and the chain falls back; nothing under `data/` is tracked by git; code-change drafting runs in a git worktree that contains no `data/`.
 
+## Campaign listening
+`backend/market/campaign_intel.py` → `/api/market/competitor-campaigns`, tool `competitor_campaigns`, terminal Intel "Campaigns detected" + App Store panel. Free channels only (exchange announcement APIs, Mudrex RSS, Google News per venue, App Store lookup/rank feeds); keyword classification; persisted 30 days; MATERIAL items feed actions/hooks with the counter SOP.
+
 ## Category benchmarks
 `backend/market/benchmarks.py` → `/api/market/benchmarks`, agent tool `competitor_benchmarks`, terminal Intel → "Best in industry". Spot / perps / options / commodities-tokenised leaderboards across Binance, OKX, Bybit, Bitget, Coinbase, Kraken, KuCoin, Gate, MEXC, HTX, Deribit, Hyperliquid (reference) and the Indian venues, from CMC listings + direct public tickers; our figure per category (spot = CMC; perps/tokenised = liquidity-venue reference; options unknown), gap multiples to the India and global leaders, and pair-level "match their numbers" targets. Daily rows kept 120 days for trends.
 

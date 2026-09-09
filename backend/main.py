@@ -917,6 +917,12 @@ def market_competitors(force: bool = False):
     return competitors.intel({"crypto_markets": ctx.get("crypto_markets") or []}, force=force)
 
 
+@app.get("/api/market/competitor-campaigns")
+def market_competitor_campaigns(hours: int = 48, venue: Optional[str] = None, force: bool = False):
+    from .market import campaign_intel
+    return campaign_intel.campaigns(hours=hours, venue=venue, force=force)
+
+
 @app.get("/api/market/benchmarks")
 def market_benchmarks(category: Optional[str] = None, force: bool = False):
     from .market import benchmarks

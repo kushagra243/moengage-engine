@@ -19,6 +19,9 @@ Four categories, each with India and international leaders and our gap multiple:
 - **Commodities / tokenised**: Bybit, Bitget, OKX, Gate RWA symbols (gold, silver, oil, indices, tokenised stocks) vs our builder-dex markets (reference).
 `targets` translate the gap into numbers: daily volume needed to match the India leader and the global leader, a first step to 25 % of the leader, and the leader's top pairs where we are furthest behind (with the SOP to run or "not listed here" for product). Trends: a daily row per venue/category is kept 120 days.
 
+## Campaign listening (`competitor_campaigns`, Intel → Campaigns detected)
+Sources (free): Binance CMS announcements, Bybit and OKX announcement APIs, Bitget announcements (news, listings, product updates), Mudrex blog RSS, Google News per Indian venue (Delta, CoinSwitch, Mudrex, WazirX, ZebPay, Pi42, plus Binance/Bybit/Bitget/Coinbase/OKX India), App Store release notes and Finance-chart ranks (India) for CoinDCX and rivals. Keyword classification into trading_competition, fee_promo, cashback_bonus, stock_perps, options, listing, product_launch, earn_apy, airdrop, referral, learn_earn, festival_offer, vip_program (delisting/maintenance are noise). Ranked by type weight × recency × venue pressure; MATERIAL items become `counter_campaign` actions and hooks. Counters are our SOPs — never a matched bonus, never a named rival: competitions → volume-ranked competition or asset spotlight; fee promos → total-cost transparency and tiers; bonuses → habit tools and a 14-day watch on deposit rate; stock perps / options → education to intent users and a product check; listings → spotlight or listing request; launches → adoption plan if we have the feature.
+
 ## Actions and owners
 | type | trigger | owner | what happens | SOP |
 |---|---|---|---|---|

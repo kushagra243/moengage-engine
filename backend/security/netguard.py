@@ -111,6 +111,7 @@ MARKET_HOSTS = [
     "api.india.delta.exchange", "api.delta.exchange", "api.wazirx.com", "api.bybit.com",   # competitive intelligence: public tickers (keyless)
     "api.coinmarketcap.com",                                                                 # CMC public data-api: exchange market pairs / listings (keyless)
     "eapi.binance.com", "api.bitget.com", "www.deribit.com",                                 # category benchmarks: Binance options, Bitget futures, Deribit options (keyless)
+    "www.binance.com", "itunes.apple.com", "mudrex.com",                                    # campaign listening: Binance CMS announcements, App Store lookup/rank feeds, Mudrex blog RSS
 ]
 
 _sessions: Dict[str, GuardedSession] = {}

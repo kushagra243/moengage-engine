@@ -385,7 +385,16 @@ def intel() -> Dict[str, Any]:
         moves.append({"t": _ago(g.get("first_seen_there")) if g.get("first_seen_there") else "—", "what": f"{g['symbol']} {g['product']} trades ${(g['their_vol_usd'] or 0) / 1e6:.1f}M/24h at {g['competitor']}; not listed here", "chan": "listing", "impact": "OPPORTUNITY", "c": "#4dffa8"})
     sov = [{"name": t["name"] if t["exchange"] != "coindcx" else "Ours", "pct": t.get("share_of_tracked_inr_spot_pct"), "c": "#6fe3ff" if t["exchange"] == "coindcx" else "#7d95a3"} for t in (ci.get("exchanges") or []) if t.get("share_of_tracked_inr_spot_pct") is not None]
     sov.sort(key=lambda s: -(s["pct"] or 0))
-    return {"rivals": rivals, "moves": moves[:12], "sov": sov, "actions": acts[:10], "note": ci.get("note"), "generated_at": ci.get("generated_at")}
+    camps = []; apps = {}
+    try:
+        from .market.campaign_intel import campaigns as _camps
+        cc = _camps(hours=48)
+        camps = cc.get("campaigns") or []; apps = cc.get("apps") or {}
+        for c in camps[:6]:
+            moves.insert(0, {"t": _ago(c.get("published_at") or c.get("first_seen")), "what": f"{c['venue']}: {c['title'][:100]}", "chan": c["type"].replace("_", " "), "impact": c["impact"], "c": "#ff5c9e" if c["impact"] == "MATERIAL" else "#ffb84d" if c["impact"] == "WATCH" else "#7d95a3"})
+    except Exception:
+        pass
+    return {"rivals": rivals, "moves": moves[:14], "sov": sov, "actions": acts[:10], "campaigns": camps[:20], "apps": apps, "note": ci.get("note"), "generated_at": ci.get("generated_at")}
 
 
 def anomalies_view() -> List[Dict[str, Any]]:

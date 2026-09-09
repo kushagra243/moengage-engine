@@ -167,7 +167,9 @@ def _web3_hooks(web3: Dict[str, Any], regime: str) -> List[Dict[str, Any]]:
 def _competitor_hooks(ci: Dict[str, Any], regime: str) -> List[Dict[str, Any]]:
     out = []
     for a in (ci or {}).get("actions") or []:
-        if a.get("type") not in ("counter_surge", "press_advantage", "share_defence"):
+        if a.get("type") not in ("counter_surge", "press_advantage", "share_defence", "counter_campaign"):
+            continue
+        if a.get("type") == "counter_campaign" and not a.get("sop"):
             continue
         out.append({"id": f"compete_{a['type']}_{a['symbol']}", "trigger": a["what"], "asset_class": "competitive", "regime": regime,
                     "segments": [f"{a['symbol']} watchers / holders / traders (30d)", "Habitual traders of the sector"], "clm_stages": ["Habitual", "Core"],

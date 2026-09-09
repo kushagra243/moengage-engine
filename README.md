@@ -11,92 +11,85 @@ Nothing leaves your machine except the calls you configure: MoEngage
 feeds. Cookies and API keys are encrypted at rest with a key held in the macOS
 Keychain, are never logged, and never enter an LLM prompt.
 
-## Quick start
+## Setup, step by step (clone `main`)
 
-Setting this up on a fresh Mac with the Claude Code login as the model?
-Follow [SETUP-MAC.md](SETUP-MAC.md) (10 minutes, no API keys).
+Every command runs in a terminal on the Mac that will run the engine.
 
+**1. Prerequisites** (skip what you already have)
 ```bash
-python3 start.py          # creates .venv (Python ≥ 3.10), installs deps, serves http://127.0.0.1:8080
+xcode-select --install
+brew install python@3.12 node
 ```
 
-The server binds to loopback only. The UI receives a per-process token that
-every API call must carry, so a page in another tab cannot drive the engine.
-
-Then in **Settings**:
-
-1. **LLM** — pick one of the provider options below and click *Test LLM*.
-2. **Integration** — see *Connecting to MoEngage* below. Turn off *Demo/mock mode*.
-3. Run *Test connection*, then *Verify endpoints*.
-
-### LLM provider options
-
-| Provider | When to use | Setup |
-|---|---|---|
-| `openrouter` (default) | Any frontier model by id, one key | Paste the key in Settings → LLM, set model (e.g. `anthropic/claude-sonnet-4.5`), *Load models* to browse. |
-| `openai_compatible` | OpenAI, Groq, Together, Ollama, LM Studio | Set base URL (`https://api.openai.com/v1`, `http://127.0.0.1:11434/v1` …) and key (empty for local servers). |
-| `claude_cli` | No API key: reuse the Claude Code login already on this device | See below. |
-
-**Claude CLI on a new device (no key needed)**
-
+**2. Clone and set up**
 ```bash
-# 1. install Claude Code if it is not there yet
-npm install -g @anthropic-ai/claude-code
-# 2. log in once in a terminal (opens the browser)
+git clone https://github.com/kushagra243/moengage-engine.git && cd moengage-engine
+./setup.sh --no-start
+```
+Creates `.venv`, installs dependencies, creates the encryption key in your Keychain (allow once), initialises `data/agent.db`, runs the tests.
+
+**3. Choose the model**
+
+No API key, using your Claude Code login:
+```bash
 claude login
-# 3. sanity check: should answer without an auth error
-claude -p "reply with ok" --output-format json
-# 4. point the engine at it
-./cli.py set llm_provider claude_cli
-./cli.py set llm_model claude-sonnet-5
+./cli.py set llm_provider claude_cli && ./cli.py set llm_model claude-sonnet-5
+```
+Or an OpenRouter key, entered once (hidden prompt, stored encrypted):
+```bash
+./cli.py set llm_provider openrouter && ./cli.py set llm_base_url https://openrouter.ai/api/v1 && ./cli.py set llm_model anthropic/claude-sonnet-4.5
+./cli.py set-key llm
 ```
 
-The engine drives `claude -p` headlessly and emulates tool calling through a
-strict JSON protocol. If the login lapses, the LLM probe reports
-"OAuth session expired" and `claude login` fixes it. Nothing else changes:
-the same redaction, tool set and approval gate apply.
-
-### Simulated model (exercise the agent loop with no key at all)
-
-`tools/sim_llm.py` is a local OpenAI-compatible server that is *not* a model:
-it is a scripted marketer that drives the real tool protocol (status →
-programme audit → anomalies → market hooks → segment + campaign proposals with
-a full goal brief) and writes its answer from the actual tool results. Every
-reply is labelled `[SIMULATED MODEL]`.
-
+**4. Enter MoEngage keys once** (MoEngage → Settings → Account → API keys; region = your dashboard host, `dashboard-03` for India)
 ```bash
-.venv/bin/python tools/sim_llm.py &            # 127.0.0.1:8791
-./cli.py set llm_provider openai_compatible
-./cli.py set llm_base_url http://127.0.0.1:8791/v1
-./cli.py set llm_model sim/marketer-v1
-./cli.py set-key llm --value sim
-./cli.py chat "Audit the programme and propose a reactivation campaign"
+./cli.py set moengage_region dashboard-03.moengage.com
+./cli.py set moengage_app_id YOUR_WORKSPACE_ID
+./cli.py set-key data
+./cli.py set-key segmentation
+./cli.py set-key campaigns
+./cli.py set-key inform          # optional
+./cli.py set mock_mode false && ./cli.py probe-keys
 ```
 
-Switch back to a real model by changing the provider/base URL/key in Settings.
-
-### Mock walkthrough (no MoEngage access, no LLM key)
-
-Demo/mock mode is on by default. This exercises every non-LLM path end to end:
-
+**5. Optional: dashboard session** (only for dashboard-only actions such as creating flows). In Chrome: log in to MoEngage → DevTools → Network → click any dashboard request → copy *Request Headers* → save to a file.
 ```bash
-./cli.py status                      # mode, transports, integration counts
-./cli.py campaigns                   # 6 simulated campaigns, tagged src=mock
-./cli.py snapshot                    # record today's metrics + run detection
-./cli.py anomalies                   # report (thin history → hard rules / peer checks)
-./cli.py market --hooks              # live regime, movers, news risk flags, campaign hooks
+./cli.py set-cookies --file ~/Downloads/headers.txt
+./cli.py verify
+```
+
+**6. Start and check**
+```bash
+python3 start.py          # console at http://127.0.0.1:8080
+```
+In a second terminal:
+```bash
+./cli.py status && ./cli.py campaigns
+```
+
+**7. First end-to-end run**
+```bash
+./cli.py daily-run
+./cli.py chat "Audit the programme, find the outliers and propose one campaign for the biggest lifecycle gap. Record every idea."
 ./cli.py approvals list --status pending
-./cli.py daily-run                   # snapshot → anomalies → market → (brief if LLM set)
-./cli.py audit-log -n 10             # hash-chained audit trail
+./cli.py approvals show 1
+./cli.py approvals approve 1 --note "looks right"     # nothing reaches MoEngage before this
 ```
 
-In the UI the same flow is Overview → *Record snapshot now* → Anomalies →
-Market → Approvals → *New proposal* (a `create_campaign` payload must include
-a `goal` block or it is refused) → Approve → Integration → audit log. Once an
-LLM is configured, the Agent tab and the daily brief light up; in mock mode
-the agent labels every number as simulated.
+**8. Keep it running without a model or credits**
+```bash
+./cli.py service install && ./cli.py service status
+```
 
-The CLI mirrors the UI: `./cli.py status | set-key | set-cookies | learn | verify | campaigns | snapshot | anomalies | market | chat | approvals | daily-run | audit-log`.
+**9. Housekeeping**
+```bash
+./cli.py set-key campaigns                                # rotate a key
+git pull && ./setup.sh --no-start                         # update
+./cli.py service uninstall && rm -rf data && security delete-generic-password -s moengage-engine -a master-key   # wipe
+```
+
+Prefer to have Claude do steps 2–7? Run `claude` inside the folder and type `/setup`.
+Full detail, storage map and team hosting: [SETUP-MAC.md](SETUP-MAC.md), [HOSTING.md](HOSTING.md).
 
 ## Connecting to MoEngage
 

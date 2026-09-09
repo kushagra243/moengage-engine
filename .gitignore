@@ -28,3 +28,6 @@ data/cache/
 
 # learned/verified/discovered endpoint state is per-workspace local state
 data/endpoints.*.json
+
+# dev-agent worktrees (code-change drafts)
+data/worktrees/

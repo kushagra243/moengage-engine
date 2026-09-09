@@ -113,6 +113,38 @@ class PublicAPI:
         return {"status": r.status_code, "data": data, "endpoint": name, "doc": ep.get("doc"),
                 "ratelimit_remaining": r.headers.get("x-ratelimit-remaining")}
 
+    def call_documented(self, method: str, path: str, path_vars: Optional[Dict[str, str]] = None, params=None, body: Optional[Dict[str, Any]] = None, timeout: float = 30.0) -> Dict[str, Any]:
+        """Call any *documented, read-safe* MoEngage API from the local catalog (GET, or POST search/meta/stats style).
+        Writes are refused here; they go through approved proposals. The catalog decides which key kind authenticates."""
+        from ..api_catalog import find_operation
+        op = find_operation(method, path)
+        if not op:
+            raise PublicAPIError(f"{method.upper()} {path} is not a documented MoEngage API (see moengage_api_reference)")
+        if not op.get("read_safe"):
+            raise PublicAPIError(f"{op['method']} {op['full_path']} is a write; it must go through an approved proposal")
+        pth = op["path"]
+        for k, v in (path_vars or {}).items():
+            pth = pth.replace("{" + k + "}", str(v))
+        for var in ("app_id", "Workspace_ID", "APP_ID", "appId", "workspace_id"):
+            pth = pth.replace("{" + var + "}", self.app_id)
+        if "{" in pth:
+            raise PublicAPIError(f"unfilled path variables in {pth}; pass path_vars")
+        server = (op.get("server") or self.host).replace("{dc}", self.dc)
+        url = server.rstrip("/") + pth
+        if isinstance(body, dict) and "request_id" not in body and op["method"] == "POST" and ("core-services" in server or pth.startswith("/v5/")):
+            body = {**body, "request_id": str(uuid.uuid4())}
+        headers = self._headers({"key": op.get("key_kind", "data"), "appkey_header": True})
+        r = self.http.request(op["method"], url, headers=headers, json=body, params=params, timeout=timeout)
+        try:
+            data = r.json()
+        except ValueError:
+            data = {"_raw": redact(r.text[:1000])}
+        if r.status_code in (401, 403):
+            raise PublicAPIError(f"auth rejected (HTTP {r.status_code}) for {op['method']} {pth}: check Workspace ID, the {op.get('key_kind')} key and data centre api-{self.dc}")
+        if r.status_code >= 400:
+            raise PublicAPIError(f"{op['method']} {pth}: HTTP {r.status_code}: {redact(json.dumps(data)[:400])}")
+        return {"status": r.status_code, "data": data, "url": redact(url), "doc": op.get("doc_url"), "ratelimit_remaining": r.headers.get("x-ratelimit-remaining")}
+
     # ── reads ────────────────────────────────────────────────────────────
     def test_connection(self) -> Dict[str, Any]:
         return self.call("test_connection", body={}, write=False)

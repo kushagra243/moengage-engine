@@ -4,6 +4,7 @@ description: Set up moengage-engine on this machine after clone (venv, deps, Cla
 
 You are setting up this repository on a freshly cloned machine. Do the steps below yourself with the Bash tool; ask the user only for the two things that need their browser (Claude login and MoEngage headers).
 
+0. Read `CLAUDE.md` (project memory) and skim `.claude/skills/moengage-engine/SKILL.md`. If `.venv` already exists this is a re-run: setup skips installs automatically; do not delete or recreate the venv, and do not reinstall Claude Code or Python.
 1. Run `./setup.sh --no-start` from the repo root and read its output. Fix anything it warns about:
    - Python ≥ 3.10 missing → install with Homebrew (`brew install python@3.12`) and re-run.
    - Claude Code missing → `npm install -g @anthropic-ai/claude-code` (install Node with `brew install node` first if needed).

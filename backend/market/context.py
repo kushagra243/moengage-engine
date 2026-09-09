@@ -8,7 +8,7 @@ from typing import Any, Dict, List, Optional
 
 from ..database import get_db, get_setting
 from ..security import redact
-from . import sources, regime as regime_mod, news as news_mod
+from . import sources, regime as regime_mod, news as news_mod, exchanges
 from .hooks import build_hooks
 
 
@@ -55,8 +55,17 @@ def market_context(force: bool = False, include_news: bool = True) -> Dict[str, 
             c["cached"] = True
             return c
     from concurrent.futures import ThreadPoolExecutor
-    universe = _lst("market_universe", "BTC,ETH,SOL,XRP,BNB,DOGE")
     ctx: Dict[str, Any] = {"generated_at": datetime.now(timezone.utc).isoformat(), "errors": []}
+    # exchange-native universe first: everything below is restricted to what Binance / Hyperliquid list
+    try:
+        uni = exchanges.universe()
+    except Exception as e:
+        uni = {"ok": False, "crypto": [], "crypto_all_symbols": [], "equities": [], "indices": [], "commodities": [], "fx": [], "counts": {}}
+        ctx["errors"].append("exchanges: " + redact(str(e)))
+    ctx["universe"] = {k: uni.get(k) for k in ("mode", "top_n", "counts", "fetched_at", "ok")}
+    listed = set(uni.get("crypto_all_symbols") or [])
+    regime_syms = [r["symbol"] for r in uni.get("crypto", [])[:20]]
+    universe = list(dict.fromkeys(["BTC", "ETH", "SOL"] + regime_syms))
 
     def step(name, fn):
         try:
@@ -66,15 +75,16 @@ def market_context(force: bool = False, include_news: bool = True) -> Dict[str, 
 
     steps = {
         "crypto": lambda: regime_mod.crypto_regime(universe),
-        "crypto_markets": lambda: sources.coingecko_markets(universe),
+        "crypto_markets": lambda: [dict(r, name=r["symbol"]) for r in uni.get("crypto", [])],
         "crypto_global": sources.coingecko_global,
         "crypto_trending": sources.coingecko_trending,
         "fear_greed": sources.fear_greed,
         "stocks_fear_greed": sources.cnn_fear_greed,
-        "inr_marks": lambda: {k: v for k, v in sources.coindcx_ticker().items() if k in universe},
-        "equities": lambda: sources.quotes(_lst("market_equities", "^GSPC,^NDX,^NSEI,^BSESN")),
-        "commodities": lambda: sources.quotes(_lst("market_commodities", "GC=F,SI=F,CL=F,BZ=F,NG=F")),
-        "macro": lambda: sources.quotes(_lst("market_macro", "DX-Y.NYB,^TNX,^VIX,INR=X")),
+        "inr_marks": lambda: sources.coindcx_ticker(),
+        "equities": lambda: uni.get("equities", []),
+        "indices": lambda: uni.get("indices", []),
+        "commodities": lambda: uni.get("commodities", []),
+        "macro": lambda: uni.get("fx", []),
         "calendar": sources.econ_calendar,
     }
     if include_news:
@@ -89,9 +99,19 @@ def market_context(force: bool = False, include_news: bool = True) -> Dict[str, 
                 ctx["news"] = {"risk_flags": val["risk_flags"], "top": {k: v[:6] for k, v in val["categories"].items()}, "errors": val["errors"]}
             else:
                 ctx[name] = val
-    ctx["crypto_movers"] = _movers(ctx.get("crypto_markets") or [])
+    mv = exchanges.movers(uni.get("crypto", []))
+    ctx["crypto_movers"] = (mv["up"][:4] + mv["down"][:4])
+    ctx["crypto_movers_detail"] = mv
     ctx["equity_movers"] = _movers(ctx.get("equities") or [])
+    ctx["index_movers"] = _movers(ctx.get("indices") or [])
     ctx["commodity_movers"] = _movers(ctx.get("commodities") or [])
+    # trending only if tradable on our venues
+    ctx["crypto_trending"] = [t for t in (ctx.get("crypto_trending") or []) if t.get("symbol") in listed]
+    ctx["inr_marks"] = {k: v for k, v in (ctx.get("inr_marks") or {}).items() if k in listed}
+    try:
+        ctx["sources"] = sources.source_status()
+    except Exception:
+        ctx["sources"] = {}
     ctx["hooks"] = build_hooks(ctx)
     ctx["narrative"] = narrative(ctx)
     _init()
@@ -105,22 +125,30 @@ def market_context(force: bool = False, include_news: bool = True) -> Dict[str, 
 def narrative(ctx: Dict[str, Any]) -> str:
     cr = ctx.get("crypto") or {}
     reg = cr.get("regime") or {}
-    lines = [f"Crypto regime: {reg.get('label','unknown')} ({', '.join(reg.get('reasons', []))})."]
+    u = (ctx.get("universe") or {}).get("counts") or {}
+    lines = [f"Universe: {u.get('binance_usdt_pairs', 0)} Binance USDT pairs, {u.get('hyperliquid_perps', 0)} Hyperliquid perps ({u.get('on_both', 0)} on both); {u.get('hl_builder_assets', 0)} equity/index/commodity perps on HL builder dexes. All figures below are restricted to these.",
+             f"Crypto regime: {reg.get('label','unknown')} ({', '.join(reg.get('reasons', []))})."]
     btc = (cr.get("assets") or {}).get("BTC")
     if btc:
         lines.append(f"BTC {btc['price']} ({btc['chg_24h']:+.1f}% 24h, {btc['chg_7d']:+.1f}% 7d, {btc['chg_30d']:+.1f}% 30d), {btc['drawdown_from_30d_high']}% off 30d high, vol pct {btc['vol_percentile']}.")
     fg = ctx.get("fear_greed") or {}
     if fg:
         lines.append(f"Fear & Greed {fg.get('value')} ({fg.get('label')}).")
-    if ctx.get("crypto_movers"):
-        lines.append("Crypto movers 24h: " + ", ".join(f"{m['symbol']} {m['chg_24h']:+.1f}%" for m in ctx["crypto_movers"][:5]) + ".")
+    md = ctx.get("crypto_movers_detail") or {}
+    if md.get("up"):
+        lines.append("Top gainers 24h (≥$1M vol): " + ", ".join(f"{m['symbol']} {m['chg_24h']:+.1f}%" for m in md["up"][:5]) + ".")
+    if md.get("down"):
+        lines.append("Top losers 24h: " + ", ".join(f"{m['symbol']} {m['chg_24h']:+.1f}%" for m in md["down"][:5]) + ".")
+    if md.get("crowded_long"):
+        lines.append("Crowded longs (funding APR): " + ", ".join(f"{m['symbol']} {m['funding_apr_pct']:+.0f}%" for m in md["crowded_long"][:4]) + ".")
+    if md.get("crowded_short"):
+        lines.append("Crowded shorts: " + ", ".join(f"{m['symbol']} {m['funding_apr_pct']:+.0f}%" for m in md["crowded_short"][:4]) + ".")
     if ctx.get("equity_movers"):
-        lines.append("Equities: " + ", ".join(f"{m['name']} {m['chg_24h']:+.1f}%" for m in ctx["equity_movers"][:5]) + ".")
+        lines.append("HL equity perps: " + ", ".join(f"{m['name']} {m['chg_24h']:+.1f}%" for m in ctx["equity_movers"][:5]) + ".")
+    if ctx.get("index_movers"):
+        lines.append("HL index perps: " + ", ".join(f"{m['name']} {m['chg_24h']:+.1f}%" for m in ctx["index_movers"][:4]) + ".")
     if ctx.get("commodity_movers"):
-        lines.append("Commodities: " + ", ".join(f"{m['name']} {m['chg_24h']:+.1f}%" for m in ctx["commodity_movers"][:5]) + ".")
-    mac = ctx.get("macro") or []
-    if mac:
-        lines.append("Macro: " + ", ".join(f"{m['name']} {m['price']}" + (f" ({m['chg_24h']:+.1f}%)" if m.get("chg_24h") is not None else "") for m in mac) + ".")
+        lines.append("HL commodity perps: " + ", ".join(f"{m['name']} {m['chg_24h']:+.1f}%" for m in ctx["commodity_movers"][:5]) + ".")
     risk = ((ctx.get("news") or {}).get("risk_flags")) or []
     if risk:
         lines.append(f"Risk headlines ({len(risk)}): " + "; ".join(r["title"][:70] for r in risk[:3]) + ".")

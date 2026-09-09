@@ -13,6 +13,24 @@ def _ago(h: int) -> str:
     return (datetime.now() - timedelta(hours=h)).strftime("%Y-%m-%d %H:%M")
 
 
+FAULTS = {"cmp_002": {"ctr": 4.1, "opened_count": 1650}, "cmp_004": {"delivery_rate": 71.0, "delivered_count": 129504}, "cmp_006": {"revenue_generated": 214000.0}}
+
+
+def _todays_faults() -> Dict[str, Dict[str, Any]]:
+    """Demo scenario: the faults injected by seed_history persist for that calendar day,
+    so re-snapshots and the daily process keep showing them instead of overwriting."""
+    try:
+        from ..database import get_setting
+        import json as _json
+        raw = get_setting("mock_scenario", "")
+        if not raw:
+            return {}
+        sc = _json.loads(raw)
+        return sc.get("faults", {}) if sc.get("date") == datetime.now().date().isoformat() else {}
+    except Exception:
+        return {}
+
+
 def campaigns(jitter: bool = False) -> List[Dict[str, Any]]:
     base = [
         {"id": "cmp_001", "name": "Weekend Flash Sale 20% Off", "channel": "Push", "status": "Active", "target_segment": "All Active App Users",
@@ -33,7 +51,9 @@ def campaigns(jitter: bool = False) -> List[Dict[str, Any]]:
             f = random.uniform(0.93, 1.07)
             c["ctr"] = round(c["ctr"] * f, 2); c["opened_count"] = int(c["opened_count"] * f)
             c["revenue_generated"] = round(c["revenue_generated"] * random.uniform(0.9, 1.1), 2)
+    faults = _todays_faults()
     for c in base:
+        c.update(faults.get(c["id"], {}))
         c["_source"] = "mock"
     return base
 
@@ -80,3 +100,34 @@ def analytics() -> Dict[str, Any]:
 
 def whoami() -> Dict[str, Any]:
     return {"valid": True, "mode": "mock", "user": "demo.marketer@brand.com", "workspace": "Production-Retail-Demo", "_source": "mock"}
+
+
+def seed_history(days: int = 30, inject: bool = True, source: str = "mock") -> Dict[str, Any]:
+    """Write `days` of realistic daily snapshots (weekly seasonality + noise) so anomaly
+    detection, sparklines and the feed have something to work with in demo mode.
+    With inject=True the latest day carries three visible faults."""
+    from ..anomaly import record_snapshot, detect_anomalies
+    from ..anomaly.store import get_db
+    rnd = random.Random(20260907)
+    conn = get_db(); conn.execute("DELETE FROM campaign_snapshots WHERE source=?", (source,)); conn.execute("DELETE FROM anomaly_events WHERE source=?", (source,)); conn.commit(); conn.close()
+    base = campaigns()
+    today = datetime.now().date()
+    for i in range(days, 0, -1):
+        d = today - timedelta(days=i)
+        dow = 1.08 if d.weekday() >= 5 else 1.0
+        rows = []
+        for c in base:
+            f = rnd.gauss(1, 0.05); r = dict(c)
+            r["ctr"] = round(c["ctr"] * f * dow, 2); r["opened_count"] = int(c["opened_count"] * f * dow)
+            r["delivery_rate"] = round(c["delivery_rate"] + rnd.gauss(0, 0.4), 1)
+            r["conversion_rate"] = round(c["conversion_rate"] * rnd.gauss(1, 0.06), 2)
+            r["revenue_generated"] = round(c["revenue_generated"] * rnd.gauss(1, 0.08), 2)
+            rows.append(r)
+        record_snapshot(rows, source=source, snapshot_date=d.isoformat())
+    from ..database import set_setting
+    import json as _json
+    set_setting("mock_scenario", _json.dumps({"date": today.isoformat(), "faults": FAULTS if inject else {}}))
+    tod = campaigns()   # applies today's faults
+    record_snapshot(tod, source=source)
+    rep = detect_anomalies(source=source, persist=True)
+    return {"days": days, "injected": inject, "critical": rep["critical"], "warnings": rep["warnings"]}

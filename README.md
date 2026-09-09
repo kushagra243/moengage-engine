@@ -182,6 +182,43 @@ networks; when a source is unavailable the quote is simply absent and listed
 under *data gaps* rather than invented. An optional CoinGecko demo key
 (`market_coingecko_key`) raises the crypto rate limit.
 
+## Markets & growth hacks feed
+
+The Overview's right-hand column is a persistent, de-duplicated feed of things
+to try in MoEngage, re-derived from data on every run (`backend/growth.py`):
+
+- **from data, no model needed** — uncovered lifecycle transitions become
+  "stand up a standing campaign" items; bad anomalies become fixes and good
+  spikes become scale-ups; rule-audit verdicts become Flow conversions and
+  lookalike expansions; today's market hooks become market plays; trending
+  assets and high-impact macro events become educational cards and briefs;
+  and a curated library of MoEngage capabilities (Smart Triggers on price
+  events, Content APIs, BTS, control groups, frequency caps, Business Events,
+  RFM, Inform, Cards, WhatsApp fallback, suppression rules) surfaces when a
+  data condition makes it relevant.
+- **from the agent** — when a model is configured, the agent is given a data
+  digest plus the titles already in the feed and asked for genuinely new
+  ideas as JSON; they are stored with the same fields.
+
+Each item carries *why* (the data), *how* (MoEngage steps), segment, channel,
+KPI, effort and expected impact. Buttons: *Draft with agent* (turns it into
+proposals with a goal brief), *Save*, *Dismiss*. Refresh re-derives on demand.
+
+## Running persistently (no model required)
+
+```bash
+./cli.py service install        # launchd: starts at login, restarts on crash
+./cli.py service status
+./cli.py service uninstall
+```
+
+The service runs the scheduler: a full daily process at `schedule_time`
+and a model-free intraday refresh every `refresh_interval_hours` (default 6)
+that re-reads MoEngage via the API keys or dashboard session, snapshots
+metrics, detects anomalies, refreshes market context and regenerates the
+rules-based feed. Nothing calls a model unless one is configured, so it
+spends no credits.
+
 ## The agent
 
 A tool-calling loop over an OpenAI-compatible chat API (OpenRouter by default;

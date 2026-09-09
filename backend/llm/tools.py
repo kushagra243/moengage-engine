@@ -85,6 +85,15 @@ def anomaly_report(source: Optional[str] = None) -> Dict[str, Any]:
     return rep
 
 
+def campaign_diagnosis(campaign_id: Optional[str] = None) -> Dict[str, Any]:
+    """Deep diagnosis: funnel decomposition, trend stats, ranked likely causes with what to check first, and practical options (effort, effect, risk). One campaign or all."""
+    from ..anomaly.diagnose import diagnose_campaign, diagnose_all
+    src = _client().mode
+    if campaign_id:
+        return diagnose_campaign(campaign_id, src)
+    return {"source": src, "campaigns": [{k: v for k, v in d.items() if k != "stats"} for d in diagnose_all(src, 12)]}
+
+
 def campaign_history(campaign_id: str, days: int = 30) -> Dict[str, Any]:
     from ..anomaly import get_history
     return {"campaign_id": campaign_id, "history": get_history(campaign_id, _client().mode, days)}
@@ -253,6 +262,7 @@ def campaign_brief_check(goal: Dict[str, Any], variants: Optional[List[Dict[str,
 # ── write tools (proposals only) ──────────────────────────────────────────────
 def propose_segment(name: str, criteria: Dict[str, Any], rationale: str, description: str = "", estimated_reach: Optional[int] = None) -> Dict[str, Any]:
     p = approvals.propose("create_segment", f"Segment: {name}", {"name": name, "description": description, "criteria": criteria, "estimated_reach": estimated_reach}, rationale, risk="low")
+    _capture_proposal_idea("create_segment", f"Segment: {name}", {"name": name}, rationale, p["id"])
     return {"proposal_id": p["id"], "status": p["status"], "preview": p.get("preview"), "note": "Awaiting human approval in the Approvals tab."}
 
 
@@ -265,6 +275,7 @@ def propose_campaign(name: str, channel: str, target_segment: str, variants: Lis
     payload = {"name": name, "channel": channel, "target_segment": target_segment, "variants": variants, "schedule": schedule, "ttl_hours": ttl_hours,
                "market_hook_id": market_hook_id, "goal": goal, "exclusions": exclusions or [], "frequency_cap": frequency_cap}
     p = approvals.propose("create_campaign", f"Campaign draft: {name}", payload, rationale, risk="medium")
+    _capture_proposal_idea("create_campaign", f"Campaign: {name}", payload, rationale, p["id"])
     return {"proposal_id": p["id"], "status": p["status"], "preview": p.get("preview"), "brief_warnings": check["warnings"], "note": "Draft only. A human must approve before anything reaches MoEngage."}
 
 
@@ -276,6 +287,35 @@ def propose_flow(name: str, entry_trigger: str, steps: List[Dict[str, Any]], rat
 def propose_pause_campaign(campaign_id: str, rationale: str) -> Dict[str, Any]:
     p = approvals.propose("pause_campaign", f"Pause campaign {campaign_id}", {"campaign_id": campaign_id}, rationale, risk="high")
     return {"proposal_id": p["id"], "status": p["status"], "preview": p.get("preview")}
+
+
+def record_ideas(ideas: List[Dict[str, Any]]) -> Dict[str, Any]:
+    """Capture recommendations (campaigns, segments, experiments, growth hacks, fixes) into the persistent growth feed."""
+    from .. import growth
+    clean = []
+    for i in ideas or []:
+        if not isinstance(i, dict) or not i.get("title"):
+            continue
+        i = dict(i)
+        i.setdefault("kind", "growth_hack"); i.setdefault("priority", 60)
+        clean.append(i)
+    res = growth.upsert_ideas(clean, "agent")
+    return {"captured": res["added"], "already_known": res["refreshed"], "feed_counts": growth.counts()}
+
+
+def _capture_proposal_idea(kind: str, title: str, payload: Dict[str, Any], rationale: str, proposal_id: int) -> None:
+    try:
+        from .. import growth
+        goal = payload.get("goal") or {}
+        growth.upsert_ideas([{"kind": "trending_campaign" if kind == "create_campaign" else "growth_hack", "title": title, "why": rationale,
+                              "how": f"Proposal #{proposal_id} in the Approvals tab. " + (f"Goal: {goal.get('transition')} · KPI {goal.get('primary_kpi')} · holdout {goal.get('control_group_pct')}%" if goal else ""),
+                              "segment": payload.get("target_segment") or payload.get("name", ""), "channel": payload.get("channel", ""), "kpi": goal.get("primary_kpi", ""),
+                              "transition": goal.get("transition", ""), "priority": 75, "data": {"proposal_id": proposal_id}}], "agent")
+        conn_ids = [r["id"] for r in growth.list_ideas(status=None, limit=200) if r.get("data", {}).get("proposal_id") == proposal_id]
+        for cid in conn_ids:
+            growth.set_status(cid, "proposed")
+    except Exception:
+        pass
 
 
 # ── schema ────────────────────────────────────────────────────────────────────
@@ -297,6 +337,7 @@ TOOL_SCHEMAS: List[Dict[str, Any]] = [
     _fn("rule_based_audit", "Deterministic threshold audit of every campaign (CTR/delivery/conversion verdicts)."),
     _fn("anomaly_report", "Statistical outliers per campaign metric vs the campaign's own history (modified z-score / IQR). Includes days of history available.", {"source": STR}),
     _fn("campaign_history", "Daily metric snapshots for one campaign.", {"campaign_id": STR, "days": {"type": "integer"}}, ["campaign_id"]),
+    _fn("campaign_diagnosis", "Deep diagnosis of a campaign (or all): which funnel stage moved vs 28d, trend stats, ranked likely causes with evidence and what to check first, and practical options with effort/effect/risk. Use before recommending any fix.", {"campaign_id": STR}),
     _fn("market_snapshot", "Crypto regime + movers, equities/commodities/macro quotes, Fear & Greed, INR marks, high-impact calendar, data gaps.", {"force": {"type": "boolean"}}),
     _fn("market_news", "Headlines by category (crypto|stocks|commodities|macro|regulatory) or a keyword query. Risk-flagged headlines included.", {"category": STR, "query": STR, "limit": {"type": "integer"}}),
     _fn("market_campaign_hooks", "Market-derived campaign hooks with segments, angle, timing, guardrails, and the angle policy for today's regime.", {"limit": {"type": "integer"}}),
@@ -317,6 +358,8 @@ TOOL_SCHEMAS: List[Dict[str, Any]] = [
         ["name", "channel", "target_segment", "variants", "rationale", "goal"]),
     _fn("propose_flow", "Propose a DRAFT flow/journey for approval. steps: [{type: wait|split|message|cohort, ...}].",
         {"name": STR, "entry_trigger": STR, "steps": {"type": "array", "items": OBJ}, "exit_rules": {"type": "array", "items": STR}, "rationale": STR}, ["name", "entry_trigger", "steps", "rationale"]),
+    _fn("record_ideas", "Capture every recommendation you make (campaign, segment, experiment, growth hack, fix) into the persistent growth feed so nothing is lost. ideas: [{title, kind: trending_campaign|growth_hack|market_play|moengage_activity|fix, why (cite data), how (MoEngage steps), segment, channel, angle, kpi, transition, effort, expected_impact, priority}].",
+        {"ideas": {"type": "array", "items": OBJ}}, ["ideas"]),
     _fn("propose_pause_campaign", "Propose pausing a campaign (e.g. deliverability collapse or market suppression rule).", {"campaign_id": STR, "rationale": STR}, ["campaign_id", "rationale"]),
 ]
 
@@ -324,9 +367,9 @@ TOOLS: Dict[str, Callable[..., Dict[str, Any]]] = {
     "get_status": _safe(get_status), "list_campaigns": _safe(list_campaigns), "get_campaign_stats": _safe(get_campaign_stats),
     "list_segments": _safe(list_segments), "list_flows": _safe(list_flows), "get_analytics": _safe(get_analytics),
     "estimate_segment": _safe(estimate_segment), "rule_based_audit": _safe(rule_based_audit), "anomaly_report": _safe(anomaly_report),
-    "campaign_history": _safe(campaign_history), "market_snapshot": _safe(market_snapshot), "market_news": _safe(market_news),
+    "campaign_history": _safe(campaign_history), "campaign_diagnosis": _safe(campaign_diagnosis), "market_snapshot": _safe(market_snapshot), "market_news": _safe(market_news),
     "market_campaign_hooks": _safe(market_campaign_hooks), "moengage_guidance": _safe(moengage_guidance), "integration_status": _safe(integration_status),
     "list_proposals": _safe(list_proposals), "propose_segment": _safe(propose_segment), "propose_campaign": _safe(propose_campaign),
-    "clm_program_audit": _safe(clm_program_audit), "experiment_plan": _safe(experiment_plan), "campaign_brief_check": _safe(campaign_brief_check),
+    "record_ideas": _safe(record_ideas), "clm_program_audit": _safe(clm_program_audit), "experiment_plan": _safe(experiment_plan), "campaign_brief_check": _safe(campaign_brief_check),
     "propose_flow": _safe(propose_flow), "propose_pause_campaign": _safe(propose_pause_campaign),
 }

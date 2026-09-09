@@ -47,6 +47,9 @@ pkill -f start.py            # the server's cmdline is start.py, not uvicorn
 - **Scheduled job**: extend `scheduler.py` run sequence; keep model-free steps before model steps.
 - **Tests**: mirror `tests/test_agent_loop.py` (fake OpenAI server) and `tests/test_security.py`; run the suite before finishing.
 
+## Model routing
+`route_models(purpose)` in `backend/llm/provider.py`; `MarketerAgent(purpose=…)` sets `client.purpose`; override per purpose with the `llm_routes` setting (json object of lists). Everything is model-agnostic: no vendor-specific prompt features except optional Anthropic cache_control.
+
 ## Token economy
 `backend/llm/usage.py` ledger (purpose × tier × model, cached tokens, cost); `TOOL_BUDGETS` + `_compact()` + per-conversation de-duplication in `backend/llm/agent.py`; budgets are settings the agent may tune (`llm_tool_output_chars`, `llm_history_messages`, `llm_max_rounds*`, `llm_brief_tier`); Claude models via OpenRouter get `cache_control` on the system prompt. New tools: small outputs, a budget entry, no raw payloads.
 

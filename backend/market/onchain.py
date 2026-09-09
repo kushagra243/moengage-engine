@@ -24,7 +24,7 @@ DS_CHAIN_IDS = {"solana": "solana", "base": "base", "bsc": "bsc", "bnb": "bsc", 
 MIN_LIQ_USD = 150_000
 MIN_VOL_USD = 300_000
 MIN_AGE_H = 24
-MAJORS = {"USDT", "USDC", "USDE", "DAI", "FDUSD", "TUSD", "USD1", "PYUSD", "WETH", "ETH", "WBTC", "CBBTC", "BTC", "SOL", "WSOL", "BNB", "WBNB", "WMATIC", "POL", "STETH", "WSTETH", "USDS", "SUSDE"}
+MAJORS = {"USDT", "USDC", "USDE", "DAI", "FDUSD", "TUSD", "USD1", "PYUSD", "WETH", "ETH", "WBTC", "CBBTC", "BTC", "SOL", "WSOL", "BNB", "WBNB", "WMATIC", "POL", "STETH", "WSTETH", "USDS", "SUSDE", "BTCB", "ETHB", "WAVAX", "WPOL", "CBETH", "WEETH"}
 
 
 def chains() -> List[str]:

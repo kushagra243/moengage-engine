@@ -43,6 +43,9 @@ Loopback bind · per-process `X-Local-Token` · Host check · outbound only thro
 - Commit style: imperative subject, body explains why; PRs to `main` on `kushagra243/moengage-engine`, merged when green.
 - Keep numbers honest: label mock data, state coverage (stats present for N of M campaigns), never invent data for missing endpoints.
 
+## Model routing (OpenRouter, free + paid)
+Purpose → model chains in `backend/llm/provider.py` (`routes()`), overridable with the `llm_routes` setting: chat/code/copy/review on the main model, autopilot/analysis/brief/test on the free bulk chain, classification on small free models; the first model that answers wins and the main model is the last fallback. Skills, tools and prompts are model-agnostic (plain OpenAI-compatible chat + tool calling). The agent's `model_routes` tool shows routes and 7-day spend per tier.
+
 ## Token economy (the platform runs on paid credits)
 Heavy work goes to the free bulk tier (`llm_model_bulk=auto-free`): autopilot, deep analysis, the daily brief (`llm_brief_tier=bulk`). Every model call lands in the `llm_usage` ledger (`/api/llm/usage`, agent tool `token_usage`, "tokens today" in the Agent tab). Tool output is compacted (raw/debug keys dropped, floats rounded) and capped per tool (`TOOL_BUDGETS` in `backend/llm/agent.py`, default `llm_tool_output_chars`=7000); identical tool calls within one conversation are answered once; chat history is `llm_history_messages` turns (default 8) at 2 500 chars each; rounds are `llm_max_rounds` (8) / `llm_max_rounds_autopilot` (6); skills load at most 9 000 chars, one at a time. Claude models get Anthropic prompt caching through OpenRouter (`cache_control` on the system prompt, which also covers the tool schemas) and OpenRouter returns real cost per call. When adding a tool, give it a budget and return only what the model needs.
 

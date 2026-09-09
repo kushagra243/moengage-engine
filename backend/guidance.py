@@ -118,6 +118,7 @@ ENGINE_SETTINGS: Dict[str, Dict[str, Any]] = {
     "llm_max_rounds_autopilot": {"type": "int", "min": 1, "max": 10, "help": "max tool rounds per autopilot mission"},
     "web3_enabled":           {"type": "bool", "help": "web3 trending lane on/off"},
     "web3_chains":            {"type": "str", "max_len": 120, "help": "comma list: solana,base,bsc,eth,robinhood"},
+    "llm_routes":             {"type": "json_object", "help": "purpose → model list (merged), purposes: chat, autopilot, analysis, brief, copy, classification, code, review, test"},
     "llm_brief_tier":         {"type": "enum", "values": ["bulk", "main"], "help": "which tier writes the daily brief"},
 }
 
@@ -153,7 +154,7 @@ def set_engine_setting(key: str, value: Any, actor: str = "agent") -> Dict[str, 
                 cur = json.loads(get_setting(key, "") or "{}")
             except Exception:
                 cur = {}
-            cur.update({str(k)[:40]: str(v)[:80] for k, v in obj.items()})
+            cur.update({str(k)[:40]: (v if isinstance(v, list) else str(v)[:120]) for k, v in obj.items()})
             sval = json.dumps(cur)
         else:
             sval = str(value)[: spec.get("max_len", 200)]

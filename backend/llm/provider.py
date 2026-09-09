@@ -108,6 +108,40 @@ def bulk_models(cfg: Optional[Dict[str, Any]] = None) -> List[str]:
     return [mb] if mb and mb != "auto-free" else [cfg["model"]]
 
 
+# Purpose → ordered model candidates. Defaults lean free for volume work and keep the main model for chat/code/copy.
+# Override any purpose with the llm_routes setting (JSON object), e.g. {"copy": ["anthropic/claude-sonnet-4.5"], "analysis": ["deepseek/deepseek-chat-v3-0324:free", "openai/gpt-4o-mini"]}
+ROUTE_PURPOSES = ("chat", "autopilot", "analysis", "brief", "copy", "classification", "code", "review", "test")
+
+
+def route_defaults(cfg: Dict[str, Any]) -> Dict[str, List[str]]:
+    main = cfg.get("model") or ""
+    free = FREE_BULK_MODELS if cfg.get("provider") == "openrouter" else []
+    bulk = bulk_models(cfg)
+    return {"chat": [main], "code": [main], "copy": [main], "review": [main],
+            "autopilot": bulk, "analysis": bulk, "brief": bulk, "classification": (free[:2] + [main]) if free else [main], "test": bulk}
+
+
+def routes(cfg: Optional[Dict[str, Any]] = None) -> Dict[str, List[str]]:
+    cfg = cfg or llm_settings()
+    out = route_defaults(cfg)
+    try:
+        override = json.loads(get_setting("llm_routes", "") or "{}")
+        for k, v in (override or {}).items():
+            if isinstance(v, str):
+                v = [x.strip() for x in v.split(",") if x.strip()]
+            if isinstance(v, list) and v:
+                out[str(k)] = [str(m) for m in v] + ([cfg.get("model")] if cfg.get("model") not in v else [])
+    except Exception:
+        pass
+    return out
+
+
+def route_models(purpose: str, cfg: Optional[Dict[str, Any]] = None) -> List[str]:
+    cfg = cfg or llm_settings()
+    r = routes(cfg)
+    return r.get(purpose) or r.get("chat") or [cfg.get("model")]
+
+
 def _headers(cfg: Dict[str, Any]) -> Dict[str, str]:
     h = {"Content-Type": "application/json", "Accept": "application/json"}
     if cfg["api_key"]:
@@ -180,6 +214,19 @@ class LLMClient:
         Returns {"content": str|None, "tool_calls": [...], "finish_reason", "usage", "model"}.
         tier="bulk" tries the free/cheap candidates in order and falls back to the main model.
         """
+        purpose = getattr(self, "purpose", "chat")
+        if tier == "main" and model is None and self.cfg["provider"] != "claude_cli":
+            cands = route_models(purpose, self.cfg)
+            if cands and (len(cands) > 1 or cands[0] != self.cfg["model"]):
+                last = None
+                for cand in cands:
+                    try:
+                        return self.chat(messages, tools, tool_choice, max_tokens, temperature, response_format, model=cand, tier="main")
+                    except LLMError as e:
+                        last = e
+                        log.info("route %s model %s failed: %s", purpose, cand, redact(str(e))[:120])
+                        continue
+                raise last or LLMError(f"no model available for purpose {purpose}")
         if tier == "bulk" and model is None:
             last = None
             for cand in bulk_models(self.cfg):
@@ -245,7 +292,7 @@ class LLMClient:
             usage = data.get("usage") or {}
             try:
                 from .usage import record as _record
-                _record(getattr(self, "purpose", "chat"), "bulk" if (model and model != self.cfg["model"]) else "main", data.get("model") or use_model, usage, usage.get("cost"))
+                _record(getattr(self, "purpose", "chat"), ("bulk" if ":free" in str(model) else "route") if (model and model != self.cfg["model"]) else "main", data.get("model") or use_model, usage, usage.get("cost"))
             except Exception:
                 pass
             return {

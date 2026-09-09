@@ -55,7 +55,7 @@ def test_prompt_caching_marker_for_claude_models(monkeypatch):
         def post(self, url, headers=None, json=None, timeout=None):
             captured["payload"] = json; return FakeResp()
     set_setting("llm_provider", "openrouter"); set_setting("llm_base_url", "https://openrouter.ai/api/v1"); set_setting("llm_model", "anthropic/claude-sonnet-4.5"); set_setting("llm_api_key", "sk-or-v1-testkey-000000000000000000000000")
-    c = pv.LLMClient(); c.session = FakeSession(); c.purpose = "test"
+    c = pv.LLMClient(); c.session = FakeSession(); c.purpose = "chat"
     r = c.chat([{"role": "system", "content": "SYSTEM DOCTRINE"}, {"role": "user", "content": "hi"}], tools=None)
     sysmsg = captured["payload"]["messages"][0]
     assert isinstance(sysmsg["content"], list) and sysmsg["content"][0]["cache_control"] == {"type": "ephemeral"} and captured["payload"]["usage"] == {"include": True}

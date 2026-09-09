@@ -607,6 +607,17 @@ def flight_plans(month: Optional[str] = None, plan_id: Optional[int] = None) -> 
     return {"plans": plans.list_plans(month), "summary": plans.month_summary(month)}
 
 
+def model_routes() -> Dict[str, Any]:
+    """Which model handles which purpose (chat, autopilot, analysis, brief, copy, classification, code, review, test) with fallback chains, the free-tier list, and 7-day spend per model. Change with set_engine_setting('llm_routes', {...})."""
+    from .provider import routes, llm_settings, FREE_BULK_MODELS
+    from .usage import summary
+    cfg = llm_settings()
+    u = summary(7)
+    return {"provider": cfg["provider"], "main_model": cfg["model"], "routes": routes(cfg), "free_models": FREE_BULK_MODELS if cfg["provider"] == "openrouter" else [],
+            "spend_7d_by_tier": u.get("by_tier"), "how_to_change": "set_engine_setting('llm_routes', {\"copy\": [\"anthropic/claude-sonnet-4.5\"], \"analysis\": [\"deepseek/deepseek-chat-v3-0324:free\"]}) — first model that answers wins; main model is always the last fallback",
+            "note": "skills and tools are model-agnostic; the same prompts run on any OpenAI-compatible model"}
+
+
 def token_usage(days: int = 7) -> Dict[str, Any]:
     """Model spend ledger: calls, prompt/completion/cached tokens and estimated cost by purpose and tier, plus the current budgets (tool output chars, history turns, rounds)."""
     from .usage import summary
@@ -694,6 +705,7 @@ TOOL_SCHEMAS: List[Dict[str, Any]] = [
     _fn("record_ideas", "Capture every recommendation you make (campaign, segment, experiment, growth hack, fix) into the persistent growth feed so nothing is lost. ideas: [{title, kind: trending_campaign|growth_hack|market_play|moengage_activity|fix, why (cite data), how (MoEngage steps), segment, channel, angle, kpi, transition, effort, expected_impact, priority}].",
         {"ideas": {"type": "array", "items": OBJ}}, ["ideas"]),
     _fn("propose_pause_campaign", "Propose pausing a campaign (e.g. deliverability collapse or market suppression rule).", {"campaign_id": STR, "rationale": STR}, ["campaign_id", "rationale"]),
+    _fn("model_routes", "Purpose → model routing over OpenRouter (free and paid), fallback chains, spend per tier; change with set_engine_setting('llm_routes', …)."),
     _fn("token_usage", "Model spend by purpose/tier for the last N days with current budgets. Use when asked about cost or before running expensive analyses.", {"days": {"type": "integer"}}),
     _fn("self_diagnose", "Diagnose the engine itself: grouped tool errors, failed jobs/proposals, log tracebacks, optional test run, with ready-to-file fix requests. Call whenever a tool returned an error or a job failed; then propose_code_change with the fix_request.", {"run_tests": {"type": "boolean"}}),
     _fn("rollback_last_change", "Revert the last merged code change and restart (only when asked, or when the change is clearly broken).", {"reason": STR}),
@@ -744,7 +756,7 @@ TOOLS: Dict[str, Callable[..., Dict[str, Any]]] = {
     "propose_flow": _safe(propose_flow), "propose_pause_campaign": _safe(propose_pause_campaign),
     "moengage_api_reference": _safe(moengage_api_reference), "moengage_api_read": _safe(moengage_api_read), "skill": _safe(skill),
     "remember_guidance": _safe(remember_guidance), "set_engine_setting": _safe(set_engine_setting), "propose_code_change": _safe(propose_code_change),
-    "token_usage": _safe(token_usage), "self_diagnose": _safe(self_diagnose), "rollback_last_change": _safe(rollback_last_change),
+    "model_routes": _safe(model_routes), "token_usage": _safe(token_usage), "self_diagnose": _safe(self_diagnose), "rollback_last_change": _safe(rollback_last_change),
     "north_star": _safe(north_star), "set_north_star": _safe(set_north_star), "comms_limits": _safe(comms_limits), "set_comms_limits": _safe(set_comms_limits), "peace_index": _safe(peace_index),
     "guardrail_monitor": _safe(guardrail_monitor), "write_flight_plan": _safe(write_flight_plan), "flight_plans": _safe(flight_plans),
     "segment_study": _safe(segment_study), "define_nomenclature": _safe(define_nomenclature), "list_sops": _safe(list_sops), "sop_detail": _safe(sop_detail), "define_sop": _safe(define_sop), "run_sop": _safe(run_sop), "sop_runs": _safe(sop_runs), "channel_matrix": _safe(channel_matrix),

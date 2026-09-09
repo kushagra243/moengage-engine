@@ -28,15 +28,19 @@ from ..security import redact
 from . import sources
 
 COMPETITORS: Dict[str, Dict[str, Any]] = {
-    "delta":     {"name": "Delta Exchange India", "kind": "INR perps + options", "direct": "delta_india", "cg": "delta_futures"},
-    "wazirx":    {"name": "WazirX", "kind": "INR spot", "direct": "wazirx", "cg": "wazirx"},
+    "delta":     {"name": "Delta Exchange India", "kind": "INR perps + options", "direct": "delta_india", "cmc": "delta-exchange", "cg": "delta_futures"},
+    "wazirx":    {"name": "WazirX", "kind": "INR spot", "direct": "wazirx", "cmc": "wazirx", "cg": "wazirx"},
     "mudrex":    {"name": "Mudrex", "kind": "INR spot", "cg": "mudrex"},
-    "zebpay":    {"name": "ZebPay", "kind": "INR spot", "cg": "zebpay"},
-    "bitbns":    {"name": "Bitbns", "kind": "INR spot", "cg": "bitbns"},
-    "giottus":   {"name": "Giottus", "kind": "INR spot", "cg": "giottus"},
-    "koinbx":    {"name": "KoinBX", "kind": "INR spot", "cg": "koinbazar"},
-    "bybit":     {"name": "Bybit", "kind": "global perps (reference)", "direct": "bybit"},
+    "zebpay":    {"name": "ZebPay", "kind": "INR spot", "cmc": "zebpay", "cg": "zebpay"},
+    "bitbns":    {"name": "Bitbns", "kind": "INR spot", "cmc": "bitbns", "cg": "bitbns"},
+    "giottus":   {"name": "Giottus", "kind": "INR spot", "cmc": "giottus", "cg": "giottus"},
+    "koinbx":    {"name": "KoinBX", "kind": "INR spot", "cmc": "koinbx", "cg": "koinbazar"},
+    "unocoin":   {"name": "Unocoin", "kind": "INR spot", "cmc": "unocoin"},
+    "bybit":     {"name": "Bybit", "kind": "global perps (reference)", "direct": "bybit", "cmc": "bybit"},
 }
+OWN_CMC_SLUG = "coindcx"
+CMC = "https://api.coinmarketcap.com/data-api/v3/exchange"
+CMC_HEADERS = {"User-Agent": "Mozilla/5.0 (compatible; moengage-engine intelligence)", "Accept": "application/json"}
 STABLES = {"USDT", "USDC", "INR", "USD", "FDUSD", "DAI", "TUSD", "BUSD"}
 SYN = {"XAU": "GOLD", "XAUT": "GOLD", "PAXG": "GOLD", "XAG": "SILVER", "XPT": "PLATINUM", "XPD": "PALLADIUM", "USOIL": "CL", "WTI": "CL", "UKOIL": "BRENTOIL", "NGAS": "NATGAS", "SPX500": "SP500", "SPX": "SP500", "US500": "SP500", "NAS100": "NASDAQ100", "NDX": "NASDAQ100", "US30": "DOW", "1000PEPE": "PEPE", "1000SHIB": "SHIB", "1000BONK": "BONK", "1000FLOKI": "FLOKI", "KPEPE": "PEPE", "KSHIB": "SHIB", "KBONK": "BONK", "KFLOKI": "FLOKI", "PUMPFUN": "PUMP", "RAYDIUM": "RAY", "SKHYNIX": "SKHX", "HYPERLIQUID": "HYPE", "1000RATS": "RATS", "1000SATS": "SATS", "1000CAT": "CAT", "1000X": "X"}
 
@@ -132,6 +136,45 @@ def fetch_coindcx(inr: float) -> List[Dict[str, Any]]:
     return out
 
 
+def fetch_cmc_pairs(slug: str, category: str = "spot", limit: int = 300) -> List[Dict[str, Any]]:
+    """CoinMarketCap public data-api: market pairs of one exchange with USD volume (spot | perpetual | futures)."""
+    d = sources._json(f"{CMC}/market-pairs/latest", {"slug": slug, "category": category, "start": 1, "limit": limit}, 20.0, headers=CMC_HEADERS) or {}
+    out = []
+    for mp in ((d.get("data") or {}).get("marketPairs") or []):
+        base = str(mp.get("baseSymbol") or "").upper(); quote = str(mp.get("quoteSymbol") or "").upper()
+        if not base:
+            continue
+        out.append({"symbol": base, "product": "perp" if category in ("perpetual", "futures") else "spot", "quote": quote, "vol_24h_usd": _f(mp.get("volumeUsd")), "oi_usd": None, "funding_1h_pct": None,
+                    "chg_24h": None, "price": _f(mp.get("price")), "inr_market": quote == "INR", "excluded": bool(mp.get("volumeExcluded") or mp.get("outlierDetected")), "market_score": _f(mp.get("marketScore"))})
+    return out
+
+
+def fetch_cmc_listing() -> Dict[str, Dict[str, Any]]:
+    """Exchange-level facts from CMC: 24h spot / derivatives / total volume, market share, 24h change, fees, traffic — keyed by slug."""
+    out: Dict[str, Dict[str, Any]] = {}
+    for cat in ("spot", "derivatives"):
+        d = sources._json(f"{CMC}/listing", {"start": 1, "limit": 500, "sort": "volume_24h", "category": cat}, 25.0, headers=CMC_HEADERS) or {}
+        for e in ((d.get("data") or {}).get("exchanges") or []):
+            slug = e.get("slug")
+            if not slug:
+                continue
+            row = out.setdefault(slug, {"name": e.get("name")})
+            row.update({k: e.get(k) for k in ("spotVol24h", "derivativesVol24h", "totalVol24h", "totalVolAdjusted24h", "totalVolChgPct24h", "totalVolChgPct7d", "marketSharePct", "makerFee", "takerFee", "visits", "trafficScore", "numMarkets", "numCoins", "countries", "score") if e.get(k) is not None})
+    return out
+
+
+def fetch_own(inr: float) -> List[Dict[str, Any]]:
+    """Our own spot markets. Default source is CoinMarketCap (the team's rule: CoinDCX volume is taken from CMC, not shared directly); api.coindcx.com only if competitor_own_source=coindcx_api."""
+    if get_setting("competitor_own_source", "cmc") == "coindcx_api":
+        return fetch_coindcx(inr)
+    rows = fetch_cmc_pairs(OWN_CMC_SLUG, "spot", 400)
+    try:
+        rows += fetch_cmc_pairs(OWN_CMC_SLUG, "perpetual", 200)
+    except Exception:
+        pass
+    return rows
+
+
 def fetch_coingecko_exchange(cg_id: str) -> Dict[str, Any]:
     d = sources._json(f"https://api.coingecko.com/api/v3/exchanges/{cg_id}", None, 20.0, headers=sources._cg_headers()) or {}
     rows = []
@@ -165,9 +208,13 @@ def snapshot(universe_ctx: Optional[Dict[str, Any]] = None, force: bool = False)
         errors: List[str] = []
         # us
         try:
-            ours = fetch_coindcx(inr)
+            ours = fetch_own(inr)
         except Exception as e:
-            ours = []; errors.append("coindcx: " + redact(str(e))[:80])
+            ours = []; errors.append("coindcx (cmc): " + redact(str(e))[:80])
+        try:
+            listing = fetch_cmc_listing()
+        except Exception as e:
+            listing = {}; errors.append("cmc listing: " + redact(str(e))[:80])
         our_perps: List[Dict[str, Any]] = []
         try:
             from .exchanges import hyperliquid_perps
@@ -181,8 +228,9 @@ def snapshot(universe_ctx: Optional[Dict[str, Any]] = None, force: bool = False)
             p["symbol"] = canon(p["symbol"])
         inr_spot = sum(p["vol_24h_usd"] or 0 for p in ours if p.get("inr_market"))
         usdt_spot = sum(p["vol_24h_usd"] or 0 for p in ours if not p.get("inr_market"))
+        own_src = "coinmarketcap" if get_setting("competitor_own_source", "cmc") != "coindcx_api" else "api.coindcx.com"
         ex["coindcx"] = {"name": "CoinDCX (us)", "kind": "INR spot (own) · USDT spot (reported) · perps (liquidity-venue reference)", "pairs": ours + our_perps, "total_vol_usd": inr_spot,
-                         "inr_spot_vol_usd": inr_spot, "usdt_spot_vol_usd_reported": usdt_spot, "perps_reference_vol_usd": sum(p["vol_24h_usd"] or 0 for p in our_perps), "source": "api.coindcx.com + liquidity venue"}
+                         "inr_spot_vol_usd": inr_spot, "usdt_spot_vol_usd_reported": usdt_spot, "perps_reference_vol_usd": sum(p["vol_24h_usd"] or 0 for p in our_perps), "source": f"{own_src} + liquidity venue", "cmc": listing.get(OWN_CMC_SLUG) or {}}
         for cid in enabled_ids():
             meta = COMPETITORS[cid]
             rows: List[Dict[str, Any]] = []; src = ""
@@ -195,6 +243,14 @@ def snapshot(universe_ctx: Optional[Dict[str, Any]] = None, force: bool = False)
                     rows = fetch_bybit(); src = "api.bybit.com"
             except Exception as e:
                 errors.append(f"{cid}: {redact(str(e))[:80]}")
+            if (not rows) and meta.get("cmc"):
+                try:
+                    rows = fetch_cmc_pairs(meta["cmc"], "spot", 300)
+                    if "perps" in meta["kind"] or cid == "bybit":
+                        rows += fetch_cmc_pairs(meta["cmc"], "perpetual", 200)
+                    src = f"coinmarketcap:{meta['cmc']}"
+                except Exception as e:
+                    errors.append(f"{cid} (cmc): {redact(str(e))[:80]}")
             for p in rows:
                 p["symbol"] = canon(p["symbol"])
             total = sum(p["vol_24h_usd"] or 0 for p in rows)
@@ -203,7 +259,7 @@ def snapshot(universe_ctx: Optional[Dict[str, Any]] = None, force: bool = False)
                     cg = fetch_coingecko_exchange(meta["cg"]); rows = cg["pairs"]; total = (cg["total_vol_btc"] or 0) * btc or sum(p["vol_24h_usd"] or 0 for p in rows); src = f"coingecko:{meta['cg']}"
                 except Exception as e:
                     errors.append(f"{cid} (coingecko): {redact(str(e))[:80]}")
-            ex[cid] = {"name": meta["name"], "kind": meta["kind"], "pairs": rows, "total_vol_usd": total, "source": src}
+            ex[cid] = {"name": meta["name"], "kind": meta["kind"], "pairs": rows, "total_vol_usd": total, "source": src, "cmc": listing.get(meta.get("cmc") or "") or {}}
         conn = get_db()
         ts = datetime.utcnow().strftime("%Y-%m-%d %H:%M:%S")
         for cid, e in ex.items():
@@ -257,10 +313,15 @@ def intel(universe_ctx: Optional[Dict[str, Any]] = None, force: bool = False) ->
         k = (p["symbol"], p["product"]); our[k] = our.get(k, 0.0) + (p.get("vol_24h_usd") or 0)
     our_syms = {k[0] for k in our}
     # exchange table + Indian share
-    inr_spot_ids = [cid for cid in ex if cid in ("coindcx", "wazirx", "mudrex", "zebpay", "bitbns", "giottus", "koinbx")]
+    inr_spot_ids = [cid for cid in ex if cid in ("coindcx", "wazirx", "mudrex", "zebpay", "bitbns", "giottus", "koinbx", "unocoin")]
     total_in = sum((ex[c].get("total_vol_usd") or 0) for c in inr_spot_ids) or 1.0
+    def _cmc_facts(e):
+        c = e.get("cmc") or {}
+        return {"cmc_spot_vol_24h_usd": c.get("spotVol24h"), "cmc_derivatives_vol_24h_usd": c.get("derivativesVol24h"), "cmc_total_vol_24h_usd": c.get("totalVol24h"), "cmc_vol_chg_24h_pct": c.get("totalVolChgPct24h"),
+                "cmc_vol_chg_7d_pct": c.get("totalVolChgPct7d"), "cmc_market_share_pct": c.get("marketSharePct"), "maker_fee_pct": c.get("makerFee"), "taker_fee_pct": c.get("takerFee"), "weekly_visits": c.get("visits"), "cmc_score": c.get("score")}
+    inr_spot_ids = [cid for cid in inr_spot_ids]
     table = [{"exchange": cid, "name": e["name"], "kind": e["kind"], "vol_24h_usd": round(e.get("total_vol_usd") or 0), "pairs": e.get("pair_count", len(e.get("pairs", []))),
-              "share_of_tracked_inr_spot_pct": round((e.get("total_vol_usd") or 0) / total_in * 100, 1) if cid in inr_spot_ids else None, "source": e.get("source"),
+              "share_of_tracked_inr_spot_pct": round((e.get("total_vol_usd") or 0) / total_in * 100, 1) if cid in inr_spot_ids else None, "source": e.get("source"), **_cmc_facts(e),
               **({k: round(e.get(k) or 0) for k in ("inr_spot_vol_usd", "usdt_spot_vol_usd_reported", "perps_reference_vol_usd")} if cid == "coindcx" else {})} for cid, e in ex.items()]
     table.sort(key=lambda r: -r["vol_24h_usd"])
     battles, surges, gaps, edges, funding_edges = [], [], [], [], []
@@ -304,9 +365,21 @@ def intel(universe_ctx: Optional[Dict[str, Any]] = None, force: bool = False) ->
             continue
         seen.add(g["symbol"]); gaps2.append(g)
     actions = _actions(surges[:10], gaps2[:10], battles[:40], funding_edges[:10], edges[:10])
+    try:
+        mine = next((t for t in table if t["exchange"] == "coindcx"), {})
+        if mine.get("taker_fee_pct") is not None:
+            cheaper = [t for t in table if t["exchange"] not in ("coindcx", "bybit") and t.get("taker_fee_pct") is not None and float(t["taker_fee_pct"]) < float(mine["taker_fee_pct"])]
+            if cheaper:
+                actions.append({"priority": 45, "owner": "product+marketing", "type": "fee_position", "symbol": "—", "product": "spot", "what": f"{len(cheaper)} tracked Indian venue(s) list a lower taker fee than ours ({mine['taker_fee_pct']}%): lead with total cost (fee + TDS + spread) transparency and fee tiers rather than headline fee; review tier thresholds.", "sop": "sop_fee_tier_nudge"})
+        drops = [t for t in table if t["exchange"] != "coindcx" and t.get("cmc_vol_chg_24h_pct") is not None and float(t["cmc_vol_chg_24h_pct"]) >= 40]
+        for t in drops[:2]:
+            actions.append({"priority": 55, "owner": "marketing", "type": "venue_volume_jump", "symbol": "—", "product": "all", "what": f"A tracked venue's total volume is up {round(float(t['cmc_vol_chg_24h_pct']))}% in 24h (CMC). Check its surging pairs in pair battles and counter on the ones we list.", "sop": "sop_asset_spotlight"})
+        actions.sort(key=lambda a: -a["priority"])
+    except Exception:
+        pass
     return {"generated_at": snap.get("fetched_at"), "exchanges": table, "pair_battles": battles[:40], "surges": surges[:15], "listing_gaps": gaps2[:15], "our_edges": edges[:15], "funding_edges": funding_edges[:10],
             "actions": actions, "errors": snap.get("errors"), "thresholds": {"surge_pct": surge_pct, "min_usd": min_usd},
-            "note": "internal intelligence from public tickers. CoinDCX INR markets are our own volume; USDT markets and perps reflect routed/liquidity-venue volume and are shown as reference, not share. Self-reported volumes vary in quality. Never name a competitor in user-facing copy."}
+            "note": "internal intelligence from free public sources: CoinMarketCap data-api (CoinDCX and venue market pairs, exchange volumes, market share, fees, traffic), direct venue tickers for realtime (Delta India, WazirX, Bybit), CoinGecko fallback. CoinDCX INR markets are our own volume; USDT markets and perps are routed/liquidity-venue volume (reference, not share). CMC excludes outlier volumes. Never name a competitor in user-facing copy."}
 
 
 def _actions(surges, gaps, battles, funding_edges, edges) -> List[Dict[str, Any]]:

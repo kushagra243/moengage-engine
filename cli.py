@@ -225,6 +225,13 @@ def cmd_mock(a):
         _print(mock.seed_history(a.days, inject=not a.clean))
 
 
+def cmd_housekeeping(a):
+    from backend.growth import expire_stale
+    from backend.approvals import expire_stale as expire_props
+    from backend.plans import archive_past
+    print(json.dumps({"ideas": expire_stale(), "proposals": expire_props(), "plans_archived": archive_past()}, indent=2))
+
+
 def cmd_selfheal(a):
     from backend.selfheal import health_report, rollback_last_merge
     if a.action == "rollback":
@@ -261,6 +268,7 @@ def main():
     s = sp.add_parser("approvals"); s.add_argument("action", choices=["list", "show", "approve", "reject"]); s.add_argument("id", nargs="?", type=int); s.add_argument("--status"); s.add_argument("--note"); s.set_defaults(fn=cmd_approvals)
     s = sp.add_parser("daily-run"); s.add_argument("--full", action="store_true"); s.set_defaults(fn=cmd_daily_run)
     s = sp.add_parser("mock", help="demo data: seed"); s.add_argument("action", choices=["seed"]); s.add_argument("--days", type=int, default=30); s.add_argument("--clean", action="store_true", help="no injected faults"); s.set_defaults(fn=cmd_mock)
+    sp.add_parser("housekeeping", help="expire stale ideas/proposals, archive past flight plans").set_defaults(fn=cmd_housekeeping)
     s = sp.add_parser("selfheal", help="engine health: report | rollback (revert last agent merge)"); s.add_argument("action", nargs="?", default="report", choices=["report", "rollback"]); s.add_argument("--tests", action="store_true"); s.set_defaults(fn=cmd_selfheal)
     s = sp.add_parser("audit-log"); s.add_argument("-n", type=int, default=30); s.set_defaults(fn=cmd_audit_log)
     s = sp.add_parser("growth", help="growth feed: refresh | list | set"); s.add_argument("action", choices=["refresh", "list", "set"]); s.add_argument("id", nargs="?", type=int); s.add_argument("--status"); s.add_argument("--llm", action="store_true"); s.add_argument("-n", type=int, default=5); s.set_defaults(fn=cmd_growth)

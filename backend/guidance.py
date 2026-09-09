@@ -122,6 +122,7 @@ ENGINE_SETTINGS: Dict[str, Dict[str, Any]] = {
     "competitors":            {"type": "str", "max_len": 200, "help": "comma list of tracked venues: delta,wazirx,mudrex,zebpay,bitbns,giottus,koinbx,bybit"},
     "competitor_surge_pct":   {"type": "float", "min": 10, "max": 500, "help": "volume surge threshold vs earlier snapshot (%)"},
     "competitor_surge_min_usd": {"type": "int", "min": 10000, "max": 50000000, "help": "minimum 24h USD volume for a surge / battle / gap to count"},
+    "competitor_own_source":  {"type": "enum", "values": ["cmc", "coindcx_api"], "help": "where our own volumes come from (team rule: cmc)"},
     "competitor_cache_ttl_s": {"type": "int", "min": 120, "max": 86400, "help": "competitor ticker cache seconds"},
     "llm_brief_tier":         {"type": "enum", "values": ["bulk", "main"], "help": "which tier writes the daily brief"},
 }

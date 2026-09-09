@@ -306,5 +306,33 @@ def approve_and_execute(pid: int, decided_by: str = "user", note: str = "") -> D
     return get_proposal(pid)  # type: ignore[return-value]
 
 
+def expire_stale() -> Dict[str, int]:
+    """Pending proposals that can no longer be sent as designed: market-linked ones older than 2× their TTL, and scheduled ones whose date passed by more than a day."""
+    init_approval_tables()
+    n = 0
+    for p in list_proposals(status="pending", limit=500):
+        pl = p.get("payload") or {}
+        created = str(p.get("created_at") or "")
+        try:
+            age_h = (datetime.utcnow() - datetime.fromisoformat(created.replace(" ", "T"))).total_seconds() / 3600
+        except Exception:
+            age_h = 0
+        ttl = pl.get("ttl_hours")
+        sched = ((pl.get("schedule") or {}).get("date")) if isinstance(pl.get("schedule"), dict) else None
+        stale = (ttl and age_h > 2 * float(ttl)) or (sched and sched < (datetime.utcnow().date() - __import__("datetime").timedelta(days=1)).isoformat())
+        if stale:
+            conn = get_db()
+            conn.execute("UPDATE proposals SET status='expired', decided_at=CURRENT_TIMESTAMP, decided_by='system', decision_note=? WHERE id=?", ("expired: market fact stale (TTL) or scheduled date passed", p["id"]))
+            conn.commit(); conn.close()
+            if p["kind"] == "create_campaign":
+                try:
+                    conn = get_db(); conn.execute("UPDATE experiments SET status='abandoned', updated_at=CURRENT_TIMESTAMP WHERE proposal_id=? AND status='proposed'", (p["id"],)); conn.commit(); conn.close()
+                except Exception:
+                    pass
+            audit("proposal.expired", {"id": p["id"], "kind": p["kind"], "ttl_hours": ttl, "schedule": sched}, actor="system")
+            n += 1
+    return {"expired": n}
+
+
 def registered_kinds() -> List[str]:
     return sorted(_executors.keys())

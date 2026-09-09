@@ -73,9 +73,16 @@ class DailyAutomationScheduler:
 
             # 3) growth feed (rules; no model needed)
             try:
-                from .growth import generate_rule_ideas
+                from .growth import generate_rule_ideas, expire_stale as _expire_ideas
                 report["growth"] = generate_rule_ideas()
                 report["steps"].append("growth_rules")
+                try:
+                    hooks_now = [h["id"] for h in (((report.get("market") or {}).get("hooks") or {}).get("hooks") or [])] if isinstance(report.get("market"), dict) else None
+                    active = [e.get("campaign_name") for e in ((report.get("anomalies") or {}).get("anomalies") or []) if e.get("urgency") in ("act_today", "watch")] if isinstance(report.get("anomalies"), dict) else None
+                    report["housekeeping"] = {"ideas": _expire_ideas(hooks_now, active), "proposals": __import__("backend.approvals", fromlist=["expire_stale"]).expire_stale(), "plans_archived": __import__("backend.plans", fromlist=["archive_past"]).archive_past()}
+                    report["steps"].append("housekeeping")
+                except Exception as e:
+                    report["housekeeping_error"] = redact(str(e))
             except Exception as e:
                 report["growth_error"] = redact(str(e))
 
@@ -159,6 +166,12 @@ class DailyAutomationScheduler:
     def refresh_intraday(self) -> Dict[str, Any]:
         """Lightweight, model-free refresh: re-read campaigns, snapshot, detect, market, rules ideas."""
         return self.trigger_run(trigger_type="intraday", use_llm=False)
+        try:
+            from .growth import expire_stale as _expire_ideas
+            from .approvals import expire_stale as _expire_props
+            _expire_ideas(); _expire_props()
+        except Exception:
+            pass
 
     def _loop(self):
         last_minute = None

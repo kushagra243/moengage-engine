@@ -109,6 +109,7 @@ MARKET_HOSTS = [
     "feeds.finance.yahoo.com", "www.nasdaq.com", "api.nasdaq.com", "feeds.bbci.co.uk",
     "api.dexscreener.com", "api.geckoterminal.com",          # web3: trending pools / token profiles (public, keyless)
     "api.india.delta.exchange", "api.delta.exchange", "api.wazirx.com", "api.bybit.com",   # competitive intelligence: public tickers (keyless)
+    "api.coinmarketcap.com",                                                                 # CMC public data-api: exchange market pairs / listings (keyless)
 ]
 
 _sessions: Dict[str, GuardedSession] = {}

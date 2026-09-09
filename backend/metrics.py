@@ -96,8 +96,11 @@ def urgency(event: Dict[str, Any]) -> str:
     lvl = unusual_level(event.get("score"), event.get("method", ""))
     sev = event.get("severity")
     metric = event.get("metric")
+    peer = str(event.get("method", "")).startswith("peer_")
     if metric == "delivery_rate" and (event.get("value") or 100) < 85:
         return "act_today"
+    if peer:
+        return "watch"          # a peer comparison is a hint, never an order
     if sev == "critical" and lvl >= 3 and event.get("impact") == "bad":
         return "act_today"
     if sev in ("critical", "warning"):
@@ -112,9 +115,14 @@ def anomaly_headline(event: Dict[str, Any]) -> Dict[str, str]:
     d = delta(m, v, b)
     lvl = unusual_level(event.get("score"), event.get("method", ""))
     direction = "up" if (v or 0) > (b or 0) else "down"
-    head = f"{name}: {label(m).lower()} {fmt_value(m, v)}, usually about {fmt_value(m, b)} ({d['text']}, {UNUSUAL_LABELS[lvl]})"
-    n = event.get("n_history") or event.get("days") or ""
     method = event.get("method", "")
+    if method.startswith("peer_"):
+        head = f"{name}: {label(m).lower()} {fmt_value(m, v)} vs {fmt_value(m, b)} for similar campaigns today ({d['text']}, {UNUSUAL_LABELS[lvl]}; no own history yet)"
+    elif "hard_rule" in method:
+        head = f"{name}: {label(m).lower()} {fmt_value(m, v)} (below the {fmt_value(m, b)} floor)"
+    else:
+        head = f"{name}: {label(m).lower()} {fmt_value(m, v)}, usually about {fmt_value(m, b)} ({d['text']}, {UNUSUAL_LABELS[lvl]})"
+    n = event.get("n_history") or event.get("days") or ""
     basis = ("compared with peer campaigns on the same channel today (thin history)" if method.startswith("peer_")
              else "a hard rule that needs no history" if "hard_rule" in method
              else f"compared with this campaign's own last {n} days, weekday-adjusted" if n else "compared with this campaign's own recent history")
@@ -177,8 +185,12 @@ def channel_kpis(campaigns: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
     """Engagement per channel weighted by delivered volume, with counts — replaces a cross-channel 'avg CTR'."""
     from .anomaly.store import normalise_campaign
     acc: Dict[str, Dict[str, float]] = {}
+    missing = 0
     for c in campaigns:
         n = normalise_campaign(c)
+        if n["stats_missing"]:
+            missing += 1
+            continue
         ch = (n["channel"] or "Other").strip() or "Other"
         a = acc.setdefault(ch, {"delivered": 0.0, "clicks": 0.0, "sent": 0.0, "conv": 0.0, "rev": 0.0, "n": 0})
         d = n["delivered_count"] or 0.0
@@ -195,6 +207,8 @@ def channel_kpis(campaigns: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
                     "conversion_rate": round(a["conv"] / a["delivered"] * 100, 2) if a["delivered"] else None,
                     "revenue": round(a["rev"], 2)})
     out.sort(key=lambda x: -x["delivered"])
+    for o in out:
+        o["campaigns_without_stats"] = missing
     return out
 
 

@@ -27,6 +27,8 @@ log = logging.getLogger("moengage.llm")
 DEFAULT_BASE_URL = "https://openrouter.ai/api/v1"
 DEFAULT_MODEL = "anthropic/claude-sonnet-4.5"
 FALLBACK_MODELS = ["openai/gpt-4o-mini", "google/gemini-2.5-flash", "meta-llama/llama-3.3-70b-instruct"]
+# Free-tier OpenRouter models tried in order for bulk analysis (per-campaign deep dives, idea generation).
+FREE_BULK_MODELS = ["meta-llama/llama-3.3-70b-instruct:free", "deepseek/deepseek-chat-v3-0324:free", "qwen/qwen3-235b-a22b:free", "google/gemma-3-27b-it:free", "mistralai/mistral-small-3.2-24b-instruct:free"]
 
 
 class LLMError(RuntimeError):
@@ -89,7 +91,21 @@ def llm_settings() -> Dict[str, Any]:
         "api_key": get_setting("llm_api_key", ""),
         "temperature": float(get_setting("llm_temperature", "0.3") or 0.3),
         "max_tokens": int(get_setting("llm_max_tokens", "2000") or 2000),
+        "model_bulk": get_setting("llm_model_bulk", "auto-free"),   # auto-free = first working FREE_BULK_MODELS entry (OpenRouter), else the main model
     }
+
+
+def bulk_models(cfg: Optional[Dict[str, Any]] = None) -> List[str]:
+    """Ordered candidates for bulk work. Only OpenRouter has a free tier; elsewhere fall back to the main model."""
+    cfg = cfg or llm_settings()
+    mb = (cfg.get("model_bulk") or "auto-free").strip()
+    if cfg["provider"] == "openrouter":
+        if mb and mb != "auto-free":
+            return [mb, cfg["model"]]
+        return FREE_BULK_MODELS + [cfg["model"]]
+    if cfg["provider"] == "claude_cli":
+        return ["haiku" if mb in ("", "auto-free") else mb]
+    return [mb] if mb and mb != "auto-free" else [cfg["model"]]
 
 
 def _headers(cfg: Dict[str, Any]) -> Dict[str, str]:
@@ -159,17 +175,28 @@ class LLMClient:
     # ── OpenAI-compatible ────────────────────────────────────────────────
     def chat(self, messages: List[Dict[str, Any]], tools: Optional[List[Dict[str, Any]]] = None,
              tool_choice: Optional[str] = None, max_tokens: Optional[int] = None, temperature: Optional[float] = None,
-             response_format: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
+             response_format: Optional[Dict[str, Any]] = None, model: Optional[str] = None, tier: str = "main") -> Dict[str, Any]:
         """
-        Returns {"content": str|None, "tool_calls": [{"id","name","arguments"(dict)}], "finish_reason", "usage", "model"}
+        Returns {"content": str|None, "tool_calls": [...], "finish_reason", "usage", "model"}.
+        tier="bulk" tries the free/cheap candidates in order and falls back to the main model.
         """
+        if tier == "bulk" and model is None:
+            last = None
+            for cand in bulk_models(self.cfg):
+                try:
+                    return self.chat(messages, tools, tool_choice, max_tokens, temperature, response_format, model=cand, tier="main")
+                except LLMError as e:
+                    last = e
+                    log.info("bulk model %s failed: %s", cand, redact(str(e))[:120])
+                    continue
+            raise last or LLMError("no bulk model available")
         if self.cfg["provider"] == "claude_cli":
-            return self._chat_claude_cli(messages, tools)
+            return self._chat_claude_cli(messages, tools, model=model)
         if not self.cfg["api_key"] and "openrouter.ai" in self.cfg["base_url"]:
             raise LLMError("No LLM API key configured. Add your OpenRouter key in Settings → LLM.")
         safe_messages = [_redact_message(m) for m in messages]
         payload: Dict[str, Any] = {
-            "model": self.cfg["model"],
+            "model": model or self.cfg["model"],
             "messages": safe_messages,
             "temperature": self.cfg["temperature"] if temperature is None else temperature,
             "max_tokens": max_tokens or self.cfg["max_tokens"],
@@ -220,7 +247,7 @@ class LLMClient:
         raise last_err or LLMError("LLM request failed")
 
     # ── Claude Code CLI (headless) ───────────────────────────────────────
-    def _chat_claude_cli(self, messages: List[Dict[str, Any]], tools: Optional[List[Dict[str, Any]]]) -> Dict[str, Any]:
+    def _chat_claude_cli(self, messages: List[Dict[str, Any]], tools: Optional[List[Dict[str, Any]]], model: Optional[str] = None) -> Dict[str, Any]:
         binary = shutil.which("claude")
         if not binary:
             raise LLMError("Claude Code CLI not found on PATH; switch provider to openrouter.")
@@ -245,7 +272,7 @@ class LLMClient:
                         '{"tool_calls":[{"name":"<tool>","arguments":{...}}]} . Otherwise reply with plain text.\n'
                         "Available tools:\n" + json.dumps([t["function"] for t in tools])[:12000])
         prompt = redact("\n\n".join(sys_parts) + protocol + "\n\n" + "\n\n".join(convo))
-        model = cli_model(self.cfg["model"])
+        model = cli_model(model or self.cfg["model"])
         try:
             out = subprocess.run([binary, "-p", "--output-format", "json", "--model", model],
                                  input=prompt, capture_output=True, text=True, timeout=180)

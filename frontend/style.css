@@ -523,3 +523,21 @@ tr.secondary td { opacity: .6; }
 .quick.compact { margin: 6px 0 10px; }
 .msg .bubble { max-width: 100%; }
 @media (min-width: 1700px) { .grid-5 { grid-template-columns: repeat(5, minmax(0, 1fr)); } }
+
+/* growth hacks + deep dive + provenance */
+.hack .cat { font-size: 10px; text-transform: uppercase; letter-spacing: .06em; padding: 1px 6px; border-radius: 3px; background: var(--bg-3); color: var(--muted); }
+.hack .rel { font-family: var(--mono); font-size: 11px; color: var(--accent); }
+.hack .src { font-size: 11px; color: var(--dim); }
+.hack .src a { color: var(--accent); }
+.hack .unv { color: var(--warn); font-size: 10px; text-transform: uppercase; letter-spacing: .05em; }
+.deep h4 { font-size: 10.5px; text-transform: uppercase; letter-spacing: .06em; color: var(--dim); margin: 10px 0 4px; }
+.deep p { margin: 0 0 4px; font-size: 12.5px; }
+.deep .verdict { font-size: 13.5px; font-weight: 600; }
+.deep ul { margin: 0; padding-left: 18px; font-size: 12.5px; }
+.prov { font-size: 10.5px; color: var(--dim); font-family: var(--mono); }
+.cov { font-size: 11px; color: var(--muted); }
+.tax-row { display: grid; grid-template-columns: minmax(0, 2fr) repeat(5, minmax(0, 1fr)); gap: 8px; padding: 5px 8px; border-bottom: 1px solid var(--line); font-size: 12px; align-items: center; }
+.tax-row:last-child { border-bottom: 0; }
+.tax-row.h { font-size: 10px; text-transform: uppercase; letter-spacing: .06em; color: var(--dim); }
+.tax-row .num { font-family: var(--mono); text-align: right; }
+.tax-row .bar { height: 4px; background: var(--accent-dim); border-radius: 2px; overflow: hidden; margin-top: 3px; } .tax-row .bar i { display: block; height: 100%; background: var(--accent); }

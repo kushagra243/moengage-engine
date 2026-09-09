@@ -190,11 +190,16 @@ class MoEngageClient:
         raise DataUnavailable(role, " | ".join(errors))
 
     # ── reads ───────────────────────────────────────────────────────────
-    STATS_LIMIT = 60          # 10 ids per stats call; keeps a dashboard load to ~6 requests
+    STATS_LIMIT = 250         # 10 ids per stats call, cached 10 min; active/recent campaigns first
 
     def _merge_stats(self, rows: List[Dict[str, Any]]) -> None:
         """Campaign search carries no performance data; fold in campaign-stats where available."""
-        ids = [r["id"] for r in rows[:self.STATS_LIMIT] if r.get("id")]
+        def _recent(r):
+            st = str(r.get("status", "")).lower()
+            return 0 if st in ("active", "running", "scheduled", "sent", "completed") else 1
+        ordered = sorted([r for r in rows if r.get("id")], key=lambda r: (_recent(r), str(r.get("last_run") or "")), reverse=False)
+        ordered.sort(key=lambda r: (_recent(r), -(len(str(r.get("last_run") or "")))))
+        ids = [r["id"] for r in ordered[:self.STATS_LIMIT]]
         if not ids:
             return
         key = "|".join(sorted(ids))
@@ -211,14 +216,47 @@ class MoEngageClient:
         for r in rows:
             p = stats.get(r.get("id"))
             if not p:
+                r["stats_missing"] = True
                 continue
             r["stats_source"] = "live:api"
-            for dst, src in (("sent_count", "sent"), ("delivered_count", "delivered"), ("opened_count", "open"),
-                             ("clicks", "click"), ("attempted_count", "attempted"), ("ctr", "ctr"),
-                             ("delivery_rate", "delivery_rate"), ("open_rate", "open_rate"),
-                             ("conversion_rate", "ctor"), ("bounce_rate", "bounce_rate")):
-                if p.get(src) is not None:
-                    r[dst] = p[src]
+            r["stats_missing"] = False
+            r["_stats_raw"] = {k: v for k, v in p.items() if not isinstance(v, (dict, list))}[:0] if False else {k: v for k, v in list(p.items())[:40] if not isinstance(v, (dict, list))}
+            def first(*keys):
+                for k in keys:
+                    if p.get(k) is not None:
+                        return p[k]
+                return None
+            mapping = {
+                "sent_count": first("sent", "sent_count", "total_sent"),
+                "attempted_count": first("attempted", "attempted_count"),
+                "delivered_count": first("delivered", "delivered_count", "impressions", "impression", "received"),
+                "opened_count": first("open", "opens", "opened", "unique_open"),
+                "clicks": first("click", "clicks", "clicked", "unique_click"),
+                "ctr": first("ctr", "click_rate", "click_through_rate"),
+                "delivery_rate": first("delivery_rate", "delivered_rate"),
+                "open_rate": first("open_rate"),
+                "ctor": first("ctor", "click_to_open_rate"),
+                "bounce_rate": first("bounce_rate"),
+                "conversions": first("conversion", "conversions", "converted", "goal_conversions", "primary_conversion"),
+                "conversion_rate": first("conversion_rate", "goal_conversion_rate", "primary_conversion_rate"),
+                "revenue_generated": first("revenue", "total_revenue", "revenue_generated"),
+                "unsubscribes": first("unsubscribe", "unsubscribes"),
+                "uninstalls": first("uninstall", "uninstalls"),
+            }
+            for dst, val in mapping.items():
+                if val is not None:
+                    r[dst] = val
+            # derive counts from rates when the API gives one but not the other
+            try:
+                sent = float(r.get("sent_count") or 0)
+                if r.get("delivered_count") is None and sent and r.get("delivery_rate") is not None:
+                    r["delivered_count"] = round(sent * float(r["delivery_rate"]) / 100.0)
+                deliv = float(r.get("delivered_count") or 0)
+                if r.get("clicks") is None and deliv and r.get("ctr") is not None:
+                    r["clicks"] = round(deliv * float(r["ctr"]) / 100.0)
+            except (TypeError, ValueError):
+                pass
+            r["_provenance"] = {"list": "core-services/v1/campaigns/search", "stats": "core-services/v1/campaign-stats (30d window)", "fetched_at": now}
 
     def get_campaigns(self, status_filter: Optional[str] = None, channel_filter: Optional[str] = None) -> List[Dict[str, Any]]:
         if self.mock_mode:

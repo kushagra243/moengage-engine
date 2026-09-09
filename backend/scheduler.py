@@ -79,6 +79,14 @@ class DailyAutomationScheduler:
             except Exception as e:
                 report["growth_error"] = redact(str(e))
 
+            # 3b) deep dives for campaigns needing attention + largest (bulk model tier; deterministic without a model)
+            try:
+                from .analysis import analyse_priority
+                report["deep_dives"] = analyse_priority(limit=int(get_setting("analysis_batch", "8") or 8))
+                report["steps"].append("deep_dives")
+            except Exception as e:
+                report["deep_dives_error"] = redact(str(e))
+
             # 4) agent brief + agent ideas (only when a model is configured)
             cfg = llm_settings()
             want_llm = (cfg["api_key"] or cfg["provider"] == "claude_cli") if use_llm is None else use_llm

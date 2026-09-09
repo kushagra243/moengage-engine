@@ -67,6 +67,13 @@ def propose(kind: str, title: str, payload: Dict[str, Any], rationale: str = "",
     init_approval_tables()
     if kind not in KINDS:
         raise ApprovalError(f"unknown proposal kind {kind}")
+    # de-duplicate: an identical pending proposal (same kind + title) is returned instead of queued twice
+    conn = get_db()
+    dup = conn.execute("SELECT * FROM proposals WHERE status='pending' AND kind=? AND title=? ORDER BY id DESC LIMIT 1", (kind, title[:200])).fetchone()
+    conn.close()
+    if dup:
+        row = _row(dup); row["duplicate_of_pending"] = True
+        return row
     ex = _executors.get(kind)
     preview: Dict[str, Any] = {}
     if ex:
@@ -142,6 +149,13 @@ def approve_and_execute(pid: int, decided_by: str = "user", note: str = "") -> D
         conn.execute("UPDATE proposals SET status='executed', executed_at=CURRENT_TIMESTAMP, result_json=? WHERE id=?", (json.dumps(result, default=str), pid))
         conn.commit(); conn.close()
         audit("proposal.executed", {"id": pid, "kind": p["kind"], "ok": result.get("success", True)}, actor=decided_by)
+        if p["kind"] == "create_campaign" and result.get("success", True):
+            try:
+                from .experiments import register_from_proposal
+                from .database import get_setting as _gs
+                register_from_proposal(p, result, "mock" if _gs("mock_mode", "true").lower() == "true" else "live")
+            except Exception as ex:
+                audit("experiment.register_failed", {"id": pid, "error": redact(str(ex))}, actor="system")
     except Exception as e:
         err = redact(str(e))
         conn = get_db()

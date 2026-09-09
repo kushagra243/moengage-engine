@@ -612,3 +612,14 @@ input:focus, select:focus, textarea:focus { box-shadow: var(--glow); border-colo
 @keyframes shimmer { 0% { background-position: -200px 0; } 100% { background-position: 200px 0; } }
 .tile .v.dim { background: linear-gradient(90deg, transparent, rgba(34,211,238,.25), transparent); background-size: 200px 100%; -webkit-background-clip: text; background-clip: text; color: rgba(143,163,187,.6); animation: shimmer 1.6s linear infinite; }
 @media (prefers-reduced-motion: reduce) { .brand .dot, .tile .v.dim { animation: none; } }
+
+.q-item { display: grid; grid-template-columns: 110px minmax(0, 1fr) auto; gap: 10px; align-items: start; padding: 9px 10px; border-bottom: 1px solid var(--line); }
+.q-item:last-child { border-bottom: 0; }
+.q-item .mission { font-family: var(--mono); font-size: 10px; text-transform: uppercase; letter-spacing: .08em; color: var(--accent); }
+.q-item .t { font-weight: 600; font-size: 13px; }
+.q-item .g { font-size: 11px; color: var(--muted); font-family: var(--mono); margin-top: 2px; }
+.q-item .r { font-size: 12px; color: var(--text); margin-top: 3px; }
+.q-item .acts { display: flex; gap: 6px; }
+.exp-item { padding: 8px 10px; border-bottom: 1px solid var(--line); font-size: 12.5px; }
+.exp-item:last-child { border-bottom: 0; }
+.exp-item .m { font-family: var(--mono); font-size: 11px; color: var(--muted); }

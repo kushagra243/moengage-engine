@@ -187,6 +187,31 @@ class PublicAPI:
     def analytics_dashboards(self) -> Dict[str, Any]:
         return self.call("analytics_dashboards")
 
+    # ── analytics query (v5, async register → poll) — experimental, needs Dashboard & Analyze permission ──
+    def analytics_query(self, kind: str, body: Dict[str, Any], wait_s: float = 20.0) -> Dict[str, Any]:
+        import time as _t
+        name = {"behavior": "/v5/analytics/behavior", "funnels": "/v5/analytics/funnels", "retention": "/v5/analytics/retention", "user-analysis": "/v5/analytics/user-analysis"}.get(kind)
+        if not name:
+            raise PublicAPIError("kind must be behavior|funnels|retention|user-analysis")
+        ep = {"method": "POST", "key": "campaigns", "appkey_header": True}
+        headers = self._headers(ep)
+        r = self.http.request("POST", self.host + name, headers=headers, json=body, timeout=30)
+        if r.status_code == 428:
+            raise PublicAPIError("analytics fair-usage quota exceeded (HTTP 428)")
+        if r.status_code >= 400:
+            raise PublicAPIError(f"analytics {kind}: HTTP {r.status_code}: {redact(r.text[:200])}")
+        rid = (r.json() or {}).get("request_id") or (r.json() or {}).get("data", {}).get("request_id")
+        if not rid:
+            return {"status": r.status_code, "data": r.json()}
+        deadline = _t.time() + wait_s
+        while _t.time() < deadline:
+            st = self.http.get(f"{self.host}/v5/analytics/query/{rid}/status", headers=headers, timeout=15).json()
+            if str(st.get("status") or st.get("data", {}).get("status", "")).lower() in ("completed", "success", "done"):
+                res = self.http.get(f"{self.host}/v5/analytics/query/{rid}/results", headers=headers, timeout=30).json()
+                return {"status": 200, "request_id": rid, "data": res}
+            _t.sleep(2)
+        return {"status": 202, "request_id": rid, "data": None, "note": "still running; poll later"}
+
     # ── writes (executors only) ──────────────────────────────────────────
     def segment_create(self, name: str, description: str, filters: Dict[str, Any]) -> Dict[str, Any]:
         return self.call("segment_create", body={"name": name, "description": description, **filters}, write=True)

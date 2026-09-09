@@ -128,6 +128,8 @@ def init_db():
         "schedule_time": "09:00",
         "refresh_interval_hours": "6",
         "analysis_batch": "8",
+        "autopilot_enabled": "true",
+        "autopilot_max_actions": "3",
         "taxonomy_codes": "",
         "schedule_enabled": "true",
         "mock_mode": "true"  # Defaults to true so users have working experience instantly

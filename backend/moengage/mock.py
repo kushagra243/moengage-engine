@@ -13,6 +13,24 @@ def _ago(h: int) -> str:
     return (datetime.now() - timedelta(hours=h)).strftime("%Y-%m-%d %H:%M")
 
 
+FAULTS = {"cmp_002": {"ctr": 4.1, "opened_count": 1650}, "cmp_004": {"delivery_rate": 71.0, "delivered_count": 129504}, "cmp_006": {"revenue_generated": 214000.0}}
+
+
+def _todays_faults() -> Dict[str, Dict[str, Any]]:
+    """Demo scenario: the faults injected by seed_history persist for that calendar day,
+    so re-snapshots and the daily process keep showing them instead of overwriting."""
+    try:
+        from ..database import get_setting
+        import json as _json
+        raw = get_setting("mock_scenario", "")
+        if not raw:
+            return {}
+        sc = _json.loads(raw)
+        return sc.get("faults", {}) if sc.get("date") == datetime.now().date().isoformat() else {}
+    except Exception:
+        return {}
+
+
 def campaigns(jitter: bool = False) -> List[Dict[str, Any]]:
     base = [
         {"id": "cmp_001", "name": "Weekend Flash Sale 20% Off", "channel": "Push", "status": "Active", "target_segment": "All Active App Users",
@@ -33,7 +51,9 @@ def campaigns(jitter: bool = False) -> List[Dict[str, Any]]:
             f = random.uniform(0.93, 1.07)
             c["ctr"] = round(c["ctr"] * f, 2); c["opened_count"] = int(c["opened_count"] * f)
             c["revenue_generated"] = round(c["revenue_generated"] * random.uniform(0.9, 1.1), 2)
+    faults = _todays_faults()
     for c in base:
+        c.update(faults.get(c["id"], {}))
         c["_source"] = "mock"
     return base
 
@@ -104,12 +124,10 @@ def seed_history(days: int = 30, inject: bool = True, source: str = "mock") -> D
             r["revenue_generated"] = round(c["revenue_generated"] * rnd.gauss(1, 0.08), 2)
             rows.append(r)
         record_snapshot(rows, source=source, snapshot_date=d.isoformat())
-    tod = [dict(c) for c in base]
-    if inject:
-        for c in tod:
-            if c["id"] == "cmp_002": c["ctr"] = 4.1; c["opened_count"] = 1650
-            if c["id"] == "cmp_004": c["delivery_rate"] = 71.0; c["delivered_count"] = 129504
-            if c["id"] == "cmp_006": c["revenue_generated"] = 214000.0
+    from ..database import set_setting
+    import json as _json
+    set_setting("mock_scenario", _json.dumps({"date": today.isoformat(), "faults": FAULTS if inject else {}}))
+    tod = campaigns()   # applies today's faults
     record_snapshot(tod, source=source)
     rep = detect_anomalies(source=source, persist=True)
     return {"days": days, "injected": inject, "critical": rep["critical"], "warnings": rep["warnings"]}

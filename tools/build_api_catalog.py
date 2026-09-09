@@ -14,7 +14,7 @@ import requests
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 OUT = os.path.join(ROOT, "backend", "knowledge", "moengage-api")
 DOCS = "https://www.moengage.com/docs"
-READ_SAFE_POST = re.compile(r"[/-](search|meta|stats|get-by-ids|export|fetch|executions|status|history|usage-report|preview)$")
+READ_SAFE_POST = re.compile(r"[/-](search|meta|stats|get-by-ids|executions|status|history|usage-report)$")   # export/fetch/preview return per-user data → never read-safe
 # which API key (Settings → Integration) authenticates each spec
 KEY_KIND = {"data": "data", "business-events": "data", "business-events-v5": "data", "cohort-audience": "segmentation", "custom-segments": "segmentation",
             "campaigns": "campaigns", "campaign-draft": "campaigns", "stats-report": "campaigns", "flows": "campaigns", "content-blocks": "campaigns",

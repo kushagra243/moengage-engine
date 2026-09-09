@@ -149,7 +149,7 @@ def status():
 
 
 # ── settings ───────────────────────────────────────────────────────────────────
-ALLOWED_SETTING_PREFIXES = ("moengage_", "llm_", "market_", "schedule_", "refresh_", "analysis_", "taxonomy_", "autopilot_", "devagent_", "web3_", "competitor", "mock_mode")
+ALLOWED_SETTING_PREFIXES = ("moengage_", "llm_", "market_", "schedule_", "refresh_", "analysis_", "taxonomy_", "autopilot_", "devagent_", "web3_", "competitor", "console", "mock_mode")
 
 
 @app.get("/api/settings")
@@ -1067,6 +1067,90 @@ def selfheal_rollback(request: Request):
     return r
 
 
+# ── brain API (terminal UI) ─────────────────────────────────────────────────────
+class DirectiveAct(BaseModel):
+    note: str = ""
+
+class AskPayload(BaseModel):
+    message: str
+
+
+@app.get("/api/brain/state")
+def brain_state():
+    from . import brain
+    return brain.state()
+
+
+@app.get("/api/brain/directives")
+def brain_directives():
+    from . import brain
+    return {"directives": brain.directives()}
+
+
+@app.post("/api/brain/directives/{did}/{action}")
+def brain_directive_act(did: str, action: str, payload: DirectiveAct, request: Request):
+    from . import brain
+    if action not in ("approve", "hold", "simulate"):
+        raise HTTPException(400, "action must be approve | hold | simulate")
+    try:
+        return brain.act_on_directive(did, action, actor=request_actor(request), note=payload.note)
+    except (approvals.ApprovalError, ValueError) as e:
+        raise HTTPException(400, str(e))
+
+
+@app.get("/api/brain/ideas")
+def brain_ideas(filter: str = "all"):
+    from . import brain
+    return {"ideas": brain.ideas(filter)}
+
+
+@app.post("/api/brain/ideas/{raw}/promote")
+def brain_idea_promote(raw: str, request: Request):
+    from . import brain
+    return brain.promote_idea(raw, actor=request_actor(request))
+
+
+@app.get("/api/brain/experiments")
+def brain_experiments():
+    from . import brain
+    return brain.experiments_board()
+
+
+@app.get("/api/brain/intel")
+def brain_intel():
+    from . import brain
+    return brain.intel()
+
+
+@app.get("/api/brain/anomalies")
+def brain_anomalies():
+    from . import brain
+    return {"anomalies": brain.anomalies_view()}
+
+
+@app.get("/api/brain/market")
+def brain_market():
+    from . import brain
+    return brain.market_view()
+
+
+@app.get("/api/brain/trace")
+def brain_trace(limit: int = 40):
+    from . import brain
+    return {"lines": brain.trace(limit)}
+
+
+@app.post("/api/brain/cycle/run")
+def brain_cycle_run(request: Request):
+    audit("cycle.start", {"trigger": "terminal", "mode": "guarded"}, actor=request_actor(request))
+    return scheduler_service.trigger_run(trigger_type="manual")
+
+
+@app.post("/api/brain/ask")
+def brain_ask(payload: AskPayload):
+    return agent_chat(ChatPayload(message=payload.message))
+
+
 @app.get("/api/devagent/status")
 def devagent_status():
     return _devagent.status()
@@ -1108,11 +1192,18 @@ def automation_history():
 
 
 # ── static frontend with token injection ───────────────────────────────────────
-def _index_html() -> str:
-    with open(os.path.join(FRONTEND_DIR, "index.html"), encoding="utf-8") as f:
+def _index_html(name: str = "index.html") -> str:
+    with open(os.path.join(FRONTEND_DIR, name), encoding="utf-8") as f:
         html = f.read()
     tag = f'<meta name="local-token" content="{local_token}">'
     return html.replace("<head>", "<head>" + tag, 1) if "<head>" in html else tag + html
+
+
+def _console_choice() -> str:
+    """Default console: the terminal (design handoff). MOE_CONSOLE=classic or the setting console=classic restores the old one at /."""
+    if os.environ.get("MOE_CONSOLE", "").lower() == "classic" or get_setting("console", "terminal") == "classic":
+        return "index.html"
+    return os.path.join("terminal", "index.html")
 
 
 if os.path.exists(FRONTEND_DIR):
@@ -1120,7 +1211,15 @@ if os.path.exists(FRONTEND_DIR):
 
     @app.get("/", response_class=HTMLResponse)
     def index():
-        return HTMLResponse(_index_html(), headers={"Content-Security-Policy": CSP})
+        return HTMLResponse(_index_html(_console_choice()), headers={"Content-Security-Policy": CSP})
+
+    @app.get("/terminal", response_class=HTMLResponse)
+    def terminal_page():
+        return HTMLResponse(_index_html(os.path.join("terminal", "index.html")), headers={"Content-Security-Policy": CSP})
+
+    @app.get("/classic", response_class=HTMLResponse)
+    def classic_page():
+        return HTMLResponse(_index_html("index.html"), headers={"Content-Security-Policy": CSP})
 
     @app.get("/{path:path}")
     def static_fallback(path: str):

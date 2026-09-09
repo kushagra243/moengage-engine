@@ -124,6 +124,7 @@ ENGINE_SETTINGS: Dict[str, Dict[str, Any]] = {
     "competitor_surge_min_usd": {"type": "int", "min": 10000, "max": 50000000, "help": "minimum 24h USD volume for a surge / battle / gap to count"},
     "competitor_own_source":  {"type": "enum", "values": ["cmc", "coindcx_api"], "help": "where our own volumes come from (team rule: cmc)"},
     "competitor_cache_ttl_s": {"type": "int", "min": 120, "max": 86400, "help": "competitor ticker cache seconds"},
+    "llm_data_collection":    {"type": "enum", "values": ["deny", "allow"], "help": "OpenRouter provider policy: deny = only providers that do not store/train on prompts (default)"},
     "llm_brief_tier":         {"type": "enum", "values": ["bulk", "main"], "help": "which tier writes the daily brief"},
 }
 

@@ -31,3 +31,7 @@ data/endpoints.*.json
 
 # dev-agent worktrees (code-change drafts)
 data/worktrees/
+
+# nothing under data/ is ever tracked (state, merges, caches)
+data/*.json
+data/**/*.json

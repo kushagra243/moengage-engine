@@ -56,6 +56,12 @@ Heavy work goes to the free bulk tier (`llm_model_bulk=auto-free`): autopilot, d
 - **Self-repair**: tool and job failures are recorded (`tool_errors`); `self_diagnose` groups them into fix requests; the `self_heal` autopilot mission files them as code changes; `start.py` reverts the last agent merge automatically if the backend no longer imports (`./cli.py selfheal rollback` does it by hand).
 - **Code**: "Change request" in the Agent tab or `propose_code_change` → `backend/devagent.py` drafts on branch `agent/change-<id>` (Claude Code headless, fallback: model diff), runs tests, shows the diff in Approvals → approve merges and restarts the server.
 
+## Consoles
+`/` serves the **Agentic Brain Terminal** (`frontend/terminal/`, design handoff in the team's zip: seven modules, strict tokens, no radius/no shadows, Chakra Petch + IBM Plex Mono vendored under `frontend/fonts/` because the CSP is self-only). Data comes from `backend/brain.py` (`/api/brain/*`). The previous console stays at `/classic` (set `console=classic` or `MOE_CONSOLE=classic` to make it the default again). Keyboard: 1–7 modules, ⌘K ask the brain, a approve focused directive, j/k move focus, Esc close.
+
+## Privacy defaults (real workspace data is involved)
+Outbound HTTP only through `guarded_session` allowlists; the agent may not read per-user endpoints (`api_catalog.is_pii_endpoint`: customer export, cards, experiences, preferences, GDPR, archival) — they are blocked in `call_documented` and flagged in the catalog; `redact()` masks keys, tokens, cookies, emails, Indian phone numbers, PAN and Aadhaar before anything reaches logs, prompts or the model; OpenRouter requests carry `provider.data_collection=deny` by default (`llm_data_collection`) so prompts never go to providers that store or train on them — free models that require data collection are skipped and the chain falls back; nothing under `data/` is tracked by git; code-change drafting runs in a git worktree that contains no `data/`.
+
 ## Intelligence dashboard
 The Market tab is the team's realtime knowledge page (`renderMarket` in `frontend/app.js`, data from `/api/market/context`): now strip → Tier-0 callout → Act-now hooks (each linked to an SOP and an "ask the agent" button) → crypto regime/movers/funding → listings + OI → tokenised markets → headlines → sources → competitive intelligence (internal) → web3 trending. Auto-refreshes every 5 minutes while open.
 

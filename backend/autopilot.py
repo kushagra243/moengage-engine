@@ -263,6 +263,7 @@ def run(max_actions: int = 3, force: bool = False) -> Dict[str, Any]:
 
 TIER0_MOVE_PCT = 8.0
 GEO_WORDS = ("war", "strike", "missile", "sanction", "tariff", "invasion", "ceasefire", "election", "coup", "sebi", "rbi", "ban", "regulat", "tax", "fiu", "hack", "exploit", "halt", "outage")
+STRONG_WORDS = ("war", "missile", "invasion", "sanction", "ceasefire", "coup", "hack", "exploit", "halt", "outage", "ban")
 
 
 def tier0_trigger(ctx: Dict[str, Any]) -> Optional[Dict[str, str]]:
@@ -279,7 +280,13 @@ def tier0_trigger(ctx: Dict[str, Any]) -> Optional[Dict[str, str]]:
         return {"kind": "stress_regime", "detail": f"regime {label}: {'; '.join((cr.get('regime') or {}).get('reasons', [])[:2])}"}
     flags = ((ctx.get("news") or {}).get("risk_flags") or [])
     geo = [f for f in flags if any(w in str(f.get("title", "")).lower() for w in GEO_WORDS)]
-    if len(geo) >= 3:
+    def _strong(t: str) -> bool:
+        t = t.lower()
+        if any(w in t for w in ("war", "missile", "invasion", "sanction", "ceasefire", "coup", "hack", "exploit", "halt", "outage")):
+            return True
+        return "ban" in t and any(k in t for k in ("crypto", "exchange", "trading", "sebi", "rbi", "bitcoin", "token")) and "lifts ban" not in t
+    strong = [f for f in geo if _strong(str(f.get("title", "")))]
+    if len(geo) >= 3 and len(strong) >= 2:
         return {"kind": "geopolitical_or_regulatory", "detail": "; ".join(str(f.get("title"))[:80] for f in geo[:3])}
     return None
 

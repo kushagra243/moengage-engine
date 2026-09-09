@@ -58,17 +58,28 @@ def _num(v) -> Optional[float]:
 
 def normalise_campaign(c: Dict[str, Any]) -> Dict[str, Any]:
     """Map heterogeneous campaign dicts (mock, dashboard, public API) to a flat metric row."""
-    sent = _num(c.get("sent_count") or c.get("sent") or c.get("attempted") or c.get("total_sent"))
-    delivered = _num(c.get("delivered_count") or c.get("delivered") or c.get("impressions"))
-    opened = _num(c.get("opened_count") or c.get("opened") or c.get("opens") or c.get("clicked") or c.get("clicks"))
-    conv = _num(c.get("conversions") or c.get("conversion_count") or c.get("converted"))
-    rev = _num(c.get("revenue_generated") or c.get("revenue") or c.get("total_revenue"))
-    dr = _num(c.get("delivery_rate"))
+    def pick(*keys):
+        for k in keys:
+            v = _num(c.get(k))
+            if v is not None:
+                return v
+        return None
+    sent = pick("sent_count", "sent", "attempted", "total_sent")
+    delivered = pick("delivered_count", "delivered", "impressions")
+    dr = pick("delivery_rate")
+    if delivered is None and sent and dr is not None:
+        delivered = round(sent * dr / 100.0)
     if dr is None and sent and delivered is not None and sent > 0:
         dr = round(100.0 * delivered / sent, 3)
-    ctr = _num(c.get("ctr") or c.get("click_rate") or c.get("open_rate"))
+    # engagement = clicks (push/in-app) — opens only when clicks are unknown (email open counts)
+    opened = pick("clicks", "clicked", "opened_count", "opened", "opens")
+    ctr = pick("ctr", "click_rate")
+    if opened is None and delivered and ctr is not None:
+        opened = round(delivered * ctr / 100.0)
     if ctr is None and delivered and opened is not None and delivered > 0:
         ctr = round(100.0 * opened / delivered, 3)
+    conv = pick("conversions", "conversion_count", "converted")
+    rev = pick("revenue_generated", "revenue", "total_revenue")
     cr = _num(c.get("conversion_rate"))
     if cr is None and delivered and conv is not None and delivered > 0:
         cr = round(100.0 * conv / delivered, 3)
@@ -80,6 +91,7 @@ def normalise_campaign(c: Dict[str, Any]) -> Dict[str, Any]:
         "sent_count": sent, "delivered_count": delivered, "delivery_rate": dr,
         "opened_count": opened, "ctr": ctr, "conversions": conv, "conversion_rate": cr,
         "revenue_generated": rev,
+        "stats_missing": bool(c.get("stats_missing")) or (sent is None and delivered is None and ctr is None),
     }
 
 
@@ -91,6 +103,8 @@ def record_snapshot(campaigns: List[Dict[str, Any]], source: str = "live", snaps
     n = 0
     for camp in campaigns:
         row = normalise_campaign(camp)
+        if row["stats_missing"]:
+            continue            # never snapshot a row with no metrics: it would poison the baseline with zeros
         c.execute("""
             INSERT INTO campaign_snapshots
               (snapshot_date, source, campaign_id, campaign_name, channel, status,

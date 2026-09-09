@@ -43,6 +43,8 @@ init_db()
 init_anomaly_tables()
 approvals.init_approval_tables()
 growth.init_growth_tables()
+from .analysis import init_analysis_tables
+init_analysis_tables()
 _migrated = migrate_plaintext_secrets()
 if _migrated:
     logging.getLogger("moengage").info("encrypted %d legacy plaintext secret(s)", _migrated)
@@ -129,7 +131,7 @@ def status():
 
 
 # ── settings ───────────────────────────────────────────────────────────────────
-ALLOWED_SETTING_PREFIXES = ("moengage_", "llm_", "market_", "schedule_", "refresh_", "mock_mode")
+ALLOWED_SETTING_PREFIXES = ("moengage_", "llm_", "market_", "schedule_", "refresh_", "analysis_", "taxonomy_", "mock_mode")
 
 
 @app.get("/api/settings")
@@ -484,6 +486,90 @@ def mock_walkthrough():
         {"id": "live", "title": "Go live: paste dashboard headers or API keys", "done": not mode_mock, "action": "settings", "detail": "Settings → Integration"},
     ]
     return {"mock_mode": mode_mock, "steps": steps, "done": sum(1 for s in steps if s["done"]), "total": len(steps)}
+
+
+# ── taxonomy & deep analysis ───────────────────────────────────────────────────
+@app.get("/api/taxonomy/catalog")
+def taxonomy_catalog():
+    from .taxonomy import catalog
+    try:
+        return catalog(MoEngageClient().get_campaigns())
+    except DataUnavailable as e:
+        return _unavailable(e)
+
+
+@app.get("/api/taxonomy/groups")
+def taxonomy_groups(by: str = "group_key"):
+    from .taxonomy import group
+    try:
+        return {"by": by, "groups": group(MoEngageClient().get_campaigns(), by)}
+    except DataUnavailable as e:
+        return _unavailable(e)
+
+
+@app.get("/api/analysis")
+def analysis_list(limit: int = 50):
+    from .analysis import list_analyses
+    return {"analyses": list_analyses(limit)}
+
+
+@app.get("/api/analysis/{campaign_id}")
+def analysis_get(campaign_id: str):
+    from .analysis import latest
+    r = latest(campaign_id)
+    if not r:
+        raise HTTPException(404, "no analysis yet; POST /api/analysis/run")
+    return r
+
+
+class AnalysisRun(BaseModel):
+    campaign_ids: Optional[List[str]] = None
+    force: bool = False
+    limit: int = 8
+
+
+@app.post("/api/analysis/run")
+def analysis_run(payload: AnalysisRun):
+    from .analysis import analyse, analyse_priority
+    if payload.campaign_ids:
+        out = []
+        for cid in payload.campaign_ids[:20]:
+            try:
+                r = analyse(cid, force=payload.force)
+                out.append({"campaign_id": cid, "cached": r["cached"], "tier": r["tier"], "model": r["model"], "verdict": r["analysis"].get("verdict")})
+            except Exception as e:
+                out.append({"campaign_id": cid, "error": redact(str(e))[:200]})
+        return {"analysed": out}
+    return analyse_priority(limit=payload.limit, force=payload.force)
+
+
+# ── growth hacks (curated + model-suggested, ranked for this workspace) ────────
+class HackStatus(BaseModel):
+    status: str
+    verified: Optional[bool] = None
+
+
+@app.get("/api/hacks")
+def hacks_list(status: Optional[str] = None):
+    from .hacks import ranked
+    return ranked(status)
+
+
+@app.post("/api/hacks/suggest")
+def hacks_suggest(n: int = 5):
+    from .hacks import suggest_with_model, ranked
+    r = suggest_with_model(n)
+    r["hacks"] = ranked()["hacks"][:5]
+    return r
+
+
+@app.post("/api/hacks/{hack_id}/status")
+def hacks_status(hack_id: str, payload: HackStatus):
+    from .hacks import set_status
+    if payload.status not in ("new", "saved", "dismissed", "proposed"):
+        raise HTTPException(400, "bad status")
+    set_status(hack_id, payload.status, payload.verified)
+    return {"ok": True}
 
 
 # ── growth feed ────────────────────────────────────────────────────────────────

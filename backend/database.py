@@ -115,6 +115,7 @@ def init_db():
         "llm_base_url": "https://openrouter.ai/api/v1",
         "llm_model": "anthropic/claude-sonnet-4.5",
         "llm_api_key": os.getenv("OPENROUTER_API_KEY", ""),
+        "llm_model_bulk": "auto-free",
         "llm_temperature": "0.3",
         "llm_max_tokens": "2000",
         "market_universe_mode": "either",   # either | both | hyperliquid | binance | manual — assets tradable on Binance USDT spot / Hyperliquid perps
@@ -126,6 +127,8 @@ def init_db():
         "market_region": "IN",
         "schedule_time": "09:00",
         "refresh_interval_hours": "6",
+        "analysis_batch": "8",
+        "taxonomy_codes": "",
         "schedule_enabled": "true",
         "mock_mode": "true"  # Defaults to true so users have working experience instantly
     }

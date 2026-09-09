@@ -289,6 +289,31 @@ def propose_pause_campaign(campaign_id: str, rationale: str) -> Dict[str, Any]:
     return {"proposal_id": p["id"], "status": p["status"], "preview": p.get("preview")}
 
 
+def campaign_taxonomy(by: str = "group_key") -> Dict[str, Any]:
+    """Campaigns grouped by naming-convention facets (programme, cohort, propensity, value tier, trader type, product, channel) with volume-weighted rates, plus the within-facet contrasts that carry insight."""
+    from ..taxonomy import catalog, group
+    camps = _client().get_campaigns()
+    cat = catalog(camps)
+    return {"source": _client().mode, "campaigns": cat["campaigns"], "programmes": cat["programmes"][:10], "cohorts": cat["cohorts"][:10],
+            "groups": group(camps, by)[:20], "comparisons": cat["comparisons"][:8], "unknown_tokens": cat["unknown_tokens"][:15]}
+
+
+def campaign_deep_dive(campaign_id: str, force: bool = False) -> Dict[str, Any]:
+    """Structured expert analysis of one campaign (segment, users, content, process, next actions, experiment) from its full dossier; cached until data changes; runs on the bulk model tier."""
+    from ..analysis import analyse
+    r = analyse(campaign_id, force=force)
+    d = r["dossier"]
+    return {"campaign_id": campaign_id, "cached": r["cached"], "model": r["model"], "tier": r["tier"], "analysis": r["analysis"],
+            "dossier_summary": {"taxonomy": d.get("taxonomy"), "metrics_today": d.get("metrics_today"), "history_days": d.get("history_days"), "peers": d.get("peers_same_group", [])[:4]}}
+
+
+def growth_hacks(status: Optional[str] = None, limit: int = 10) -> Dict[str, Any]:
+    """Curated, sourced growth hacks for crypto/fintech CLM ranked for this workspace's regime, gaps and channel mix (plus model-suggested ones marked unverified)."""
+    from ..hacks import ranked
+    r = ranked(status)
+    return {"context": r["context"], "hacks": [{k: h.get(k) for k in ("id", "title", "category", "what", "why", "source", "how", "kpi", "effort", "relevance", "relevance_reasons", "source_kind", "verified", "status")} for h in r["hacks"][:limit]]}
+
+
 def record_ideas(ideas: List[Dict[str, Any]]) -> Dict[str, Any]:
     """Capture recommendations (campaigns, segments, experiments, growth hacks, fixes) into the persistent growth feed."""
     from .. import growth
@@ -358,6 +383,9 @@ TOOL_SCHEMAS: List[Dict[str, Any]] = [
         ["name", "channel", "target_segment", "variants", "rationale", "goal"]),
     _fn("propose_flow", "Propose a DRAFT flow/journey for approval. steps: [{type: wait|split|message|cohort, ...}].",
         {"name": STR, "entry_trigger": STR, "steps": {"type": "array", "items": OBJ}, "exit_rules": {"type": "array", "items": STR}, "rationale": STR}, ["name", "entry_trigger", "steps", "rationale"]),
+    _fn("campaign_taxonomy", "Group campaigns by naming-convention facets (programme, cohort, propensity, value, trader, product, channel) with volume-weighted rates and the biggest within-facet contrasts. Use for any segment-level or 'which cohorts respond' question.", {"by": STR}),
+    _fn("campaign_deep_dive", "Deep, structured analysis of one campaign from its full dossier (taxonomy, metrics, history, diagnosis, peers, market). Cached until data changes. Use before recommending changes to a specific campaign.", {"campaign_id": STR, "force": {"type": "boolean"}}, ["campaign_id"]),
+    _fn("growth_hacks", "Sourced growth tactics working in crypto/fintech CLM, ranked for this workspace today; use when asked what is trending or what to try next.", {"status": STR, "limit": {"type": "integer"}}),
     _fn("record_ideas", "Capture every recommendation you make (campaign, segment, experiment, growth hack, fix) into the persistent growth feed so nothing is lost. ideas: [{title, kind: trending_campaign|growth_hack|market_play|moengage_activity|fix, why (cite data), how (MoEngage steps), segment, channel, angle, kpi, transition, effort, expected_impact, priority}].",
         {"ideas": {"type": "array", "items": OBJ}}, ["ideas"]),
     _fn("propose_pause_campaign", "Propose pausing a campaign (e.g. deliverability collapse or market suppression rule).", {"campaign_id": STR, "rationale": STR}, ["campaign_id", "rationale"]),
@@ -370,6 +398,6 @@ TOOLS: Dict[str, Callable[..., Dict[str, Any]]] = {
     "campaign_history": _safe(campaign_history), "campaign_diagnosis": _safe(campaign_diagnosis), "market_snapshot": _safe(market_snapshot), "market_news": _safe(market_news),
     "market_campaign_hooks": _safe(market_campaign_hooks), "moengage_guidance": _safe(moengage_guidance), "integration_status": _safe(integration_status),
     "list_proposals": _safe(list_proposals), "propose_segment": _safe(propose_segment), "propose_campaign": _safe(propose_campaign),
-    "record_ideas": _safe(record_ideas), "clm_program_audit": _safe(clm_program_audit), "experiment_plan": _safe(experiment_plan), "campaign_brief_check": _safe(campaign_brief_check),
+    "record_ideas": _safe(record_ideas), "growth_hacks": _safe(growth_hacks), "campaign_taxonomy": _safe(campaign_taxonomy), "campaign_deep_dive": _safe(campaign_deep_dive), "clm_program_audit": _safe(clm_program_audit), "experiment_plan": _safe(experiment_plan), "campaign_brief_check": _safe(campaign_brief_check),
     "propose_flow": _safe(propose_flow), "propose_pause_campaign": _safe(propose_pause_campaign),
 }

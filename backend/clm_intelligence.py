@@ -57,8 +57,10 @@ class CLMIntelligenceEngine:
         try:
             campaigns = self.moe.get_campaigns()
             out["source"] = campaigns[0].get("_source") if campaigns else self.moe.mode
-            audited = self.audit_active_campaigns(campaigns)
+            audited = self.audit_active_campaigns([c for c in campaigns if not c.get("stats_missing")])
             out["audited_campaigns"] = audited
+            out["coverage"] = {"campaigns_total": len(campaigns), "with_stats": len(audited), "without_stats": len(campaigns) - len(audited),
+                               "note": "Stats come from campaign-stats (last 30 days); campaigns without any sends in the window have no metrics and are excluded from audits."}
             ctrs = [a["ctr"] for a in audited if a["ctr"]]
             dels = [a["delivery_rate"] for a in audited if a["delivery_rate"] is not None]
             out["health_scorecard"] = {

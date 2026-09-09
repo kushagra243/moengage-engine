@@ -24,10 +24,10 @@ from typing import Any, Dict, List, Optional
 from .database import get_db
 from .security import redact
 
-KINDS = ("trending_campaign", "growth_hack", "market_play", "moengage_activity", "fix")
+KINDS = ("trending_campaign", "growth_hack", "market_play", "moengage_activity", "fix", "structural_gap")
 STATUSES = ("new", "saved", "dismissed", "proposed", "expired")
 # how long an idea stays relevant unless the data keeps re-surfacing it (refresh extends expiry); saved/proposed never expire
-TTL_HOURS = {"market_play": 6, "fix": 72, "trending_campaign": 24 * 14, "growth_hack": 24 * 21, "moengage_activity": 24 * 60}
+TTL_HOURS = {"market_play": 6, "fix": 72, "trending_campaign": 24 * 14, "growth_hack": 24 * 21, "moengage_activity": 24 * 60, "structural_gap": 24 * 45}
 
 
 def init_growth_tables() -> None:

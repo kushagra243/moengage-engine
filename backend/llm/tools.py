@@ -336,12 +336,15 @@ def propose_segment(name: str, criteria: Dict[str, Any], rationale: str, descrip
 
 def propose_campaign(name: str, channel: str, target_segment: str, variants: List[Dict[str, Any]], rationale: str, goal: Dict[str, Any],
                      schedule: Optional[Dict[str, Any]] = None, ttl_hours: Optional[int] = None, market_hook_id: Optional[str] = None,
-                     exclusions: Optional[List[str]] = None, frequency_cap: Optional[str] = None) -> Dict[str, Any]:
+                     exclusions: Optional[List[str]] = None, frequency_cap: Optional[str] = None, ice: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
     check = campaign_brief_check(goal, variants, channel, market_linked=bool(market_hook_id), ttl_hours=ttl_hours)
     if not check["ok"]:
         return {"error": "brief rejected", "problems": check["problems"], "warnings": check["warnings"], "hint": "Fix the goal brief and call propose_campaign again."}
+    from .. import ice as ice_mod
+    ice_in = ice or {}
+    ice_row = {**ice_mod.score(ice_in.get("impact", 6), ice_in.get("confidence", 6), ice_in.get("ease", 6)), "tagline": str(ice_in.get("tagline") or ice_mod.tagline(name, goal.get("primary_kpi") or "", target_segment, goal.get("hypothesis") or ""))[:220]}
     payload = {"name": name, "channel": channel, "target_segment": target_segment, "variants": variants, "schedule": schedule, "ttl_hours": ttl_hours,
-               "market_hook_id": market_hook_id, "goal": goal, "exclusions": exclusions or [], "frequency_cap": frequency_cap}
+               "market_hook_id": market_hook_id, "goal": goal, "exclusions": exclusions or [], "frequency_cap": frequency_cap, "ice": ice_row}
     p = approvals.propose("create_campaign", f"Campaign draft: {name}", payload, rationale, risk="medium")
     _capture_proposal_idea("create_campaign", f"Campaign: {name}", payload, rationale, p["id"])
     return {"proposal_id": p["id"], "status": p["status"], "preview": p.get("preview"), "brief_warnings": check["warnings"], "note": "Draft only. A human must approve before anything reaches MoEngage."}
@@ -520,10 +523,10 @@ def define_sop(spec: Dict[str, Any]) -> Dict[str, Any]:
     return sops.define_sop(spec, author="agent")
 
 
-def run_sop(sop_id: str, segment_name: Optional[str] = None, start_date: Optional[str] = None, variants_by_step: Optional[Dict[str, Any]] = None, dry_run: bool = False) -> Dict[str, Any]:
-    """Run an SOP on a cohort: resolves the segment (exact name or latest version of the family), pre-flight checks, then one approval-gated campaign proposal per step. Provide variants_by_step {"0": [{label,title,body,cta}], ...} written per crypto-copywriting; use dry_run first."""
+def run_sop(sop_id: str, segment_name: Optional[str] = None, start_date: Optional[str] = None, variants_by_step: Optional[Dict[str, Any]] = None, dry_run: bool = False, ice: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
+    """Run an SOP on a cohort: resolves the segment (exact name or latest version of the family), pre-flight checks, then one approval-gated campaign proposal per step. Provide variants_by_step {"0": [{label,title,body,cta}], ...} written per crypto-copywriting; use dry_run first. Pass ice {impact, confidence, ease, tagline} so the board ranks the run."""
     from .. import sops
-    return sops.run_sop(sop_id, segment_name=segment_name, start_date=start_date, variants_by_step=variants_by_step, created_by="agent", dry_run=dry_run)
+    return sops.run_sop(sop_id, segment_name=segment_name, start_date=start_date, variants_by_step=variants_by_step, created_by="agent", dry_run=dry_run, ice=ice)
 
 
 def competitor_intel(force: bool = False) -> Dict[str, Any]:
@@ -550,6 +553,19 @@ def onchain_vs_cex(force: bool = False) -> Dict[str, Any]:
     """Hyperliquid (the venue behind our perps) versus centralised exchanges: HL daily volume, OI and users vs Binance/OKX/Bybit/Bitget/Gate/MEXC (CMC), rank and share; on-chain perps OI landscape (DefiLlama, free); per-coin OI share and funding (per hour) across Hyperliquid, Binance, Bybit, OKX with the cheapest venue for longs; Coinglass section if a key is set. Internal."""
     from ..market import onchain_cex
     return onchain_cex.compare(force=force)
+
+
+def structural_audit() -> Dict[str, Any]:
+    """Which must-have lifecycle campaigns (from the CLM playbooks) are missing from the live programme: KYC rescue, deposit-failure recovery, funded→first trade, second trade 72h, own-asset alerts, weekly recap, fee-tier nudge, intent-based graduation, tokenised cross-sell, slipping vs own baseline, dormant by cause, liquidation recovery, funding nudges, stress mode, holdouts, broadcast cap, frequency caps, web3 safety, SIP nurture, WhatsApp utility, Cards, channel recovery, re-KYC, cohort refresh. Each gap carries ICE, tagline, segment, SOP, KPI, benchmark. These are the P0 recommendations."""
+    from .. import structural
+    return structural.audit()
+
+
+def money_flow() -> Dict[str, Any]:
+    """Where capital and attention are going today and what traders are doing: risk-appetite composite, BTC/ETH dominance shift, stablecoin net minting (7d) and chain inflows, sector rotation in/out (CoinGecko categories), venue volume share crypto vs US-stock vs index vs commodity perps, attention spikes vs 7-day average, leverage build/flush, web3 speculation gauge — plus plain-English behaviour reads and prioritised recommendations with segment, SOP, KPI and what to avoid."""
+    from ..market import moneyflow
+    from ..market.context import _latest
+    return moneyflow.lab(_latest(6 * 3600) or {})
 
 
 def market_flash(hours: int = 6) -> Dict[str, Any]:
@@ -775,9 +791,9 @@ TOOL_SCHEMAS: List[Dict[str, Any]] = [
         ["baseline_rate_pct", "min_detectable_lift_pct_points", "daily_eligible_users"]),
     _fn("campaign_brief_check", "Validate a goal brief + copy against the goal discipline and compliance rules. Returns problems (blocking) and warnings.",
         {"goal": OBJ, "variants": {"type": "array", "items": OBJ}, "channel": STR, "market_linked": {"type": "boolean"}, "ttl_hours": {"type": "integer"}, "audience_countries": {"type": "array", "items": STR}, "disclaimer_included": {"type": "boolean"}}, ["goal"]),
-    _fn("propose_campaign", "Propose a DRAFT campaign for human approval. REQUIRES a complete goal brief: {transition, hypothesis, primary_kpi, target, guardrail_metric, control_group_pct (>=5), measurement_window_days, kill_criteria, suppressions[]}. variants: [{label,title,body,cta}]. Include ttl_hours for market-linked sends and exclusions[].",
+    _fn("propose_campaign", "Propose a DRAFT campaign for human approval. REQUIRES a complete goal brief: {transition, hypothesis, primary_kpi, target, guardrail_metric, control_group_pct (>=5), measurement_window_days, kill_criteria, suppressions[]}. variants: [{label,title,body,cta}]. Include ttl_hours for market-linked sends and exclusions[]. ALWAYS pass ice: {impact 1-10, confidence 1-10, ease 1-10, tagline} (GrowthHackers ICE) — the board ranks by it.",
         {"name": STR, "channel": STR, "target_segment": STR, "variants": {"type": "array", "items": OBJ}, "rationale": STR, "goal": OBJ, "schedule": OBJ,
-         "ttl_hours": {"type": "integer"}, "market_hook_id": STR, "exclusions": {"type": "array", "items": STR}, "frequency_cap": STR},
+         "ttl_hours": {"type": "integer"}, "market_hook_id": STR, "exclusions": {"type": "array", "items": STR}, "frequency_cap": STR, "ice": OBJ},
         ["name", "channel", "target_segment", "variants", "rationale", "goal"]),
     _fn("propose_flow", "Propose a DRAFT flow/journey for approval. steps: [{type: wait|split|message|cohort, ...}].",
         {"name": STR, "entry_trigger": STR, "steps": {"type": "array", "items": OBJ}, "exit_rules": {"type": "array", "items": STR}, "rationale": STR}, ["name", "entry_trigger", "steps", "rationale"]),
@@ -808,11 +824,13 @@ TOOL_SCHEMAS: List[Dict[str, Any]] = [
     _fn("list_sops", "List campaign SOPs (standard operating procedures) by type with sequence length, cohort family, duration, frequency, holdout, KPI and framework status.", {"campaign_type": STR}),
     _fn("sop_detail", "Full SOP: audience, steps (day/channel/purpose/copy brief), kill criteria, checks, compliance.", {"sop_id": STR}, ["sop_id"]),
     _fn("define_sop", "Create or update an SOP from a full spec; validated against the framework (one KPI, holdout, caps, DND windows, exclusions for derivatives, disclaimers, kill criteria).", {"spec": OBJ}, ["spec"]),
-    _fn("run_sop", "Run an SOP on a cohort: resolve segment (name or family → latest version), pre-flight, then one approval-gated proposal per step. Write variants_by_step per crypto-copywriting; dry_run first to see the plan.", {"sop_id": STR, "segment_name": STR, "start_date": STR, "variants_by_step": OBJ, "dry_run": {"type": "boolean"}}, ["sop_id"]),
+    _fn("run_sop", "Run an SOP on a cohort: resolve segment (name or family → latest version), pre-flight, then one approval-gated proposal per step. Write variants_by_step per crypto-copywriting; dry_run first to see the plan.", {"sop_id": STR, "segment_name": STR, "start_date": STR, "variants_by_step": OBJ, "dry_run": {"type": "boolean"}, "ice": OBJ}, ["sop_id"]),
     _fn("competitor_intel", "Internal competitive picture vs tracked Indian/global venues: volume table, pair battles (our share), surges elsewhere, listing gaps, our edges, funding edges, ranked actions with owner + SOP. Internal only.", {"force": {"type": "boolean"}}),
     _fn("competitor_benchmarks", "Category leaderboards (spot / perps / options / commodities_tokenised) across Indian and global venues with our gap multiple and pair-level targets to match. Internal.", {"category": {"type": "string", "enum": ["spot", "perps", "options", "commodities_tokenised"]}, "force": {"type": "boolean"}}),
     _fn("competitor_campaigns", "Competitor campaigns detected in the last N hours from announcements, blogs, news and App Store notes — type, impact, counter SOP; App Store ranks. Internal.", {"hours": {"type": "integer"}, "venue": STR, "force": {"type": "boolean"}}),
     _fn("onchain_vs_cex", "Hyperliquid vs centralised venues (volume, OI, users, rank, share), on-chain perps OI landscape, per-coin OI share and funding edges. Internal.", {"force": {"type": "boolean"}}),
+    _fn("structural_audit", "Structural misses in the CRM / funnel journey vs the CLM playbooks, ICE-ranked with tagline, segment, SOP, KPI, benchmark. These are P0; propose them first (run_sop or propose_campaign with ice + tagline).", {}),
+    _fn("money_flow", "Money flow + trader behaviour reads + prioritised recommendations (segment, SOP, KPI, avoid). Start here for 'what should we do today'.", {}),
     _fn("market_flash", "Breaking-now market flash with product lenses, biggest news, top OI assets and intel per product.", {"hours": {"type": "integer"}}),
     _fn("campaign_from_alert", "Queue an approval-gated campaign from a market alert via the product's SOP with compliant placeholder copy; dry_run first, then revise_proposal to improve copy.", {"product": STR, "headline": STR, "detail": STR, "sop_id": STR, "segment_name": STR, "dry_run": {"type": "boolean"}}, ["product", "headline"]),
     _fn("competitor_dossier", "Marketing dossier for one rival: position by category, 7-day changes, app presence, campaigns and playbook, counters, how to beat them. Internal.", {"venue": STR}, ["venue"]),
@@ -854,5 +872,5 @@ TOOLS: Dict[str, Callable[..., Dict[str, Any]]] = {
     "north_star": _safe(north_star), "set_north_star": _safe(set_north_star), "comms_limits": _safe(comms_limits), "set_comms_limits": _safe(set_comms_limits), "peace_index": _safe(peace_index),
     "guardrail_monitor": _safe(guardrail_monitor), "write_flight_plan": _safe(write_flight_plan), "flight_plans": _safe(flight_plans),
     "segment_study": _safe(segment_study), "define_nomenclature": _safe(define_nomenclature), "list_sops": _safe(list_sops), "sop_detail": _safe(sop_detail), "define_sop": _safe(define_sop), "run_sop": _safe(run_sop), "sop_runs": _safe(sop_runs), "channel_matrix": _safe(channel_matrix),
-    "competitor_intel": _safe(competitor_intel), "competitor_benchmarks": _safe(competitor_benchmarks), "competitor_campaigns": _safe(competitor_campaigns), "onchain_vs_cex": _safe(onchain_vs_cex), "market_flash": _safe(market_flash), "campaign_from_alert": _safe(campaign_from_alert), "competitor_dossier": _safe(competitor_dossier), "pair_battle": _safe(pair_battle), "web3_trending": _safe(web3_trending), "product_cohorts": _safe(product_cohorts), "announcement_lenses": _safe(announcement_lenses), "request_data": _safe(request_data), "data_requests": _safe(data_requests),
+    "competitor_intel": _safe(competitor_intel), "competitor_benchmarks": _safe(competitor_benchmarks), "competitor_campaigns": _safe(competitor_campaigns), "onchain_vs_cex": _safe(onchain_vs_cex), "structural_audit": _safe(structural_audit), "money_flow": _safe(money_flow), "market_flash": _safe(market_flash), "campaign_from_alert": _safe(campaign_from_alert), "competitor_dossier": _safe(competitor_dossier), "pair_battle": _safe(pair_battle), "web3_trending": _safe(web3_trending), "product_cohorts": _safe(product_cohorts), "announcement_lenses": _safe(announcement_lenses), "request_data": _safe(request_data), "data_requests": _safe(data_requests),
 }

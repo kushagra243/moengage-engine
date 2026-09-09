@@ -130,6 +130,24 @@ def run(max_actions: int = 3, force: bool = False) -> Dict[str, Any]:
     except Exception as ex:
         results.append({"mission": "stop_the_bleed", "outcome": "error", "detail": redact(str(ex))[:200]})
 
+    # 1b. structural P0: must-have journeys missing from the programme (CLM playbooks), ICE-ranked
+    try:
+        if budget > 0:
+            from . import structural
+            gaps = [g for g in structural.audit().get("gaps", []) if g.get("sop")][:6]
+            todo = [g for g in gaps if not _pending_for(g["title"][:40]) and not _done_today("close_structural_gaps", g["id"])][:2]
+            if todo:
+                target = "structural:" + ",".join(g["id"] for g in todo)
+                if not _done_today("close_structural_gaps", target):
+                    prompt = (f"MISSION close_structural_gaps. structural_audit ranks these must-have journeys as missing (P0): {json.dumps([{k: g[k] for k in ('id', 'title', 'tagline', 'who', 'what', 'sop', 'kpi', 'benchmark', 'ice')} for g in todo])[:2600]}. "
+                              f"For each: read the SOP (list_sops / get_sop), pick the closest existing segment family (segment_study) or propose_segment with criteria, run_sop(sop_id, segment_name, dry_run=True) then for real with copy per step "
+                              f"(two compliant variants, fact + tool, no venue names); if no SOP fits, propose_campaign with a full goal brief. Pass ice={{impact, confidence, ease, tagline}} from the audit. {BRIEF_RULES}")
+                    results.append(_run_mission(agent, "close_structural_gaps", target, prompt)); budget -= 1
+                    for g in todo:
+                        _log("close_structural_gaps", g["id"], "proposed", [], None, g["title"][:120])
+    except Exception as ex:
+        results.append({"mission": "close_structural_gaps", "outcome": "error", "detail": redact(str(ex))[:200]})
+
     # 2. close the gap
     try:
         if budget > 0:

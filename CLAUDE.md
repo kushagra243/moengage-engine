@@ -62,6 +62,9 @@ Heavy work goes to the free bulk tier (`llm_model_bulk=auto-free`): autopilot, d
 ## Privacy defaults (real workspace data is involved)
 Outbound HTTP only through `guarded_session` allowlists; the agent may not read per-user endpoints (`api_catalog.is_pii_endpoint`: customer export, cards, experiences, preferences, GDPR, archival) — they are blocked in `call_documented` and flagged in the catalog; `redact()` masks keys, tokens, cookies, emails, Indian phone numbers, PAN and Aadhaar before anything reaches logs, prompts or the model; OpenRouter requests carry `provider.data_collection=deny` by default (`llm_data_collection`) so prompts never go to providers that store or train on them — free models that require data collection are skipped and the chain falls back; nothing under `data/` is tracked by git; code-change drafting runs in a git worktree that contains no `data/`.
 
+## Category benchmarks
+`backend/market/benchmarks.py` → `/api/market/benchmarks`, agent tool `competitor_benchmarks`, terminal Intel → "Best in industry". Spot / perps / options / commodities-tokenised leaderboards across Binance, OKX, Bybit, Bitget, Coinbase, Kraken, KuCoin, Gate, MEXC, HTX, Deribit, Hyperliquid (reference) and the Indian venues, from CMC listings + direct public tickers; our figure per category (spot = CMC; perps/tokenised = liquidity-venue reference; options unknown), gap multiples to the India and global leaders, and pair-level "match their numbers" targets. Daily rows kept 120 days for trends.
+
 ## Intelligence dashboard
 The Market tab is the team's realtime knowledge page (`renderMarket` in `frontend/app.js`, data from `/api/market/context`): now strip → Tier-0 callout → Act-now hooks (each linked to an SOP and an "ask the agent" button) → crypto regime/movers/funding → listings + OI → tokenised markets → headlines → sources → competitive intelligence (internal) → web3 trending. Auto-refreshes every 5 minutes while open.
 

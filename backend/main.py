@@ -917,6 +917,12 @@ def market_competitors(force: bool = False):
     return competitors.intel({"crypto_markets": ctx.get("crypto_markets") or []}, force=force)
 
 
+@app.get("/api/market/benchmarks")
+def market_benchmarks(category: Optional[str] = None, force: bool = False):
+    from .market import benchmarks
+    return benchmarks.benchmarks(category, force=force)
+
+
 @app.get("/api/market/pair-battle")
 def market_pair_battle(symbol: str):
     from .market import competitors

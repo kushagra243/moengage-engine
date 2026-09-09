@@ -366,6 +366,13 @@ def intel(universe_ctx: Optional[Dict[str, Any]] = None, force: bool = False) ->
         seen.add(g["symbol"]); gaps2.append(g)
     actions = _actions(surges[:10], gaps2[:10], battles[:40], funding_edges[:10], edges[:10])
     try:
+        from .campaign_intel import campaigns as _camps
+        cc = _camps(hours=48)
+        actions += (cc.get("actions") or [])[:4]
+        campaigns_today = cc.get("campaigns") or []
+    except Exception:
+        campaigns_today = []
+    try:
         mine = next((t for t in table if t["exchange"] == "coindcx"), {})
         if mine.get("taker_fee_pct") is not None:
             cheaper = [t for t in table if t["exchange"] not in ("coindcx", "bybit") and t.get("taker_fee_pct") is not None and float(t["taker_fee_pct"]) < float(mine["taker_fee_pct"])]
@@ -378,7 +385,7 @@ def intel(universe_ctx: Optional[Dict[str, Any]] = None, force: bool = False) ->
     except Exception:
         pass
     return {"generated_at": snap.get("fetched_at"), "exchanges": table, "pair_battles": battles[:40], "surges": surges[:15], "listing_gaps": gaps2[:15], "our_edges": edges[:15], "funding_edges": funding_edges[:10],
-            "actions": actions, "errors": snap.get("errors"), "thresholds": {"surge_pct": surge_pct, "min_usd": min_usd},
+            "actions": actions, "campaigns": campaigns_today[:12], "errors": snap.get("errors"), "thresholds": {"surge_pct": surge_pct, "min_usd": min_usd},
             "note": "internal intelligence from free public sources: CoinMarketCap data-api (CoinDCX and venue market pairs, exchange volumes, market share, fees, traffic), direct venue tickers for realtime (Delta India, WazirX, Bybit), CoinGecko fallback. CoinDCX INR markets are our own volume; USDT markets and perps are routed/liquidity-venue volume (reference, not share). CMC excludes outlier volumes. Never name a competitor in user-facing copy."}
 
 

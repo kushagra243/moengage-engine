@@ -2,8 +2,11 @@
 
 This file is committed so every machine and every session starts with the same context. Keep it short and current; details live in the skills under `.claude/skills/`.
 
+## Who we are
+CoinDCX: spot + SIP (recurring buy), crypto perps, US stock / index / commodity perps (tokenised, 24/7), earn. Binance (spot listings) and Hyperliquid (perps, builder dexes) are **data sources only** — never named in user copy, nor any competitor. `campaign_brief_check` blocks venue/competitor names.
+
 ## What this is
-A local, leak-proof MoEngage CLM (lifecycle marketing) engine for a crypto/equities trading app: FastAPI backend (`backend/`), vanilla-JS console (`frontend/`), CLI (`cli.py`), SQLite in `data/agent.db`, secrets encrypted with a Keychain-held key. Everything runs on 127.0.0.1; nothing leaves the Mac except allowlisted calls to MoEngage, the chosen model provider, and public market data.
+A local, leak-proof MoEngage CLM (lifecycle marketing) engine for CoinDCX: FastAPI backend (`backend/`), vanilla-JS console (`frontend/`), CLI (`cli.py`), SQLite in `data/agent.db`, secrets encrypted with a Keychain-held key. Everything runs on 127.0.0.1; nothing leaves the Mac except allowlisted calls to MoEngage, the chosen model provider, and public market data.
 
 ## Start here on a new machine
 ```bash
@@ -38,6 +41,9 @@ Loopback bind · per-process `X-Local-Token` · Host check · outbound only thro
 - Restart the server with `pkill -f start.py` then `.venv/bin/python start.py` (cmdline is start.py, not uvicorn).
 - Commit style: imperative subject, body explains why; PRs to `main` on `kushagra243/moengage-engine`, merged when green.
 - Keep numbers honest: label mock data, state coverage (stats present for N of M campaigns), never invent data for missing endpoints.
+
+## Token economy (the platform runs on paid credits)
+Heavy work goes to the free bulk tier (`llm_model_bulk=auto-free`): autopilot, deep analysis, the daily brief (`llm_brief_tier=bulk`). Every model call lands in the `llm_usage` ledger (`/api/llm/usage`, agent tool `token_usage`, "tokens today" in the Agent tab). Tool output is compacted (raw/debug keys dropped, floats rounded) and capped per tool (`TOOL_BUDGETS` in `backend/llm/agent.py`, default `llm_tool_output_chars`=7000); identical tool calls within one conversation are answered once; chat history is `llm_history_messages` turns (default 8) at 2 500 chars each; rounds are `llm_max_rounds` (8) / `llm_max_rounds_autopilot` (6); skills load at most 9 000 chars, one at a time. Claude models get Anthropic prompt caching through OpenRouter (`cache_control` on the system prompt, which also covers the tool schemas) and OpenRouter returns real cost per call. When adding a tool, give it a budget and return only what the model needs.
 
 ## How the team steers the agent
 - **Teach**: Agent tab → "Teach the agent" (or say "from now on…" in chat → `remember_guidance`). Stored in `agent_guidance`, injected into the system prompt, toggle/delete in the UI.

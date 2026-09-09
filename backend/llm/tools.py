@@ -146,7 +146,7 @@ def moengage_guidance(topic: str) -> Dict[str, Any]:
             sections = re.split(r"\n(?=#{1,3} )", text)
             ranked = sorted(sections, key=lambda s: -sum(s.lower().count(w) for w in words))
             label = os.path.basename(path) if os.path.basename(path) != "SKILL.md" else "skill:" + os.path.basename(os.path.dirname(path))
-            hits.append({"doc": label, "score": score, "excerpt": "\n\n".join(ranked[:2])[:2500]})
+            hits.append({"doc": label, "score": score, "excerpt": "\n\n".join(ranked[:2])[:1500]})
     hits.sort(key=lambda h: -h["score"])
     return {"topic": topic, "docs_available": [os.path.basename(p) for p in glob.glob(os.path.join(KNOWLEDGE_DIR, "*.md"))], "matches": hits[:3]}
 
@@ -233,6 +233,7 @@ def experiment_plan(baseline_rate_pct: float, min_detectable_lift_pct_points: fl
 
 DERIVATIVE_WORDS = re.compile(r"\b(perp|perps|perpetual|futures|leverage|\d+x|margin|short|long)\b", re.I)
 BANNED_COPY = re.compile(r"\b(guaranteed|will (rise|pump|moon|double)|buy now|sell now|can'?t lose|risk[- ]free|100%|to the moon|last chance( to buy)?|don'?t miss|passive income|earn while you sleep|safe (bet|investment)|sure ?shot|get in early|listing pump|moon|pump)\b", re.I)
+VENUE_WORDS = re.compile(r"\b(hyperliquid|binance|bybit|okx|coinbase|kraken|kucoin|bitget|gate\.io|mexc|coinswitch|wazirx|zebpay|mudrex|delta exchange|zerodha|groww|upstox|robinhood|etoro)\b", re.I)
 LEVERAGE_LURE = re.compile(r"\bup to \d+x\b|\b\d{2,3}x leverage\b", re.I)
 STANDARD_SUPPRESSIONS = ("liquidat", "loss-dormant", "kyc", "dnd", "unsub", "ticket")
 
@@ -254,6 +255,8 @@ def campaign_brief_check(goal: Dict[str, Any], variants: Optional[List[Dict[str,
         problems.append("US persons in audience: perps/derivatives content must be geo-fenced away from US users")
     if "IN" in countries and derivative_content and not market_linked and re.search(r"trade (perps?|futures) now|open a (long|short)|start (trading )?with leverage", text_all, re.I):
         problems.append("India: derivatives content must be education-only until counsel clears acquisition (see crypto-compliance-copy)")
+    if VENUE_WORDS.search(text_all):
+        problems.append("copy names a liquidity venue or competitor (%s): we are CoinDCX; venue data is intelligence only and never appears in user copy" % VENUE_WORDS.search(text_all).group(0))
     if LEVERAGE_LURE.search(text_all):
         problems.append("leverage figures used as a lure ('up to 50x') are not allowed in marketing copy")
     if channel.lower() in ("email", "whatsapp", "in-app", "inapp", "in_app", "cards") and "IN" in countries and disclaimer_included is False:
@@ -497,6 +500,12 @@ def run_sop(sop_id: str, segment_name: Optional[str] = None, start_date: Optiona
     return sops.run_sop(sop_id, segment_name=segment_name, start_date=start_date, variants_by_step=variants_by_step, created_by="agent", dry_run=dry_run)
 
 
+def channel_matrix() -> Dict[str, Any]:
+    """User state × channel capability matrix: allowed purposes, formats (push / email / WhatsApp / SMS / in-app bottom sheets / cards), caps, compliance and the SOPs for each."""
+    from .. import sops
+    return sops.channel_matrix()
+
+
 def sop_runs(limit: int = 20) -> Dict[str, Any]:
     from .. import sops
     return {"runs": sops.list_runs(limit)}
@@ -562,6 +571,12 @@ def flight_plans(month: Optional[str] = None, plan_id: Optional[int] = None) -> 
     if plan_id:
         return plans.get_plan(int(plan_id)) or {"error": "not found"}
     return {"plans": plans.list_plans(month), "summary": plans.month_summary(month)}
+
+
+def token_usage(days: int = 7) -> Dict[str, Any]:
+    """Model spend ledger: calls, prompt/completion/cached tokens and estimated cost by purpose and tier, plus the current budgets (tool output chars, history turns, rounds)."""
+    from .usage import summary
+    return summary(days)
 
 
 def self_diagnose(run_tests: bool = False) -> Dict[str, Any]:
@@ -645,6 +660,7 @@ TOOL_SCHEMAS: List[Dict[str, Any]] = [
     _fn("record_ideas", "Capture every recommendation you make (campaign, segment, experiment, growth hack, fix) into the persistent growth feed so nothing is lost. ideas: [{title, kind: trending_campaign|growth_hack|market_play|moengage_activity|fix, why (cite data), how (MoEngage steps), segment, channel, angle, kpi, transition, effort, expected_impact, priority}].",
         {"ideas": {"type": "array", "items": OBJ}}, ["ideas"]),
     _fn("propose_pause_campaign", "Propose pausing a campaign (e.g. deliverability collapse or market suppression rule).", {"campaign_id": STR, "rationale": STR}, ["campaign_id", "rationale"]),
+    _fn("token_usage", "Model spend by purpose/tier for the last N days with current budgets. Use when asked about cost or before running expensive analyses.", {"days": {"type": "integer"}}),
     _fn("self_diagnose", "Diagnose the engine itself: grouped tool errors, failed jobs/proposals, log tracebacks, optional test run, with ready-to-file fix requests. Call whenever a tool returned an error or a job failed; then propose_code_change with the fix_request.", {"run_tests": {"type": "boolean"}}),
     _fn("rollback_last_change", "Revert the last merged code change and restart (only when asked, or when the change is clearly broken).", {"reason": STR}),
     _fn("north_star", "The north star sentence, current communication limits and this month's flight-plan coverage. Read before planning."),
@@ -661,6 +677,7 @@ TOOL_SCHEMAS: List[Dict[str, Any]] = [
     _fn("sop_detail", "Full SOP: audience, steps (day/channel/purpose/copy brief), kill criteria, checks, compliance.", {"sop_id": STR}, ["sop_id"]),
     _fn("define_sop", "Create or update an SOP from a full spec; validated against the framework (one KPI, holdout, caps, DND windows, exclusions for derivatives, disclaimers, kill criteria).", {"spec": OBJ}, ["spec"]),
     _fn("run_sop", "Run an SOP on a cohort: resolve segment (name or family → latest version), pre-flight, then one approval-gated proposal per step. Write variants_by_step per crypto-copywriting; dry_run first to see the plan.", {"sop_id": STR, "segment_name": STR, "start_date": STR, "variants_by_step": OBJ, "dry_run": {"type": "boolean"}}, ["sop_id"]),
+    _fn("channel_matrix", "What can be done for each user state on each channel (push, email, WhatsApp, SMS, in-app bottom sheets, cards): purposes, formats, caps, compliance, SOPs."),
     _fn("sop_runs", "Recent SOP runs with proposal statuses and mid-flight flags.", {"limit": {"type": "integer"}}),
     _fn("moengage_api_reference", "Search the complete local catalog of documented MoEngage APIs (131 operations across data, segments, campaigns v1/v5, stats, flows, templates, content blocks, catalog, coupons, inform, analytics, subscriptions, GDPR…). query → matches; method+path → parameters, body schema, auth key, rate limit, doc URL. No network.",
         {"query": STR, "method": STR, "path": STR}),
@@ -688,8 +705,8 @@ TOOLS: Dict[str, Callable[..., Dict[str, Any]]] = {
     "propose_flow": _safe(propose_flow), "propose_pause_campaign": _safe(propose_pause_campaign),
     "moengage_api_reference": _safe(moengage_api_reference), "moengage_api_read": _safe(moengage_api_read), "skill": _safe(skill),
     "remember_guidance": _safe(remember_guidance), "set_engine_setting": _safe(set_engine_setting), "propose_code_change": _safe(propose_code_change),
-    "self_diagnose": _safe(self_diagnose), "rollback_last_change": _safe(rollback_last_change),
+    "token_usage": _safe(token_usage), "self_diagnose": _safe(self_diagnose), "rollback_last_change": _safe(rollback_last_change),
     "north_star": _safe(north_star), "set_north_star": _safe(set_north_star), "comms_limits": _safe(comms_limits), "set_comms_limits": _safe(set_comms_limits), "peace_index": _safe(peace_index),
     "guardrail_monitor": _safe(guardrail_monitor), "write_flight_plan": _safe(write_flight_plan), "flight_plans": _safe(flight_plans),
-    "segment_study": _safe(segment_study), "define_nomenclature": _safe(define_nomenclature), "list_sops": _safe(list_sops), "sop_detail": _safe(sop_detail), "define_sop": _safe(define_sop), "run_sop": _safe(run_sop), "sop_runs": _safe(sop_runs),
+    "segment_study": _safe(segment_study), "define_nomenclature": _safe(define_nomenclature), "list_sops": _safe(list_sops), "sop_detail": _safe(sop_detail), "define_sop": _safe(define_sop), "run_sop": _safe(run_sop), "sop_runs": _safe(sop_runs), "channel_matrix": _safe(channel_matrix),
 }

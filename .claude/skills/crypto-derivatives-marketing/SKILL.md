@@ -5,6 +5,8 @@ description: Lifecycle marketing for spot, perpetual futures and tokenised perps
 
 # Derivatives & spot lifecycle marketing
 
+**Brand rule:** we are CoinDCX. Binance (spot listings) and Hyperliquid (perps, builder dexes) are data sources for intelligence; they never appear in user copy, and neither does any competitor.
+
 The product has three surfaces the CRM must treat differently: **spot pairs** (Binance-listed USDT pairs), **crypto perps** (Hyperliquid main dex, hourly funding, up to 50x on majors) and **tokenised perps** on Hyperliquid builder dexes (xyz / flx / km …: US equities, indices, commodities, FX as 24/7 perps). Data for all three is in `market_snapshot` (universe strictly = Binance spot ∪ Hyperliquid perps), `market_campaign_hooks` and the hacks library.
 
 ## Trader states (segment by behaviour, never by time alone)
@@ -24,7 +26,7 @@ Derive these as MoEngage user attributes from the tracking plan (`trading-event-
 ## The perp adoption ladder (one transition per campaign)
 1. **Spot-only → first perp (opt-in)**: only for users who opened the perps tab or a perp market screen ≥2 times (intent signal). Copy: what a perp is, funding in one line, isolated margin default, "start with 1x–2x". Holdout 20%, KPI first_perp_trade_rate_30d, guardrail liquidation_rate_30d of the cohort ≤ baseline.
 2. **First perp → second perp**: within 72h of the first fill, an in-app card: how funding was charged, how to set SL. KPI second_perp_within_14d.
-3. **Habitual → tokenised markets**: users trading crypto perps who hold equity watchlists or trade in US hours → "NVDA / gold / SPX perps trade 24/7 here". Angle product_education, never "trade earnings".
+3. **Habitual → tokenised markets**: users trading crypto perps who hold equity watchlists or trade in US hours → "NVDA / gold / SPX perps trade 24/7 on CoinDCX". Angle product_education, never "trade earnings".
 4. **Any → Hedger**: spot holders with concentration >40% in one asset during high_volatility regimes → "how a small short hedges a spot position" (education), tool link to hedge calculator. Angle risk_education.
 Never ladder users *up* leverage. Size-up and leverage-upsell angles are blocked in every regime except trending_up, and even there only to Habitual users with liquidation_rate_90d = 0.
 
@@ -45,7 +47,7 @@ KPI: return_to_trade_rate_30d vs holdout; guardrail: repeat liquidation within 3
 | OI up ≥ 30% in 24h with |price| < 3% | `oi_movers.surge` | holders/watchers of X | risk_education / alerts_adoption | "Open interest in X rose 34% today — positioning is crowded" |
 | OI down ≥ 25% after a move | `oi_movers.drop` | traders of X in 7d | risk_education | "Leverage flushed out of X (OI −28%)" |
 | New listing (spot or perp) | `listings.new` | watchers of the sector; Habitual traders | new_listing (blocked in stress regimes) | "X is now tradable as spot / as a perp" — no launch-pump framing |
-| Tokenised perp mover ≥ 3% | `equity_movers` etc. | tokenised explorers; watchlist | watchlist_adoption | "NVDA perp moved 4.1% while US markets were closed" |
+| Tokenised perp mover ≥ 3% | `equity_movers` etc. | tokenised explorers; watchlist | watchlist_adoption | "NVDA perp moved 4.1% while US markets were closed — trade it 24/7 on CoinDCX" |
 | Macro print in <24h (FOMC/CPI/NFP) | `calendar` | leverage users | risk_education | "CPI at 18:00 IST; volatility usually rises — review margin" |
 | Regime flip to high_volatility_down / capitulation | `regime` | everyone | suppression + service | pause acquisition/upsell; FC 1/day |
 Every trigger message: fact + relevance + tool + TTL ≤ 4h; funding/OI numbers rounded and time-stamped; no direction, no forecast.
@@ -61,7 +63,7 @@ Every trigger message: fact + relevance + tool + TTL ≤ 4h; funding/OI numbers 
 ## Reading derivatives data honestly
 - Funding is annualised only for comparison; show users the per-day cost. APR ≠ yield; never call funding "income" in acquisition copy.
 - OI in USD is price-sensitive: quote OI change together with price change.
-- Builder-dex prices can diverge from the underlying's last close (24/7 vs exchange hours); say "on Hyperliquid" explicitly.
+- Tokenised-perp prices can diverge from the underlying's last close (24/7 vs exchange hours); copy says "on CoinDCX" — the liquidity venue is never named to users.
 - Movers below $1M 24h volume are excluded from hooks by design; do not message illiquid names.
 
 ## KPIs the programme reports weekly

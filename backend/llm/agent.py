@@ -20,9 +20,25 @@ from .tools import TOOLS, TOOL_SCHEMAS
 
 log = logging.getLogger("moengage.agent")
 MAX_ROUNDS = 8
-TOOL_OUTPUT_CHARS = 16000
+TOOL_OUTPUT_CHARS = 16000          # hard ceiling; the effective budget comes from settings / per-tool budgets below
+# per-tool output budgets (chars). Heavy list tools get less; detail tools a bit more. Anything else uses llm_tool_output_chars.
+TOOL_BUDGETS = {"list_campaigns": 6000, "campaign_taxonomy": 6000, "segment_study": 7000, "anomaly_report": 6000, "market_snapshot": 5000, "market_news": 3500, "market_campaign_hooks": 4500,
+                "growth_hacks": 4000, "list_proposals": 3500, "moengage_api_reference": 5000, "skill": 9000, "moengage_guidance": 4000, "campaign_deep_dive": 7000, "flight_plans": 6000,
+                "sop_detail": 5000, "list_sops": 3000, "experiment_readouts": 4000, "peace_index": 4000, "self_diagnose": 6000}
+DROP_KEYS = {"_stats_raw", "_provenance", "raw", "trace", "snapshot_json"}
 
-SYSTEM_PROMPT = """You are the resident Head of CRM / lifecycle (CLM) for a crypto, stocks and commodities trading app, operating inside MoEngage. You are the single most actionable asset the growth team has: you diagnose with data, decide against explicit goals, and hand over proposals that are ready to approve.
+
+def _compact(obj, depth=0):
+    """Strip debugging/raw fields and round floats so tool output spends fewer tokens."""
+    if isinstance(obj, dict):
+        return {k: _compact(v, depth + 1) for k, v in obj.items() if k not in DROP_KEYS and v not in (None, [], {}, "")}
+    if isinstance(obj, list):
+        return [_compact(x, depth + 1) for x in obj]
+    if isinstance(obj, float):
+        return round(obj, 4)
+    return obj
+
+SYSTEM_PROMPT = """You are the resident Head of CRM / lifecycle (CLM) for CoinDCX — the exchange app offering spot and SIP (recurring buy), crypto perps, US stock perps, indices and commodities perps, and earn products — operating inside MoEngage. Pair- and exchange-level intelligence comes from external venues (Binance spot listings, Hyperliquid perps) for analysis only: user-facing copy never names those venues or any competitor; the product is always "CoinDCX" or "here". You are the single most actionable asset the growth team has: you diagnose with data, decide against explicit goals, and hand over proposals that are ready to approve.
 
 MoEngage mastery you bring: segmentation (attributes, events with counts/windows/attributes, affinity, RFM, custom segments, cohort sync), every channel (Push, Email, SMS, WhatsApp, In-app, Cards), Flows, event-triggered Smart Triggers, Business Events (200/day limit), Inform API for transactional alerts, Content APIs for live numbers at send time, Best Time to Send (not for triggered sends), frequency capping and minimum delay (with Message Queuing), DND, control groups and global control group, conversion goals with matching attribution windows, A/B and multivariate tests, personalisation with fallbacks, deliverability hygiene. The local playbooks (moengage_guidance) hold the detail; consult them rather than guessing.
 
@@ -61,8 +77,10 @@ Today: {today}. Workspace region: {region}. Data mode: {mode}."""
 
 
 class MarketerAgent:
-    def __init__(self, client: Optional[LLMClient] = None):
+    def __init__(self, client: Optional[LLMClient] = None, purpose: str = "chat"):
         self.client = client or LLMClient()
+        self.purpose = purpose
+        self._seen_calls: Dict[str, str] = {}
 
     def _system(self) -> str:
         from ..moengage import MoEngageClient
@@ -80,22 +98,28 @@ class MarketerAgent:
         fn = TOOLS.get(name)
         if not fn:
             return json.dumps({"error": f"unknown tool {name}"})
+        key = name + ":" + json.dumps(args or {}, sort_keys=True, default=str)
+        if key in self._seen_calls and not name.startswith("propose_") and name not in ("record_ideas", "run_sop", "define_sop", "write_flight_plan", "set_engine_setting", "set_comms_limits", "remember_guidance", "define_nomenclature"):
+            return "<tool_data name=\"%s\" trust=\"untrusted\">\n{\"note\": \"identical call already answered earlier in this conversation; reuse that result (repeated to save tokens)\", \"first_result_head\": %s}\n</tool_data>" % (name, json.dumps(self._seen_calls[key][:600]))
         out = fn(**(args or {}))
-        text = json.dumps(out, default=str)
+        text = json.dumps(_compact(out), default=str, separators=(",", ":"))
         text = redact(text)
-        if len(text) > TOOL_OUTPUT_CHARS:
-            text = text[:TOOL_OUTPUT_CHARS] + f'… [truncated {len(text) - TOOL_OUTPUT_CHARS} chars]'
+        budget = min(TOOL_OUTPUT_CHARS, TOOL_BUDGETS.get(name, int(get_setting("llm_tool_output_chars", "7000") or 7000)))
+        if len(text) > budget:
+            text = text[:budget] + f'… [truncated {len(text) - budget} chars; ask a narrower question or use a detail tool]'
+        self._seen_calls[key] = text
         # Data boundary: everything a tool returns (campaign names, headlines, segment
         # descriptions) is untrusted content. It is wrapped so the model treats any
         # instruction-like text inside as data, never as a directive.
         return "<tool_data name=\"%s\" trust=\"untrusted\">\n%s\n</tool_data>" % (name, text)
 
     def chat(self, user_message: str, history: Optional[List[Dict[str, Any]]] = None, persist: bool = True) -> Dict[str, Any]:
-        history = history if history is not None else get_chat_history(limit=12)
+        hist_n = int(get_setting("llm_history_messages", "8") or 8)
+        history = history if history is not None else get_chat_history(limit=hist_n)
         messages: List[Dict[str, Any]] = [{"role": "system", "content": self._system()}]
         for h in history:
             if h.get("role") in ("user", "assistant") and h.get("content"):
-                messages.append({"role": h["role"], "content": redact(h["content"])[:6000]})
+                messages.append({"role": h["role"], "content": redact(h["content"])[:2500]})
         messages.append({"role": "user", "content": redact(user_message)})
         if persist:
             save_chat_message("user", user_message)
@@ -104,7 +128,9 @@ class MarketerAgent:
         usage_total = {"prompt_tokens": 0, "completion_tokens": 0}
         final_text = None
         model = None
-        for _ in range(MAX_ROUNDS):
+        rounds = int(get_setting("llm_max_rounds_autopilot" if self.purpose == "autopilot" else "llm_max_rounds", "6" if self.purpose == "autopilot" else str(MAX_ROUNDS)) or MAX_ROUNDS)
+        self.client.purpose = self.purpose
+        for _ in range(rounds):
             resp = self.client.chat(messages, tools=TOOL_SCHEMAS)
             model = resp.get("model")
             for k in usage_total:
@@ -141,7 +167,18 @@ class MarketerAgent:
                   "critical_alerts (list of {campaign, issue, action}), recommended_actions (list of {title, segment, channel, angle, timing, kpi, why}), "
                   "market_note (1-2 sentences on how today's regime should change send decisions), suppressions (list of strings). "
                   "Use rule_based_audit / list_campaigns tools if you need more detail. Context:\n" + json.dumps(ctx, default=str)[:9000])
-        out = self.chat(prompt, history=[], persist=False)
+        # the brief is bulk-tier work by default (free models); the main model is used only when llm_brief_tier=main
+        brief_agent = self
+        if get_setting("llm_brief_tier", "bulk") == "bulk":
+            try:
+                from .provider import LLMClient as _C, llm_settings as _ls, bulk_models as _bm
+                cfg = _ls(); cands = _bm(cfg)
+                if cands and cands[0] != cfg.get("model"):
+                    brief_agent = MarketerAgent(_C({**cfg, "model": cands[0]}), purpose="brief")
+            except Exception:
+                brief_agent = self
+        brief_agent.purpose = "brief"
+        out = brief_agent.chat(prompt, history=[], persist=False)
         text = out["reply"].strip()
         try:
             start, end = text.find("{"), text.rfind("}")

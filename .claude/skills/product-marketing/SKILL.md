@@ -3,7 +3,9 @@ name: product-marketing
 description: Product marketing for a crypto spot, perps and tokenised-perps trading app — positioning and messaging hierarchy, value propositions per trader state, feature launch and adoption playbook through lifecycle channels, moments-that-matter map, competitive framing versus centralised and decentralised exchanges, pricing and fee communication, and message-market-fit testing. Use for launches, positioning, feature adoption programmes and any "how do we talk about X" question.
 ---
 
-# Product marketing for the trading app
+# Product marketing for CoinDCX
+
+We are CoinDCX: spot + SIP (recurring buy), crypto perps, US stock / index / commodity perps (tokenised, 24/7), earn. Liquidity comes from external venues; **no user-facing message ever names a venue or a competitor**. Positioning is always about what CoinDCX gives the user.
 
 Lifecycle channels are the distribution for product marketing; product marketing gives lifecycle its message. This skill connects the two.
 
@@ -11,7 +13,7 @@ Lifecycle channels are the distribution for product marketing; product marketing
 Template: *For [trader state] who [job to be done], [product] is the [category] that [key benefit] because [proof]. Unlike [alternative], we [difference].*
 - Spot for new users: the calm, transparent place to start — fees shown before you trade, instant withdrawals, alerts instead of screen-watching.
 - Perps for habitual traders: risk tools first (isolated margin default, funding shown per day, liquidation distance visible), then depth.
-- Tokenised perps (Hyperliquid builder dexes): the markets that never close — NVDA, gold, SPX 24/7, priced on-chain, in the same account. Proof: after-hours moves the user can see before Wall Street opens.
+- Tokenised perps: the markets that never close — NVDA, gold, SPX 24/7 in the same CoinDCX account. Proof: after-hours moves the user can see before Wall Street opens.
 Never position on returns, leverage size, or "cheapest" unless verifiably true and stable.
 
 ## Messaging hierarchy (one line per level; every campaign picks a level)
@@ -42,11 +44,11 @@ Checklist: naming consistent across app, docs and messages; screenshots current;
 ## Moments that matter (map messages to these, not to a calendar of your own)
 first deposit landed · first fill · first loss · first liquidation · fee-tier change · large move on a held asset · funding extreme on an open position · macro print tonight · new listing in a watched sector · KYC/re-KYC due · withdrawal completed · long absence + regime change · salary week · tax season.
 
-## Competitive framing (say what is true, never name-and-shame)
-- vs large CEXs (Binance, Bybit, OKX): we compete on INR rails, service, transparency and risk tools, not on breadth or leverage.
-- vs Indian incumbents (CoinDCX, CoinSwitch, Delta): tokenised 24/7 markets and on-chain perps are the distinct access story; keep compliance posture identical or stronger.
-- vs DEX-native (Hyperliquid direct): one account, INR on/off-ramp, support, risk defaults; be honest that the venue is Hyperliquid.
-Proof beats claims: show the fee page, the funding display, the withdrawal timer.
+## Competitive framing (internal only — never named in copy)
+- Against global exchanges we win on INR rails, service, transparency and risk tools, not on breadth or leverage.
+- Against Indian peers the distinct access story is 24/7 tokenised US stocks, indices and commodities plus perps in one INR account, with an equal or stronger compliance posture.
+- Against going direct to on-chain venues: one account, INR on/off-ramp, support, risk defaults.
+In user copy this becomes proof, not comparison: the fee page, the funding display, the withdrawal timer, the 24/7 markets list.
 
 ## Pricing and fee communication
 Total cost per trade (fee + TDS + spread where relevant) shown before confirmation; tier tables in plain numbers; changes announced ≥ 7 days ahead by email to affected tiers; never "zero fee" if a spread exists.

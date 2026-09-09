@@ -29,6 +29,7 @@ Not legal advice: an operating checklist so that nothing obviously non-compliant
 - Do not market perps or unregistered derivatives to US persons; geo-fence and suppress US-located users from perp content entirely. Spot promotion is state-dependent (NY BitLicense). "Not available to US persons" where relevant.
 
 ## Everywhere: what copy may never do
+- Name a liquidity venue or a competitor (Binance, Hyperliquid, Bybit, OKX, CoinSwitch, Zerodha…). We are CoinDCX; venue data informs, it is never cited to users. `campaign_brief_check` blocks these words.
 - Forecast, imply returns, or tell a user to buy/sell/long/short a named asset. "Could rally", "don't miss", "moon", "last chance", "guaranteed", "risk-free", "safe", "passive income", "earn while you sleep" are banned words in any market or derivatives message.
 - Present **funding, staking or earn rates as income/yield without risk context**; APRs need "variable" and "not guaranteed".
 - Use leverage as a lure: "up to 50x" only in product documentation and market-screen UI, never in acquisition pushes or emails.

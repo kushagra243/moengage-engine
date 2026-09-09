@@ -35,7 +35,7 @@ def list_skills() -> List[Dict[str, Any]]:
     return out
 
 
-def read_skill(name: str, max_chars: int = 14000) -> Dict[str, Any]:
+def read_skill(name: str, max_chars: int = 9000) -> Dict[str, Any]:
     safe = re.sub(r"[^a-z0-9_-]", "", (name or "").lower())
     p = os.path.join(SKILLS_DIR, safe, "SKILL.md")
     if not safe or not os.path.exists(p):

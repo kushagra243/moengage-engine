@@ -44,7 +44,7 @@ def test_web3_hooks_blocked_in_stress_and_tier0_trigger():
     assert "web3_trend_solana" in build_hooks(ctx)["blocked_hook_ids"]
     assert tier0_trigger({"crypto": {"regime": {"label": "chop"}}, "crypto_markets": [{"symbol": "BTC", "chg_24h": -9.2}]})["kind"] == "major_move"
     assert tier0_trigger({"crypto": {"regime": {"label": "capitulation", "reasons": ["x"]}}, "crypto_markets": []})["kind"] == "stress_regime"
-    assert tier0_trigger({"crypto": {"regime": {"label": "chop"}}, "news": {"risk_flags": [{"title": "War escalates"}, {"title": "New tariff on chips"}, {"title": "SEBI regulation draft"}]}})["kind"] == "geopolitical_or_regulatory"
+    assert tier0_trigger({"crypto": {"regime": {"label": "chop"}}, "news": {"risk_flags": [{"title": "War escalates"}, {"title": "Exchange hack drains $40M"}, {"title": "SEBI regulation draft"}]}})["kind"] == "geopolitical_or_regulatory"
     assert tier0_trigger({"crypto": {"regime": {"label": "chop"}}, "crypto_markets": [{"symbol": "BTC", "chg_24h": 2.0}]}) is None
 
 

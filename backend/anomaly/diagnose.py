@@ -160,8 +160,25 @@ def diagnose_campaign(campaign_id: str, source: str, days: int = 35) -> Dict[str
     sev = "critical" if any(c["confidence"] == "high" for c in co["likely_causes"]) else ("watch" if co["likely_causes"] and co["likely_causes"][0]["cause"] != "No dominant driver" else "normal")
     moved = decomp.get("moved_most")
     headline = (f"{camp.get('campaign_name')}: {STAGES_LABEL.get(moved, moved)} moved {decomp['moves'][moved]['change_pct']:+.1f}% vs 28d — {co['likely_causes'][0]['cause']}" if moved and decomp["moves"] else f"{camp.get('campaign_name')}: within normal variation")
-    return {"campaign_id": campaign_id, "campaign_name": camp.get("campaign_name"), "channel": camp.get("channel"), "days": len(hist), "severity": sev,
-            "headline": headline, "funnel": decomp, "stats": stats, **co}
+    out = {"campaign_id": campaign_id, "campaign_name": camp.get("campaign_name"), "channel": camp.get("channel"), "days": len(hist), "severity": sev,
+           "headline": headline, "funnel": decomp, "stats": stats, **co}
+    try:
+        from ..metrics import funnel_lines, lights_from_diagnosis, so_what
+        out["funnel_lines"] = funnel_lines(out)
+        out["lights"] = lights_from_diagnosis(out)
+        out["so_what"] = so_what(out, out["lights"])
+        # plain headline: absolute stage move with the right unit
+        if moved and decomp["moves"]:
+            fl = next((f for f in out["funnel_lines"] if f["metric"] == moved), None)
+            if fl:
+                out["headline"] = f"{camp.get('campaign_name')}: {fl['label'].lower()} {fl['today']} vs usual {fl['usual']} ({fl['delta_text']}) — {co['likely_causes'][0]['cause']}"
+        for c in out.get("likely_causes", []):
+            c["likelihood"] = {"high": "Likely", "medium": "Possible", "low": "Unlikely"}.get(c.get("confidence"), c.get("confidence"))
+        for i, o in enumerate(out.get("options", [])):
+            o["do_first"] = (i == 0 and out["severity"] != "normal")
+    except Exception:
+        pass
+    return out
 
 
 STAGES_LABEL = {m: l for m, l in STAGES}

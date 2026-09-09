@@ -491,3 +491,21 @@ ol.steps-list code { background: var(--bg); padding: 0 4px; border-radius: 3px; 
 .src-row { display: grid; grid-template-columns: 140px 130px 1fr 120px; gap: 8px; padding: 5px 0; border-bottom: 1px solid var(--line); font-size: 12px; align-items: center; }
 .src-row:last-child { border-bottom: 0; }
 .src-row .nm { font-weight: 600; } .src-row .k { color: var(--muted); font-size: 11px; } .src-row .c { color: var(--muted); font-size: 11.5px; }
+
+/* ── metric clarity ─────────────────────────────────────────────────────── */
+.light { display: inline-block; width: 9px; height: 9px; border-radius: 50%; margin-right: 3px; background: var(--line-2); vertical-align: middle; }
+.light.green { background: var(--ok); } .light.amber { background: var(--warn); } .light.red { background: var(--bad); } .light.grey { background: var(--line-2); }
+.mini { width: 70px; height: 20px; display: block; } .mini polyline { fill: none; stroke: var(--accent); stroke-width: 1.5; }
+.help-q { display: inline-flex; align-items: center; justify-content: center; width: 14px; height: 14px; border-radius: 50%; border: 1px solid var(--line-2); color: var(--dim); font-size: 10px; cursor: help; margin-left: 4px; vertical-align: middle; font-weight: 600; }
+.help-q:hover { border-color: var(--accent); color: var(--accent); }
+tr.urg-act_today td:first-child { box-shadow: inset 3px 0 0 var(--bad); } tr.urg-watch td:first-child { box-shadow: inset 3px 0 0 var(--warn); }
+.dots { font-family: var(--mono); letter-spacing: 1px; color: var(--warn); }
+.funnel { display: grid; grid-template-columns: repeat(auto-fit, minmax(120px, 1fr)); gap: 6px; }
+.fstage { background: var(--bg); border: 1px solid var(--line); border-radius: var(--r); padding: 6px 8px; }
+.fstage .k { font-size: 10px; text-transform: uppercase; letter-spacing: .06em; color: var(--dim); }
+.fstage .v { font-family: var(--mono); font-size: 12.5px; margin-top: 2px; }
+.fstage .d { font-family: var(--mono); font-size: 11px; color: var(--muted); }
+.fstage.worse { border-color: rgba(248,113,113,.45); } .fstage.worse .d { color: var(--bad); }
+.fstage.better { border-color: rgba(52,211,153,.45); } .fstage.better .d { color: var(--ok); }
+.rec.first { border-color: var(--accent); }
+tr.secondary td { opacity: .6; }

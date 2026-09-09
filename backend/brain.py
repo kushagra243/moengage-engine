@@ -11,7 +11,7 @@ from typing import Any, Dict, List, Optional
 
 from .database import get_db, get_setting, get_latest_daily_run
 from .security import audit, redact
-from . import approvals, growth, experiments, hacks as hacks_mod, plans, sops as sops_mod, guardrails, datarequests
+from . import approvals, growth, experiments, hacks as hacks_mod, plans, sops as sops_mod, guardrails, datarequests, ice as ice_mod
 
 SEV_COLOR = {"act_now": "#ff5c9e", "high_ev": "#6fe3ff", "counter": "#ffb84d", "cleanup": "#4dffa8", "watch": "#ffb84d", "good": "#4dffa8", "info": "#7fd8ec"}
 SEV_LABEL = {"act_now": "ACT NOW", "high_ev": "HIGH EV", "counter": "COUNTER", "cleanup": "CLEANUP", "watch": "WATCH", "good": "GOOD"}
@@ -106,7 +106,7 @@ def state() -> Dict[str, Any]:
     ctx = _ctx(); an = _anoms(); bu = an.get("by_urgency", {}) if isinstance(an, dict) else {}
     ci = ctx.get("competitors") or {}
     brief = _brief(latest, an, ctx, pend, read)
-    badges = {"exp": len(pend), "anom": bu.get("act_today", 0)}
+    badges = {"exp": len(pend), "anom": bu.get("act_today", 0), "lab": sum(1 for a in (ci.get("actions") or []) if a.get("priority", 0) >= 80) or (1 if ctx.get("tier0") else 0)}
     return {"bus": bus, "load": load, "pipeline": pipeline, "brief": brief, "autopilot": get_setting("autopilot_enabled", "true").lower() == "true", "badges": badges, "mode": mode,
             "north_star": guardrails.north_star(), "stats": _stats(mode, pend, exps, running, read, days, an, ctx, ci, ideas_new), "region": get_setting("moengage_region", ""), "generated_at": datetime.utcnow().isoformat()}
 
@@ -122,10 +122,22 @@ def _stats(mode, pend, exps, running, read, days, an, ctx, ci, ideas_new) -> Dic
     except Exception:
         pass
     n_sops = len(sops_mod.list_sops()); runs = sops_mod.list_runs(50); runs_today = [r for r in runs if str(r.get("created_at", ""))[:10] == date.today().isoformat()]
-    fam_cov = "—"
+    fam_cov = "—"; fams = []; n_segs = 0; peace_counts = {}; peace_v = "—"; ra_v, ra_sub, ra_c = "—", "money flow composite", "#eaf7fc"
+    try:
+        from .market import moneyflow
+        _ra = (moneyflow.flow(ctx) if ctx else {}).get("risk_appetite") or {}
+        if _ra.get("score") is not None:
+            ra_v = f"{_ra['score']} · {_ra['label'].upper()}"; ra_sub = "; ".join(_ra.get("reasons", [])[:2]); ra_c = "#4dffa8" if _ra["label"] == "risk-on" else "#ff5c9e" if _ra["label"] == "risk-off" else "#ffb84d"
+    except Exception:
+        pass
+    try:
+        _pi = guardrails.peace_index(_client().get_campaigns(), regime); peace_counts = _pi.get("counts") or {}
+        peace_v = f"{peace_counts.get('too_much', 0)} / {peace_counts.get('in_band', 0)} / {peace_counts.get('too_little', 0)}"
+    except Exception:
+        pass
     try:
         from . import segments
-        st = segments.study(_client().get_campaigns()); fams = st.get("families") or []
+        st = segments.study(_client().get_campaigns()); fams = st.get("families") or []; n_segs = st.get("segments") or 0
         fam_cov = f"{round(sum(1 for f in fams if f.get('campaigns_attached')) / len(fams) * 100)}%" if fams else "—"
     except Exception:
         pass
@@ -160,6 +172,13 @@ def _stats(mode, pend, exps, running, read, days, an, ctx, ci, ideas_new) -> Dic
                  {"k": "TEAM EDITS", "v": str(sum(1 for s in sops_mod.list_sops(include_inactive=True) if s.get('source') not in ('library',))), "sub": "versioned SOPs", "c": "#6fe3ff"}],
         "anom": [{"k": "TRACKED", "v": str(tracked), "sub": "campaigns", "c": "#eaf7fc"}, {"k": "ACT TODAY", "v": str(bu.get("act_today", 0)), "sub": "severity high", "c": "#ff5c9e"},
                  {"k": "WATCH", "v": str(bu.get("watch", 0)), "sub": "drifting", "c": "#ffb84d"}, {"k": "GOOD SURPRISE", "v": str(bu.get("good_surprise", 0)), "sub": "above baseline", "c": "#4dffa8"}, {"k": "HISTORY", "v": f"{days}d", "sub": "snapshot depth", "c": "#eaf7fc"}],
+        "lab": [{"k": "RISK APPETITE", "v": ra_v, "sub": ra_sub, "c": ra_c},
+                {"k": "REGIME", "v": regime.replace("_", " ").upper(), "sub": f"{len(hooks.get('hooks') or [])} hooks allowed", "c": reg_c},
+                {"k": "TIER-0", "v": "ARMED" if ctx.get("tier0") else "none", "sub": (ctx.get("tier0") or {}).get("kind", "no major event").replace("_", " "), "c": "#ff5c9e" if ctx.get("tier0") else "#4dffa8"},
+                {"k": "RIVAL ACTIONS", "v": str(len(acts)), "sub": f"{len(surges)} surges on pairs we list" if surges else "no surges", "c": "#ff5c9e" if any(a.get('priority', 0) >= 80 for a in acts) else "#6fe3ff"},
+                {"k": "LAST SYNC", "v": _ago(ctx.get("generated_at")), "sub": "auto every 15 min", "c": "#eaf7fc"}],
+        "atlas": [{"k": "COHORT FAMILIES", "v": str(len(fams)), "sub": f"{n_segs} segments decoded", "c": "#eaf7fc"}, {"k": "COVERAGE", "v": fam_cov, "sub": "families with a campaign", "c": "#4dffa8"},
+                  {"k": "PEACE", "v": peace_v, "sub": "too much / in band / too little", "c": "#ff5c9e" if peace_counts.get("too_much") else "#4dffa8"}, {"k": "LIMITS", "v": f"≤{guardrails.limits().get('total_per_week')}/wk", "sub": "per user, regime-adjusted", "c": "#6fe3ff"}, {"k": "NORTH STAR", "v": "set", "sub": guardrails.north_star()[:60], "c": "#eaf7fc"}],
         "market": [{"k": "REGIME", "v": regime.replace("_", " ").upper(), "sub": f"BTC {((ctx.get('crypto') or {}).get('assets') or {}).get('BTC', {}).get('chg_24h', '—')}% 24h", "c": reg_c},
                    {"k": "HOOKS", "v": str(len(hooks.get("hooks") or [])), "sub": f"{len(hooks.get('blocked_hook_ids') or [])} blocked by policy", "c": "#6fe3ff"},
                    {"k": "TIER-0", "v": "ARMED" if ctx.get("tier0") else "none", "sub": (ctx.get("tier0") or {}).get("kind", "no major event").replace("_", " "), "c": "#ff5c9e" if ctx.get("tier0") else "#4dffa8"},
@@ -284,8 +303,14 @@ def ideas(filter_: str = "all") -> List[Dict[str, Any]]:
     for i in growth.list_ideas(status="new", limit=60):
         cat = "counter" if "compet" in (i.get("title") or "").lower() or (i.get("data") or {}).get("competitive") else CATEGORY_OF.get(i.get("kind"), "audience")
         conf = 0.72 if i.get("source") == "rules" else 0.55
+        data = i.get("data") or {}
+        structural = bool(data.get("structural")) or i.get("kind") == "structural_gap"
+        if structural:
+            cat = "structural"; conf = 0.8
+        ic = ice_mod.score(**{k: data["ice"][k] for k in ("impact", "confidence", "ease")}) if isinstance(data.get("ice"), dict) and all(k in data["ice"] for k in ("impact", "confidence", "ease")) else ice_mod.infer(i.get("expected_impact") or "", conf, i.get("effort"), i.get("source") or "", i.get("priority"))
         out.append({"id": f"#IDEA-{i['id']}", "raw_id": i["id"], "kind": "idea", "title": i["title"], "tags": [t for t in [i.get("kind"), i.get("channel"), i.get("angle")] if t][:3], "hypothesis": (i.get("why") or "")[:320],
-                    "projectedLift": i.get("expected_impact") or "—", "confidence": f"{conf:.2f}", "effort": _effort(i.get("effort")), "sourceSignal": f"{i.get('source')} · {i.get('transition') or i.get('kpi') or 'feed'}", "category": cat, "how": (i.get("how") or "")[:300], "priority": i.get("priority", 50)})
+                    "projectedLift": i.get("expected_impact") or "—", "confidence": f"{conf:.2f}", "effort": _effort(i.get("effort")), "sourceSignal": f"{i.get('source')} · {i.get('transition') or i.get('kpi') or 'feed'}", "category": cat, "how": (i.get("how") or "")[:300], "priority": i.get("priority", 50),
+                    "ice": ic, "tagline": data.get("tagline") or ice_mod.tagline(i["title"], i.get("kpi") or "", i.get("segment") or ""), "structural": structural, "sop": data.get("sop")})
     try:
         rk = hacks_mod.ranked(); hack_rows = (rk.get("hacks") if isinstance(rk, dict) else rk) or []
     except Exception:
@@ -293,11 +318,13 @@ def ideas(filter_: str = "all") -> List[Dict[str, Any]]:
     for h in hack_rows[:12]:
         if h.get("status") in ("dismissed",):
             continue
+        hconf = 0.8 if h.get("source_kind") != "model" else 0.5
         out.append({"id": f"#HACK-{h['id']}", "raw_id": h["id"], "kind": "hack", "title": h["title"], "tags": [h.get("category")] + (h.get("channels") or [])[:2], "hypothesis": (h.get("why") or "")[:320], "projectedLift": h.get("kpi") or "—",
+                    "ice": ice_mod.infer(h.get("kpi") or "", hconf, h.get("effort"), "library", h.get("relevance") if isinstance(h.get("relevance"), (int, float)) else 50), "tagline": ice_mod.tagline(h["title"], h.get("kpi") or "", ""), "structural": False,
                     "confidence": "0.80" if h.get("source_kind") != "model" else "0.50", "effort": _effort(h.get("effort")), "sourceSignal": f"hack · {h.get('source') or 'library'}", "category": "sop" if h.get("category") in ("retention", "activation") else "market" if h.get("category") in ("risk",) else "audience", "how": (h.get("how") or "")[:300], "priority": h.get("relevance", 50) if isinstance(h.get("relevance"), (int, float)) else 50})
     if filter_ and filter_ != "all":
         out = [o for o in out if o["category"] == filter_]
-    out.sort(key=lambda o: -(o.get("priority") or 0))
+    out.sort(key=lambda o: (-(1 if o.get("structural") else 0), -((o.get("ice") or {}).get("score") or 0), -(o.get("priority") or 0)))
     return out
 
 
@@ -321,7 +348,9 @@ def experiments_board() -> Dict[str, Any]:
         pl = p.get("payload") or {}
         goal = pl.get("goal") or {}
         metric = (f"holdout {goal.get('control_group_pct')}% · {goal.get('primary_kpi')}" if goal else p.get("kind", ""))
-        card = {"id": p["id"], "title": p["title"], "tag": p.get("category") or p["kind"], "product": p.get("product"), "note": (p.get("rationale") or "")[:140], "metric": metric, "created_at": p.get("created_at")}
+        card = {"id": p["id"], "title": p["title"], "tag": p.get("category") or p["kind"], "product": p.get("product"), "note": (p.get("rationale") or "")[:140], "metric": metric, "created_at": p.get("created_at"),
+                "ice": ice_mod.from_payload(pl, p.get("created_by") or "agent") if p["kind"] in ("create_campaign", "create_flow", "create_segment") else None,
+                "tagline": (pl.get("ice") or {}).get("tagline") or (ice_mod.tagline(pl.get("name") or p["title"], goal.get("primary_kpi") or "", pl.get("target_segment") or "") if goal else None)}
         st = p["status"]; pv = p.get("preview") or {}
         if st == "pending":
             if p["kind"] == "code_change" and pv.get("status") == "drafted":
@@ -339,7 +368,7 @@ def experiments_board() -> Dict[str, Any]:
         else:
             card["metric"] = st; cols["archive"].append(card)
     for k in cols:
-        cols[k].sort(key=lambda c: -(c["id"] or 0))
+        cols[k].sort(key=lambda c: (-((c.get("ice") or {}).get("score") or 0), -(c["id"] or 0)) if k == "proposed" else -(c["id"] or 0))
     return {"columns": [{"key": "proposed", "name": "PROPOSED", "c": "#ffb84d", "cards": cols["proposed"][:30]}, {"key": "simulated", "name": "SIMULATED", "c": "#6fe3ff", "cards": cols["simulated"][:30]},
                         {"key": "live", "name": "LIVE", "c": "#4dffa8", "cards": cols["live"][:30]}, {"key": "read", "name": "READ", "c": "#7fd8ec", "cards": cols["read"][:30]}, {"key": "archive", "name": "ARCHIVE", "c": "#7d95a3", "cards": cols["archive"][:30]}]}
 
@@ -373,8 +402,20 @@ def intel() -> Dict[str, Any]:
         if g_n: tactics.append(f"{g_n} listings we lack")
         if t.get("taker_fee_pct") is not None and ours.get("taker_fee_pct") is not None and float(t["taker_fee_pct"]) < float(ours["taker_fee_pct"]): tactics.append("lower taker fee")
         if t.get("kind"): tactics.append(t["kind"])
-        counter = next((a["what"] for a in acts if a.get("type") in ("counter_surge", "share_defence")), None) or ("asset spotlight on shared pairs" if s_n else "hold; monitor")
-        rivals.append({"id": t["exchange"], "name": t["name"], "threat": threat.upper(), "color": color, "pressureIndex": idx, "latestMove": move, "tactics": tactics[:4], "counterPlay": counter[:120], "vol_24h_usd": t.get("vol_24h_usd"), "share": t.get("share_of_tracked_inr_spot_pct"), "visits": t.get("weekly_visits"), "source": t.get("source")})
+        mine_s = [s for s in surges if s["competitor"] == t["exchange"] and s.get("we_list_it")]
+        camp_act = next((a for a in acts if a.get("type") == "counter_campaign" and a.get("symbol") == t["exchange"]), None)
+        if camp_act:
+            counter = camp_act["what"].split("→", 1)[-1].strip()
+        elif mine_s:
+            counter = f"spotlight {', '.join(x['symbol'] for x in mine_s[:3])} to our watchers/holders today (they are surging there)"
+        elif g_n:
+            counter = f"listing asks for {g_n} pair(s) they have; spotlight what we already list"
+        elif t.get("taker_fee_pct") is not None and ours.get("taker_fee_pct") is not None and float(t["taker_fee_pct"]) < float(ours["taker_fee_pct"]):
+            counter = "total-cost transparency and fee tiers, not a headline fee cut"
+        else:
+            counter = "hold; monitor cadence and app rank"
+        minor = t["exchange"] not in ("delta", "bybit", "binance", "okx", "bitget", "coinbase", "mudrex") and (t.get("vol_24h_usd") or 0) < 5e6 and idx < 30
+        rivals.append({"id": t["exchange"], "name": t["name"], "threat": threat.upper(), "color": color, "pressureIndex": idx, "latestMove": move, "tactics": tactics[:4], "counterPlay": counter[:160], "vol_24h_usd": t.get("vol_24h_usd"), "share": t.get("share_of_tracked_inr_spot_pct"), "visits": t.get("weekly_visits"), "source": t.get("source"), "minor": minor})
     rivals.sort(key=lambda r: -r["pressureIndex"])
     moves = []
     for s in surges[:8]:
@@ -447,6 +488,84 @@ def market_view() -> Dict[str, Any]:
     except Exception as e:
         layers = {"flash": [], "news": [], "top_oi": {}, "by_category": {}, "by_product": [], "feed_error": redact(str(e))}
     return {"tiles": tiles[:12], "hooks": table, "regime": (ctx.get("hooks") or {}).get("regime"), "tier0": ctx.get("tier0"), "narrative": ctx.get("narrative"), "web3": [(r.get("chain"), r.get("symbol"), r.get("vol_24h_usd")) for r in ((ctx.get("web3") or {}).get("trending") or [])[:8]], "generated_at": ctx.get("generated_at"), "cached": ctx.get("cached"), **layers}
+
+
+def _rec_ice(r: Dict[str, Any]) -> Dict[str, Any]:
+    pr = r.get("priority") or 50
+    return ice_mod.score(9 if pr >= 90 else 8 if pr >= 75 else 6 if pr >= 60 else 5, 8 if r.get("urgency") in ("now", "today") else 6, 8 if r.get("sop") else 5)
+
+
+def lab_view() -> Dict[str, Any]:
+    """Brain Lab: one intel-heavy page — situation, money flow, trader behaviour, recommendations (structural P0 first, ICE-ranked), global events, rivals that matter, campaigns, markets, benchmarks summary, HL vs CEX summary."""
+    from .market import moneyflow, feed
+    from . import structural
+    ctx = _ctx()
+    L = moneyflow.lab(ctx)
+    for r in L["recommendations"]:
+        r["ice"] = _rec_ice(r); r["tagline"] = ice_mod.tagline(r["title"], r.get("kpi") or "", r.get("who") or "", r.get("what") or "")
+    try:
+        L["recommendations"] = structural.as_recommendations(4) + L["recommendations"]
+    except Exception as e:
+        L["structural_error"] = redact(str(e))[:200]
+    L["recommendations"].sort(key=lambda r: (-(1 if r.get("structural") else 0), -((r.get("ice") or {}).get("score") or 0), -(r.get("priority") or 0)))
+    mv = market_view()
+    it = intel()
+    majors = [r for r in it.get("rivals", []) if not r.get("minor")]; minors = [r for r in it.get("rivals", []) if r.get("minor")]
+    bench_summary = {}
+    try:
+        from .market.benchmarks import benchmarks
+        b = benchmarks()
+        for cat, c in (b.get("categories") or {}).items():
+            bench_summary[cat] = {"leader": (c.get("leader") or {}).get("name"), "india_leader": (c.get("india_leader") or {}).get("name"), "gap_india_x": c.get("gap_to_india_leader_x"), "gap_global_x": c.get("gap_to_leader_x"), "ours": (c.get("ours") or {}).get("vol_24h_usd"), "top_target": next((t for t in (c.get("targets") or []) if t.get("pair")), None)}
+    except Exception:
+        pass
+    ocx = {}
+    try:
+        from .market.onchain_cex import compare
+        o = compare(); ocx = {"hl": o.get("hyperliquid"), "vs": o.get("hl_vs_cex"), "onchain_top": (o.get("onchain") or {}).get("protocols", [])[:5], "per_coin": (o.get("per_coin") or [])[:6]}
+    except Exception:
+        pass
+    return {"generated_at": ctx.get("generated_at"), "situation": {"regime": (ctx.get("hooks") or {}).get("regime"), "tier0": ctx.get("tier0"), "flash": feed.flash(ctx)[:10], "risk_appetite": (L["flow"] or {}).get("risk_appetite")},
+            "flow": L["flow"], "reads": L["reads"], "recommendations": L["recommendations"], "events": {"news": feed.biggest_news(ctx, 10), "calendar": [e for e in (ctx.get("calendar") or []) if e.get("impact") == "High"][:8], "risk_flags": ((ctx.get("news") or {}).get("risk_flags") or [])[:6]},
+            "rivals": {"major": majors, "minor": minors, "moves": it.get("moves", [])[:12], "campaigns": it.get("campaigns", [])[:12], "apps": it.get("apps", {}), "actions": it.get("actions", [])[:8], "sov": it.get("sov", [])},
+            "benchmarks": bench_summary, "hl_vs_cex": ocx, "market": {k: mv.get(k) for k in ("tiles", "hooks", "regime", "narrative", "top_oi", "by_category", "by_product")},
+            "note": "internal intelligence from free public sources; venue data is never named in user copy"}
+
+
+def atlas_view() -> Dict[str, Any]:
+    """Cohort Atlas: decoded segment families, product cohorts and their treatment, peace index, north star and limits, studies, open data requests."""
+    from . import segments
+    from .products import PRODUCTS
+    camps = []
+    try:
+        camps = _client().get_campaigns()
+    except Exception:
+        pass
+    regime = (_ctx().get("hooks") or {}).get("regime")
+    try:
+        st = segments.study(camps)
+    except Exception as e:
+        st = {"families": [], "segments": 0, "unknown_tokens": [], "studies": [], "by_product": [], "error": redact(str(e))[:200]}
+    try:
+        pi = guardrails.peace_index(camps, regime)
+    except Exception as e:
+        pi = {"families": [], "counts": {}, "error": redact(str(e))[:200]}
+    stage_of = {r["family"]: r.get("stage") for r in (pi.get("families") or [])}
+    fams = []
+    for f in st.get("families") or []:
+        fams.append({"family": f["family"], "meaning": f.get("meaning"), "products": f.get("products"), "stage": stage_of.get(f["family"]), "reach": f.get("reach"), "latest": {"name": (f.get("latest") or {}).get("name"), "version": (f.get("latest") or {}).get("version"), "first_seen": (f.get("latest") or {}).get("first_seen")},
+                     "versions": [{"version": v.get("version"), "name": v.get("name")} for v in (f.get("versions") or [])][-6:], "performance": f.get("performance"), "delta": f.get("delta"), "flags": f.get("flags"), "campaigns": len(f.get("campaigns_attached") or [])})
+    byp = {b["product"]: b for b in (st.get("by_product") or [])}
+    products = []
+    for pid, p in PRODUCTS.items():
+        b = byp.get(pid) or {}
+        products.append({"id": pid, "name": p["name"], "lens": p["lens"], "never": p["never"], "cadence": p["cadence"], "cross_sell": p["cross_sell"], "families": len(b.get("families") or []), "reach": b.get("reach"), "campaigns": b.get("campaigns"), "click_rate": b.get("click_rate")})
+    try:
+        reqs = [r for r in datarequests.list_requests(status="open", limit=20)]
+    except Exception:
+        reqs = []
+    return {"segments": st.get("segments", 0), "families": fams, "unknown_tokens": st.get("unknown_tokens") or [], "studies": st.get("studies") or [], "products": products,
+            "peace": {"counts": pi.get("counts"), "families": pi.get("families"), "multiplier": pi.get("multiplier"), "method": pi.get("method")}, "north_star": guardrails.north_star(), "limits": guardrails.limits(), "regime": regime, "requests": reqs, "error": st.get("error") or pi.get("error")}
 
 
 def trace(limit: int = 40) -> List[Dict[str, str]]:

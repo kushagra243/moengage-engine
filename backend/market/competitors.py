@@ -365,7 +365,7 @@ def intel(universe_ctx: Optional[Dict[str, Any]] = None, force: bool = False) ->
         prev = _previous(cid); fs = _first_seen(cid)
         for p in e.get("pairs", [])[:300]:
             k = (p["symbol"], p["product"]); v = p.get("vol_24h_usd") or 0
-            if p["symbol"] in STABLES:
+            if p["symbol"] in STABLES or p.get("product") == "option":      # per-contract option rows are not comparable pairs
                 continue
             ours_v = our.get(k, 0.0)
             if v >= min_usd or ours_v >= min_usd:

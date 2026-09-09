@@ -72,7 +72,7 @@ LIBRARY: List[Dict[str, Any]] = [
          compliance=dict(disclaimer_channels=["email", "whatsapp", "in-app"], banned_angles=["fomo", "win_framing"]), source="library", version=1),
     dict(id="sop_liquidation_recovery", name="Liquidation recovery (T+0 silence → T+14 spot path)", campaign_type="risk", transition="slipping",
          objective="Keep liquidated users as customers without ever encouraging re-leveraging.",
-         audience=dict(segment_family="LIQUIDATED_14D", description="position_liquidated in last 14 days", exclusions=["unsubscribed / DND", "open support ticket (route to support)"], min_reach=50, jurisdictions_excluded=["UK", "US"]),
+         audience=dict(segment_family="LIQUIDATED_14D", description="position_liquidated in last 14 days", exclusions=["unsubscribed / DND", "open support ticket (route to support)", "liquidated again inside the window (route to support, no sends)", "loss-dormant before the event (service card only)"], min_reach=50, jurisdictions_excluded=["UK", "US"]),
          steps=[dict(day=0, channel="in-app", purpose="Service card: what happened, where to see it, support link", copy_brief="No promo. Their numbers. Derivatives disclaimer block.", send_time_ist="+1h"),
                 dict(day=1, channel="email", purpose="Plain-language explainer: margin, funding, ADL; position-size calculator", copy_brief="No CTA to trade; disclaimer.", send_time_ist="10:00"),
                 dict(day=4, channel="email", purpose="Isolated vs cross, stop-loss habits (opt-in series)", copy_brief="Education only.", condition="opened day-1 email", send_time_ist="10:00"),
@@ -572,8 +572,8 @@ def preflight(sop: Dict[str, Any], segment: Optional[Dict[str, Any]], regime: Op
 
 
 def run_sop(sop_id: str, segment_name: Optional[str] = None, start_date: Optional[str] = None, variants_by_step: Optional[Dict[str, List[Dict[str, Any]]]] = None,
-            created_by: str = "user", dry_run: bool = False) -> Dict[str, Any]:
-    """Resolve the cohort, run pre-flight, and queue one approval-gated campaign proposal per step (plus the run record)."""
+            created_by: str = "user", dry_run: bool = False, ice: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
+    """Resolve the cohort, run pre-flight, and queue one approval-gated campaign proposal per step (plus the run record). `ice` = {impact, confidence, ease, tagline} is stored on every step proposal so the board ranks it."""
     from . import approvals, segments
     from .llm.tools import campaign_brief_check
     sop = get_sop(sop_id)
@@ -616,7 +616,7 @@ def run_sop(sop_id: str, segment_name: Optional[str] = None, start_date: Optiona
         title = f"{sop['name']} · step {p['step']} · {st['channel']} → {seg['name'] if seg else fam}"
         prop = approvals.propose("create_campaign", title, {"name": f"SOP_{sop['id']}_{p['step']}_{(seg or {}).get('name') or fam}_{start.strftime('%d%b%y')}", "channel": st["channel"], "target_segment": (seg or {}).get("name") or fam,
                                                           "variants": p["variants"], "goal": p["goal"], "schedule": {"date": p["send_on"], "time_ist": st.get("send_time_ist"), "condition": st.get("condition")},
-                                                          "ttl_hours": st.get("ttl_hours"), "exclusions": p["goal"]["suppressions"], "frequency_cap": f"{sop['frequency'].get('max_messages_per_user_per_week')}/week", "sop_id": sop["id"]},
+                                                          "ttl_hours": st.get("ttl_hours"), "exclusions": p["goal"]["suppressions"], "frequency_cap": f"{sop['frequency'].get('max_messages_per_user_per_week')}/week", "sop_id": sop["id"], "ice": _ice_row(ice, sop, seg or {"name": fam})},
                                  rationale=f"SOP {sop['id']} v{sop.get('version')}: {sop['objective']} Step purpose: {st['purpose']}", risk="medium", created_by=created_by)
         pids.append(prop["id"])
     conn = get_db()
@@ -625,6 +625,14 @@ def run_sop(sop_id: str, segment_name: Optional[str] = None, start_date: Optiona
     run_id = cur.lastrowid; conn.commit(); conn.close()
     audit("sop.run", {"run_id": run_id, "sop": sop["id"], "segment": (seg or {}).get("name") or fam, "proposals": pids}, actor=created_by)
     return {"ok": True, "run_id": run_id, "sop": sop["id"], "segment": (seg or {}).get("name") or fam, "proposal_ids": pids, "preflight": pf, "plan": plan, "next": "review and approve each step in Approvals; mid-flight checks run daily"}
+
+
+def _ice_row(ice: Optional[Dict[str, Any]], sop: Dict[str, Any], seg: Dict[str, Any]) -> Dict[str, Any]:
+    from . import ice as ice_mod
+    ice = ice or {}
+    row = ice_mod.score(ice.get("impact", 7), ice.get("confidence", 7), ice.get("ease", 7))
+    row["tagline"] = str(ice.get("tagline") or ice_mod.tagline(sop["name"], sop.get("primary_kpi") or "", (seg or {}).get("name") or "", sop.get("objective") or ""))[:220]
+    return row
 
 
 def list_runs(limit: int = 30) -> List[Dict[str, Any]]:

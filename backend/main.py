@@ -1193,6 +1193,31 @@ def brain_market():
     return brain.market_view()
 
 
+@app.get("/api/brain/lab")
+def brain_lab():
+    from . import brain
+    return brain.lab_view()
+
+
+@app.get("/api/brain/atlas")
+def brain_atlas():
+    from . import brain
+    return brain.atlas_view()
+
+
+@app.get("/api/brain/structural")
+def brain_structural():
+    from . import structural
+    return structural.audit()
+
+
+@app.get("/api/market/moneyflow")
+def market_moneyflow():
+    from .market import moneyflow
+    from .market.context import _latest
+    return moneyflow.lab(_latest(6 * 3600) or {})
+
+
 @app.get("/api/brain/trace")
 def brain_trace(limit: int = 40):
     from . import brain

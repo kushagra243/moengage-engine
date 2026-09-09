@@ -28,8 +28,15 @@ DEFAULT_CODES: Dict[str, Dict[str, str]] = {
     # propensity / risk
     "HIGHPROP": "propensity:High propensity", "LOWPROP": "propensity:Low propensity", "MIDPROP": "propensity:Mid propensity",
     "LOWRISK": "risk:Low risk", "HIGHRISK": "risk:High risk", "MIDRISK": "risk:Mid risk",
-    # value tier
+    # value tier (campaigns) and trader value cohorts (monthly segment uploads)
     "HVS": "value:High value", "LVS": "value:Low value", "LIS": "value:Low intent", "HIS": "value:High intent", "MVS": "value:Mid value",
+    "HVT": "value:High value trader", "MVT": "value:Mid value trader", "LVT": "value:Low value trader", "NVT": "value:New trader (no value tier yet)", "VHVT": "value:Very high value trader",
+    "HVU": "value:High value user", "LVU": "value:Low value user", "TOP100": "value:Top 100", "TOP1K": "value:Top 1000", "WHALES": "trader:Whale",
+    # lifecycle / cohort states used in segment names
+    "FTD": "cohort:First-time depositor", "NODEP": "cohort:No deposit", "NONDEP": "cohort:No deposit", "DEP": "cohort:Depositor", "FTT": "cohort:First-time trader", "NOTRADE": "cohort:No trade",
+    "DORMANT": "cohort:Dormant", "DORM": "cohort:Dormant", "INACTIVE": "cohort:Dormant", "INACT": "cohort:Dormant", "ACTIVE": "cohort:Active", "SLIPPING": "cohort:Slipping", "CHURNED": "cohort:Churned",
+    "D30": "window:30 days", "D60": "window:60 days", "D90": "window:90 days", "D7": "window:7 days", "D14": "window:14 days", "M1": "window:Month 1 tenure", "M3": "window:Month 3 tenure",
+    "PENDING": "cohort:Pending", "APPROVED": "cohort:Approved", "REJECTED": "cohort:Rejected", "WATCHERS": "cohort:Watchlist users", "HABITUAL": "cohort:Habitual", "LIQUIDATED": "cohort:Liquidation recovery",
     # trader type
     "HFT": "trader:High-frequency trader", "BC": "trader:Buy-and-hold / basic", "LIF": "trader:Low-frequency / infrequent", "LF": "trader:Low-frequency / infrequent",
     "PRO": "trader:Pro", "WHALE": "trader:Whale", "VIP": "trader:VIP",

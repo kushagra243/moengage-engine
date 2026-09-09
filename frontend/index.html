@@ -16,6 +16,7 @@
     <nav class="nav" id="nav">
       <button class="nav-item active" data-tab="overview" data-icon="grid">Overview</button>
       <button class="nav-item" data-tab="agent" data-icon="chat">Agent</button>
+      <button class="nav-item" data-tab="sops" data-icon="table">SOPs</button>
       <button class="nav-item" data-tab="anomalies" data-icon="alert">Anomalies <span class="count" id="nav-count-anomalies" hidden></span></button>
       <button class="nav-item" data-tab="market" data-icon="trend">Market</button>
       <button class="nav-item" data-tab="approvals" data-icon="check">Approvals <span class="count" id="nav-count-approvals" hidden></span></button>
@@ -77,6 +78,16 @@
               <div id="ov-tax"></div>
             </div>
             <div class="card">
+              <div class="card-head"><h3>North star &amp; guardrails</h3><div class="actions"><button class="btn ghost sm" id="ov-guard-monitor" data-icon="check" title="Check SOP misses and breaches now">Monitor</button></div></div>
+              <div id="ov-guard"></div>
+            </div>
+            <div class="card">
+              <div class="card-head"><h3>Cohorts (monthly uploads)</h3><div class="actions"><span class="small dim" id="ov-coh-meta"></span><button class="btn ghost sm" id="ov-coh-refresh" data-icon="refresh" title="Re-read segments from MoEngage"></button></div></div>
+              <div id="ov-coh"></div>
+              <div class="row" style="gap:6px;margin-top:8px"><input type="text" id="coh-code" placeholder="code, e.g. HVT" style="width:110px"><input type="text" id="coh-meaning" placeholder="meaning, e.g. value:High value trader"><button class="btn sm" id="coh-define" data-icon="plus">Define</button></div>
+              <div class="tiny dim" id="ov-coh-unknown"></div>
+            </div>
+            <div class="card">
               <div class="card-head"><h3>Lifecycle templates</h3></div>
               <div id="ov-templates"></div>
             </div>
@@ -128,6 +139,11 @@
                   <div class="row spread"><span class="small dim" id="change-engine"></span><button class="btn sm primary" id="change-queue" data-icon="zap">Queue &amp; draft</button></div>
                   <div class="teach-list" id="change-list"></div>
                 </div>
+                <div style="grid-column:1/-1">
+                  <label class="small muted">Hard communication limits (per user) and north star — enforced in SOP checks, pre-flight and brief checks</label>
+                  <div class="row" id="limits-row"></div>
+                  <div class="row"><input type="text" id="ns-text" placeholder="north star sentence"><button class="btn sm" id="ns-save" data-icon="plus">Set north star</button></div>
+                </div>
               </div>
             </details>
           </div>
@@ -135,6 +151,24 @@
           <div class="composer">
             <textarea id="chat-input" placeholder="Ask about campaigns, anomalies, market context… (Enter to send, Shift+Enter for newline)"></textarea>
             <button class="btn primary" id="chat-send" data-icon="send">Send</button>
+          </div>
+        </div>
+      </section>
+
+      <!-- ── SOPs ─────────────────────────────────────────────────────── -->
+      <section class="tab" id="tab-sops">
+        <div class="page-head">
+          <div><h2>Campaign SOPs</h2><div class="sub">Standard operating procedures per campaign type: cohort family, sequence, duration, frequency, holdout, KPI, kill rules. Running one queues approval-gated proposals per step.</div></div>
+          <div class="actions"><button class="btn ghost sm" id="sops-checks" data-icon="check" title="Evaluate kill rules on active runs now">Run checks</button><button class="btn ghost sm" id="sops-refresh" data-icon="refresh"></button></div>
+        </div>
+        <div class="grid grid-2">
+          <div class="card"><div class="card-head"><h3>Library</h3><span class="small dim" id="sops-meta"></span></div><div id="sops-list"></div></div>
+          <div>
+            <div class="card mb"><div class="card-head"><h3 id="sop-title">Select an SOP</h3><div class="actions"><span class="small dim" id="sop-fw"></span></div></div><div id="sop-detail" class="small">Pick one on the left to see the sequence and checks, then run it on a cohort.</div>
+              <div class="row" style="gap:6px;margin-top:10px" id="sop-run-row" hidden><input type="text" id="sop-seg" placeholder="segment name or family (default: SOP family → latest version)"><input type="date" id="sop-date" style="width:150px"><button class="btn sm" id="sop-dry" data-icon="check">Dry run</button><button class="btn sm primary" id="sop-run" data-icon="play">Run → proposals</button><button class="btn sm ghost" id="sop-agent" data-icon="chat" title="Ask the agent to write copy per step and run it">Agent runs it</button></div>
+              <div id="sop-plan" class="small mt-s"></div></div>
+            <div class="card mb"><div class="card-head"><h3>Runs</h3></div><div id="sops-runs"></div></div>
+            <div class="card"><div class="card-head"><h3>Flight plans</h3><span class="small dim" id="plans-meta"></span></div><div id="plans-list"></div><div id="plan-doc" class="md small mt-s"></div></div>
           </div>
         </div>
       </section>

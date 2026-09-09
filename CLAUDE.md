@@ -23,6 +23,11 @@ Or type `/setup` in Claude Code. Persistent service: `./cli.py service install`.
 - `crypto-copywriting` — frameworks and a compliant copy bank per trigger and channel, Hinglish examples, tests to run first.
 - `trader-analytics-playbook` — weekly seven questions with v5 Analytics Query shapes and reading rules.
 - `crypto-growth-calendar` — funding windows, expiries, macro prints in IST, US hours for tokenised perps, India moments.
+- `clm-campaign-playbook` — best campaign ideas per transition, what works / doesn't, anti-patterns, benchmark ranges, how to pick the next one.
+- `product-marketing` — positioning, messaging hierarchy, value props per trader state, launch/adoption playbook, competitive framing, fee comms.
+- `cohort-studies` — decoding segment nomenclature (HVT_Sep26), families/versions, monthly routine, standard studies.
+- `campaign-sops` — the SOP framework, library, run procedure and pre/mid/post-flight checks.
+- `flight-plans-and-guardrails` — the Flight Plan (campaign requirement doc) template, north star, hard communication limits, peace index, SOP monitor.
 Load the relevant one before working; the agent does the same via its `skill` tool.
 
 ## Invariants (do not weaken)
@@ -40,5 +45,5 @@ Loopback bind · per-process `X-Local-Token` · Host check · outbound only thro
 - **Code**: "Change request" in the Agent tab or `propose_code_change` → `backend/devagent.py` drafts on branch `agent/change-<id>` (Claude Code headless, fallback: model diff), runs tests, shows the diff in Approvals → approve merges and restarts the server.
 
 ## Current state (2026-09-09)
-Merged through PR #12: autopilot missions → approval-ready proposals; experiment ledger with Wilson readouts; taxonomy from naming conventions; deep per-campaign analysis on the free bulk model tier; Growth hacks tab; exchange-native market universe (Binance ∪ Hyperliquid). PR #13 added the full API catalog, shared skills, operator guidance, engine knobs, code-change proposals and this file. PR #14 adds six marketing skills for crypto derivatives, listing detection + open-interest movers as hooks (`backend/market/derivs.py`), derivatives taxonomy codes and six derivatives tactics in the hacks library.
+Merged through PR #12: autopilot missions → approval-ready proposals; experiment ledger with Wilson readouts; taxonomy from naming conventions; deep per-campaign analysis on the free bulk model tier; Growth hacks tab; exchange-native market universe (Binance ∪ Hyperliquid). PR #13 added the full API catalog, shared skills, operator guidance, engine knobs, code-change proposals and this file. PR #15 adds north star + hard communication limits + peace index + SOP monitor (`backend/guardrails.py`), Flight Plans (`backend/plans.py`), cohort decoding from segment names (`backend/segments.py`, Overview Cohorts card, define-code box), the SOP engine (`backend/sops.py`, SOPs tab, run → proposals, mid-flight checks) and four more skills. PR #14 added six marketing skills for crypto derivatives, listing detection + open-interest movers as hooks (`backend/market/derivs.py`), derivatives taxonomy codes and six derivatives tactics in the hacks library.
 Known limits: campaign-stats API exposes no control-group figures (readouts are pre-period comparisons); v5 analytics query is experimental; campaign creation via API is Push/Email only.

@@ -91,6 +91,15 @@ class DailyAutomationScheduler:
             try:
                 from .experiments import refresh_all
                 report["experiments"] = refresh_all()
+                try:
+                    from . import segments as _segments, sops as _sops
+                    report["segments"] = _segments.sync(client.get_segments())
+                    report["sop_checks"] = _sops.midflight_checks()
+                    from . import guardrails as _guard
+                    report["sop_monitor"] = _guard.sop_monitor(((report.get("market") or {}).get("hooks") or {}).get("regime") if isinstance(report.get("market"), dict) else None)
+                    report["steps"].append("segments+sops")
+                except Exception as e:
+                    report["segments_error"] = redact(str(e))
                 report["steps"].append("experiments")
             except Exception as e:
                 report["experiments_error"] = redact(str(e))

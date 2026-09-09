@@ -163,6 +163,37 @@ def run(max_actions: int = 3, force: bool = False) -> Dict[str, Any]:
     except Exception as ex:
         results.append({"mission": "ride_the_market", "outcome": "error", "detail": redact(str(ex))[:200]})
 
+    # 6. new cohort uploads → study + re-point (monthly)
+    try:
+        if budget > 0:
+            from . import segments as _seg
+            reg = _seg.registry(limit=300)
+            fresh = [r for r in reg if r.get("first_seen") and str(r["first_seen"])[:10] >= (date.today().replace(day=1)).isoformat()]
+            fams = sorted({r["family"] for r in fresh})
+            if fams:
+                target = f"cohorts:{date.today().strftime('%Y-%m')}:{len(fams)}"
+                if not _done_today("study_new_cohorts", target):
+                    prompt = (f"MISSION study_new_cohorts. New segment versions arrived this month for families {fams[:12]}. Run segment_study; for each new family: state reach vs previous version, "
+                              f"which standing campaigns should be re-pointed, and any undefined codes (ask, do not guess). Then run_sop('sop_monthly_cohort_upload', dry_run=True) and, for the two most valuable families, "
+                              f"run the matching SOP (list_sops) with copy per step. {BRIEF_RULES}")
+                    results.append(_run_mission(agent, "study_new_cohorts", target, prompt)); budget -= 1
+    except Exception as ex:
+        results.append({"mission": "study_new_cohorts", "outcome": "error", "detail": redact(str(ex))[:200]})
+
+    # 7. monthly flight plans (first 5 days of the month, or when none exist)
+    try:
+        if budget > 0:
+            from . import plans as _plans
+            month = date.today().strftime("%Y-%m")
+            ms = _plans.month_summary(month)
+            if (date.today().day <= 5 or ms["plans"] == 0) and not _done_today("monthly_flight_plans", month):
+                prompt = (f"MISSION monthly_flight_plans for {month}. Read north_star, comms_limits, clm_program_audit, segment_study, experiment_readouts and flight_plans(month='{month}'). "
+                          f"Transitions without a plan: {ms['transitions_without_plan']}. Write up to 3 Flight Plans (write_flight_plan) for the highest-value opportunities this month, each tied to an SOP where one fits, "
+                          f"with month_on_month grounded in last month's readouts and a candid whats_possible section. Do not queue proposals; plans first. {BRIEF_RULES}")
+                results.append(_run_mission(agent, "monthly_flight_plans", month, prompt)); budget -= 1
+    except Exception as ex:
+        results.append({"mission": "monthly_flight_plans", "outcome": "error", "detail": redact(str(ex))[:200]})
+
     # 4. best idea
     try:
         if budget > 0:

@@ -643,3 +643,15 @@ input:focus, select:focus, textarea:focus { box-shadow: var(--glow); border-colo
 .teach-list .gi button { flex: none; padding: 0 6px; font-size: 11px; }
 .diff { max-height: 320px; overflow: auto; font-size: 11px; line-height: 1.35; }
 .diff .add { color: var(--ok); } .diff .del { color: var(--bad); } .diff .hunk { color: var(--info); }
+
+/* cohorts + SOPs */
+.coh-row { display: grid; grid-template-columns: 1.6fr 0.8fr 0.6fr 0.6fr 0.7fr 0.9fr; gap: 6px; padding: 5px 4px; border-top: 1px solid var(--line); font-size: 12px; align-items: center; }
+.coh-row.h { color: var(--muted); font-size: 11px; text-transform: uppercase; letter-spacing: .04em; border-top: 0; }
+.coh-row .num { text-align: right; font-family: var(--mono); }
+.coh-row .fl { display: flex; flex-wrap: wrap; gap: 3px; }
+.sop-item { padding: 8px; border-top: 1px solid var(--line); cursor: pointer; }
+.sop-item:hover, .sop-item.selected { background: var(--bg-3); }
+.sop-item .t { font-weight: 600; }
+.sop-steps { display: grid; grid-template-columns: 50px 80px 1fr; gap: 4px 10px; font-size: 12px; margin-top: 6px; }
+.sop-steps .d { font-family: var(--mono); color: var(--muted); }
+.check-ok { color: var(--ok); } .check-bad { color: var(--bad); }

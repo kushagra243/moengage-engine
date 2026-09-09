@@ -18,7 +18,7 @@ from pydantic import BaseModel
 
 from .database import (init_db, get_all_settings, set_setting, get_setting, get_latest_daily_run, get_daily_run_history,
                        get_chat_history, clear_chat_history, save_chat_message, migrate_plaintext_secrets)
-from .security import install_log_redaction, LocalTokenMiddleware, local_token, secret_store, redact, audit
+from .security import install_log_redaction, LocalTokenMiddleware, local_token, secret_store, redact, audit, request_actor
 from .security.audit import tail as audit_tail, verify_chain
 from .security.secrets import is_secret_key
 from .moengage import MoEngageClient, DataUnavailable, registry_status
@@ -120,7 +120,8 @@ def status():
                       "last_run_time": scheduler_service.last_run_time, "last_run_status": scheduler_service.last_run_status},
         "settings": {"region": get_setting("moengage_region", ""), "app_id": get_setting("moengage_app_id", ""), "mock_mode": moe.mock_mode,
                      "has_cookies": moe.has_cookies()},
-        "security": {"secrets_backend": secret_store.status()["backend"], "audit": verify_chain(), "bind": "127.0.0.1"},
+        "security": {"secrets_backend": secret_store.status()["backend"], "audit": verify_chain(), "bind": "127.0.0.1",
+                     "allowed_hosts": list(__import__("backend.security.localauth", fromlist=["ALLOWED_HOST_PREFIXES"]).ALLOWED_HOST_PREFIXES)},
         "integration": {k: v for k, v in registry_status().items() if k in ("usable_reads", "usable_writes", "learned_file", "verified_file")},
         "anomaly": {"days_of_history": snapshot_count(moe.mode)},
         "growth": growth.counts(),
@@ -423,25 +424,25 @@ def approvals_get(pid: int):
 
 
 @app.post("/api/approvals/propose")
-def approvals_propose(payload: ProposePayload):
+def approvals_propose(payload: ProposePayload, request: Request):
     try:
-        return approvals.propose(payload.kind, payload.title, payload.payload, payload.rationale, payload.risk, created_by="user")
+        return approvals.propose(payload.kind, payload.title, payload.payload, payload.rationale, payload.risk, created_by=request_actor(request))
     except (approvals.ApprovalError, ValueError) as e:
         raise HTTPException(400, str(e))
 
 
 @app.post("/api/approvals/{pid}/approve")
-def approvals_approve(pid: int, payload: DecisionPayload):
+def approvals_approve(pid: int, payload: DecisionPayload, request: Request):
     try:
-        return approvals.approve_and_execute(pid, decided_by="user", note=payload.note)
+        return approvals.approve_and_execute(pid, decided_by=request_actor(request), note=payload.note)
     except approvals.ApprovalError as e:
         raise HTTPException(400, str(e))
 
 
 @app.post("/api/approvals/{pid}/reject")
-def approvals_reject(pid: int, payload: DecisionPayload):
+def approvals_reject(pid: int, payload: DecisionPayload, request: Request):
     try:
-        return approvals.reject(pid, note=payload.note, decided_by="user")
+        return approvals.reject(pid, note=payload.note, decided_by=request_actor(request))
     except approvals.ApprovalError as e:
         raise HTTPException(400, str(e))
 

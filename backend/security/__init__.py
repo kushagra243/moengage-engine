@@ -19,11 +19,11 @@ from .redact import redact, install_log_redaction
 from .secrets import SecretStore, secret_store, is_secret_key, mask_secret
 from .netguard import guarded_session, GuardedSession, NetworkPolicyError
 from .audit import audit
-from .localauth import local_token, LocalTokenMiddleware
+from .localauth import local_token, LocalTokenMiddleware, request_actor
 
 __all__ = [
     "redact", "install_log_redaction",
     "SecretStore", "secret_store", "is_secret_key", "mask_secret",
     "guarded_session", "GuardedSession", "NetworkPolicyError",
-    "audit", "local_token", "LocalTokenMiddleware",
+    "audit", "local_token", "LocalTokenMiddleware", "request_actor",
 ]

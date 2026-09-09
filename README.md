@@ -204,6 +204,9 @@ Each item carries *why* (the data), *how* (MoEngage steps), segment, channel,
 KPI, effort and expected impact. Buttons: *Draft with agent* (turns it into
 proposals with a goal brief), *Save*, *Dismiss*. Refresh re-derives on demand.
 
+Hosting for a team (Tailscale / Cloudflare Access in front of one host, with
+per-person identity on every approval): see [HOSTING.md](HOSTING.md).
+
 ## Running persistently (no model required)
 
 ```bash

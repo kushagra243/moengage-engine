@@ -184,7 +184,7 @@ def cmd_service(a):
   <key>Label</key><string>{label}</string>
   <key>ProgramArguments</key><array><string>{os.path.join(ROOT, '.venv', 'bin', 'python3')}</string><string>{os.path.join(ROOT, 'start.py')}</string></array>
   <key>WorkingDirectory</key><string>{ROOT}</string>
-  <key>EnvironmentVariables</key><dict><key>PORT</key><string>{port}</string><key>PATH</key><string>/usr/local/bin:/opt/homebrew/bin:/usr/bin:/bin</string></dict>
+  <key>EnvironmentVariables</key><dict><key>PORT</key><string>{port}</string><key>MOE_ALLOWED_HOSTS</key><string>{a.allowed_hosts or ''}</string><key>PATH</key><string>/usr/local/bin:/opt/homebrew/bin:/usr/bin:/bin</string></dict>
   <key>RunAtLoad</key><true/>
   <key>KeepAlive</key><true/>
   <key>ThrottleInterval</key><integer>10</integer>
@@ -243,7 +243,7 @@ def main():
     s = sp.add_parser("mock", help="demo data: seed"); s.add_argument("action", choices=["seed"]); s.add_argument("--days", type=int, default=30); s.add_argument("--clean", action="store_true", help="no injected faults"); s.set_defaults(fn=cmd_mock)
     s = sp.add_parser("audit-log"); s.add_argument("-n", type=int, default=30); s.set_defaults(fn=cmd_audit_log)
     s = sp.add_parser("growth", help="growth feed: refresh | list | set"); s.add_argument("action", choices=["refresh", "list", "set"]); s.add_argument("id", nargs="?", type=int); s.add_argument("--status"); s.add_argument("--llm", action="store_true"); s.add_argument("-n", type=int, default=5); s.set_defaults(fn=cmd_growth)
-    s = sp.add_parser("service", help="persistent background service (launchd): install | uninstall | status"); s.add_argument("action", choices=["install", "uninstall", "status"]); s.add_argument("--port"); s.set_defaults(fn=cmd_service)
+    s = sp.add_parser("service", help="persistent background service (launchd): install | uninstall | status"); s.add_argument("action", choices=["install", "uninstall", "status"]); s.add_argument("--port"); s.add_argument("--allowed-hosts", help="comma list of proxy hostnames allowed in the Host header, e.g. engine.tailnet.ts.net"); s.set_defaults(fn=cmd_service)
     a = p.parse_args()
     a.fn(a)
 

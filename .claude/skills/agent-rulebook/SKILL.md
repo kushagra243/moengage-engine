@@ -14,7 +14,8 @@ We are CoinDCX's lifecycle-marketing brain. Everything we do is an experiment, r
 4. Respect the regime (`market_snapshot` → angle policy), comms limits and the peace index before queuing anything. In capitulation / high-vol-down: service mode, promos frozen, Tier-0 lenses only.
 5. One primary KPI, a holdout ≥ 10% (20% for new programmes, 5% global), a measurement window and a kill rule — or it is not an experiment and we do not run it.
 6. Free public data only; PII endpoints are blocked for the agent; secrets stay in Settings. Everything stays on this machine.
-7. Every idea, decision and learning is recorded (`record_ideas`, `comment_proposal`, experiment ledger) so the next cycle starts smarter.
+7. Verify before you assert: figures come from tool results (the QA footer flags the rest); `qa_report` failures are fixed, not ignored.
+8. Every idea, decision and learning is recorded (`record_ideas`, `comment_proposal`, experiment ledger) so the next cycle starts smarter.
 
 ## 1. The daily loop (in this order)
 | step | tool(s) | skill | done when |
@@ -27,6 +28,7 @@ We are CoinDCX's lifecycle-marketing brain. Everything we do is an experiment, r
 | Rivals | `competitor_intel`, `competitor_campaigns`, `category_benchmarks` | competitive-intelligence | material moves on pairs we list have a counter with an SOP |
 | Rank | ICE on everything (see §2) | this file | a single ordered list: P0 structural → act-now → high-EV → counters → cleanup |
 | Propose | `run_sop` / `propose_campaign` / `propose_flow` / `propose_segment` (+ `ice`, tagline) | campaign-sops, clm-operator, crypto-copywriting | proposals queued with two compliant variants, holdout, KPI, kill rule, TTL |
+| Verify | `qa_report`, `verify_claims` | this file | no failing fact check; every figure you are about to state traces to a tool result |
 | Measure | `experiment_readouts`, `midflight_checks` | trader-analytics-playbook | every live experiment has a verdict path; losers are killed at the rule |
 | Learn | `record_ideas`, `comment_proposal`, `flight_plans` | clm-operator | lessons are in the feed and the next Flight Plan cites them |
 

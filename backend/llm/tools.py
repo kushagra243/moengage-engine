@@ -555,6 +555,20 @@ def onchain_vs_cex(force: bool = False) -> Dict[str, Any]:
     return onchain_cex.compare(force=force)
 
 
+def qa_report(force: bool = False) -> Dict[str, Any]:
+    """Fact-check report over everything the boards show: freshness, cross-source agreement, sanity bounds, references (SOPs/segments/KPIs), copy claims in pending drafts, source health, information completeness; safe improvements are applied and listed. Fails first; each carries a fix."""
+    from .. import qa
+    r = qa.report(force=force)
+    r["checks"] = [c for c in r["checks"] if c["status"] != "pass"][:30] + [{"note": f"{r['counts'].get('pass', 0)} checks passing (hidden)"}]
+    return r
+
+
+def verify_claims(claims: List[Dict[str, Any]]) -> Dict[str, Any]:
+    """Verify numeric claims against the live context before asserting them: [{claim, value, unit}] → verified true/false with how. Use for any figure you did not just read from a tool."""
+    from .. import qa
+    return qa.verify_claims(claims)
+
+
 def structural_audit() -> Dict[str, Any]:
     """Which must-have lifecycle campaigns (from the CLM playbooks) are missing from the live programme: KYC rescue, deposit-failure recovery, funded→first trade, second trade 72h, own-asset alerts, weekly recap, fee-tier nudge, intent-based graduation, tokenised cross-sell, slipping vs own baseline, dormant by cause, liquidation recovery, funding nudges, stress mode, holdouts, broadcast cap, frequency caps, web3 safety, SIP nurture, WhatsApp utility, Cards, channel recovery, re-KYC, cohort refresh. Each gap carries ICE, tagline, segment, SOP, KPI, benchmark. These are the P0 recommendations."""
     from .. import structural
@@ -829,6 +843,8 @@ TOOL_SCHEMAS: List[Dict[str, Any]] = [
     _fn("competitor_benchmarks", "Category leaderboards (spot / perps / options / commodities_tokenised) across Indian and global venues with our gap multiple and pair-level targets to match. Internal.", {"category": {"type": "string", "enum": ["spot", "perps", "options", "commodities_tokenised"]}, "force": {"type": "boolean"}}),
     _fn("competitor_campaigns", "Competitor campaigns detected in the last N hours from announcements, blogs, news and App Store notes — type, impact, counter SOP; App Store ranks. Internal.", {"hours": {"type": "integer"}, "venue": STR, "force": {"type": "boolean"}}),
     _fn("onchain_vs_cex", "Hyperliquid vs centralised venues (volume, OI, users, rank, share), on-chain perps OI landscape, per-coin OI share and funding edges. Internal.", {"force": {"type": "boolean"}}),
+    _fn("qa_report", "Fact-check report over the boards (freshness, cross-source agreement, bounds, references, copy claims, sources, completeness) with fixes; safe improvements auto-applied.", {"force": {"type": "boolean"}}),
+    _fn("verify_claims", "Verify numeric claims against live data before asserting them.", {"claims": {"type": "array", "items": OBJ}}, ["claims"]),
     _fn("structural_audit", "Structural misses in the CRM / funnel journey vs the CLM playbooks, ICE-ranked with tagline, segment, SOP, KPI, benchmark. These are P0; propose them first (run_sop or propose_campaign with ice + tagline).", {}),
     _fn("money_flow", "Money flow + trader behaviour reads + prioritised recommendations (segment, SOP, KPI, avoid). Start here for 'what should we do today'.", {}),
     _fn("market_flash", "Breaking-now market flash with product lenses, biggest news, top OI assets and intel per product.", {"hours": {"type": "integer"}}),
@@ -872,5 +888,5 @@ TOOLS: Dict[str, Callable[..., Dict[str, Any]]] = {
     "north_star": _safe(north_star), "set_north_star": _safe(set_north_star), "comms_limits": _safe(comms_limits), "set_comms_limits": _safe(set_comms_limits), "peace_index": _safe(peace_index),
     "guardrail_monitor": _safe(guardrail_monitor), "write_flight_plan": _safe(write_flight_plan), "flight_plans": _safe(flight_plans),
     "segment_study": _safe(segment_study), "define_nomenclature": _safe(define_nomenclature), "list_sops": _safe(list_sops), "sop_detail": _safe(sop_detail), "define_sop": _safe(define_sop), "run_sop": _safe(run_sop), "sop_runs": _safe(sop_runs), "channel_matrix": _safe(channel_matrix),
-    "competitor_intel": _safe(competitor_intel), "competitor_benchmarks": _safe(competitor_benchmarks), "competitor_campaigns": _safe(competitor_campaigns), "onchain_vs_cex": _safe(onchain_vs_cex), "structural_audit": _safe(structural_audit), "money_flow": _safe(money_flow), "market_flash": _safe(market_flash), "campaign_from_alert": _safe(campaign_from_alert), "competitor_dossier": _safe(competitor_dossier), "pair_battle": _safe(pair_battle), "web3_trending": _safe(web3_trending), "product_cohorts": _safe(product_cohorts), "announcement_lenses": _safe(announcement_lenses), "request_data": _safe(request_data), "data_requests": _safe(data_requests),
+    "competitor_intel": _safe(competitor_intel), "competitor_benchmarks": _safe(competitor_benchmarks), "competitor_campaigns": _safe(competitor_campaigns), "onchain_vs_cex": _safe(onchain_vs_cex), "qa_report": _safe(qa_report), "verify_claims": _safe(verify_claims), "structural_audit": _safe(structural_audit), "money_flow": _safe(money_flow), "market_flash": _safe(market_flash), "campaign_from_alert": _safe(campaign_from_alert), "competitor_dossier": _safe(competitor_dossier), "pair_battle": _safe(pair_battle), "web3_trending": _safe(web3_trending), "product_cohorts": _safe(product_cohorts), "announcement_lenses": _safe(announcement_lenses), "request_data": _safe(request_data), "data_requests": _safe(data_requests),
 }

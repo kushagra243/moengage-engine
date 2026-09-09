@@ -144,6 +144,13 @@ class DailyAutomationScheduler:
                         report["growth_agent_error"] = redact(str(e))
                 except Exception as e:
                     report["brief_error"] = redact(str(e))
+            try:
+                from . import qa as _qa
+                q = _qa.run()
+                report["qa"] = {"score": q["score"], **q["counts"], "improvements": len(q["improvements"])}
+                report["steps"].append("qa")
+            except Exception as e:
+                report["qa_error"] = redact(str(e))
             if not report.get("executive_summary"):
                 a = report.get("anomalies") or {}
                 report["executive_summary"] = (

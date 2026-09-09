@@ -15,6 +15,7 @@ North star, communication limits, peace index and SOP monitor.
   cap) → priority items in the growth feed.
 """
 from __future__ import annotations
+import re
 import json
 from datetime import date, datetime, timedelta
 from typing import Any, Dict, List, Optional
@@ -125,13 +126,25 @@ def effective_limits(regime: Optional[str] = None, stage: Optional[str] = None) 
 
 
 def _stage_for_family(family: str) -> Optional[str]:
-    f = family.upper()
-    if any(t in f for t in ("HVT", "VIP", "WHALE", "TOP", "CORE")):
-        return "Core"
-    if "LIQUIDAT" in f:
+    """Lifecycle stage from the family tokens (nomenclature). Order matters: risk states first, then funnel position, then value tiers."""
+    f = (family or "").upper()
+    toks = set(re.split(r"[^A-Z0-9]+", f))
+    if "LIQUIDAT" in f or "LIQUIDATED" in toks:
         return "Liquidated"
     if "LOSS" in f:
         return "Loss-dormant"
+    if any(t in toks for t in ("DORMANT", "RES", "RESURRECTION", "INACTIVE", "LAPSED", "CHURN", "CHURNED", "WINBACK")):
+        return "Dormant"
+    if any(t in toks for t in ("SLIPPING", "SLIP", "DECLINING", "ATRISK", "AT_RISK")):
+        return "Slipping"
+    if any(t in toks for t in ("KYC", "REKYC", "PENDING", "UNVERIFIED", "SIGNUP", "NODEP", "NODEPOSIT", "NEW", "FTD", "NOTRADE", "FTT", "ONBOARD", "ONBOARDING")):
+        return "New"
+    if any(t in f for t in ("HVT", "VIP", "WHALE", "TOP", "CORE", "HVS")):
+        return "Core"
+    if any(t in toks for t in ("HFT", "FUTURES", "PERP", "PERPS", "LEV", "LEVERAGE", "MARGIN", "OPTIONS", "OPT")):
+        return "Habitual perp"
+    if any(t in f for t in ("MVT", "LVT", "LVS", "LIS", "BC", "LIF", "SIP", "SPOT", "TG", "XQ", "ACTIVE", "HABIT", "RET", "RETENTION", "CS")):
+        return "Habitual"
     return None
 
 

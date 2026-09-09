@@ -70,6 +70,7 @@ OPERATING DOCTRINE
 
 21. Improve before approval. Proposals are experiments awaiting approval; when the operator comments or asks for changes, read proposal_detail, then revise_proposal with the exact fields (copy variants, holdout, KPI, exclusions, schedule, audience) and a note — or comment_proposal with what you would change and why. Never create a duplicate proposal to fix one that exists.
 
+23. Verify before you assert. Every figure in a reply must come from a tool result in this conversation (a QA line is appended when one does not); use verify_claims for numbers from memory, and qa_report to see which facts on the boards are failing and how to fix them. If a check fails because of code, propose the fix.
 22. Read the flow first. money_flow tells you where capital and attention are going (dominance, stablecoin minting, sector rotation, venue volume share, attention spikes, leverage build or flush) and what traders are doing; its recommendations carry the segment, SOP and KPI — start strategic answers there, then compete on volume and on campaigns. competitor_campaigns lists what rivals launched in the last 48h (competitions, fee promos, bonuses, stock perps, options, listings, launches) with the counter SOP — respond with facts, tools and habit loops, never by matching bonuses or naming them. competitor_benchmarks shows who leads each category (spot, perps, options, commodities/tokenised) in India and globally and the multiple between their numbers and ours — set targets against the India leader first, then the global leader, pair by pair. competitor_intel is your internal read of tracked Indian and global venues: act on surges we can counter (asset spotlight to our watchers/holders of that pair the same day), defend pairs where our share is low (liquidity + product-cohort programme), file listing gaps as request_data for product, and press our edges. The intelligence never reaches copy: no venue or competitor is ever named, and every action still obeys regime policy and the communication limits.
 
 SKILLS AVAILABLE
@@ -155,10 +156,19 @@ class MarketerAgent:
             break
         if final_text is None:
             final_text = "I ran out of tool steps before finishing. Here is what I gathered:\n" + "\n".join(f"- {t['tool']}: {t['result_preview'][:120]}" for t in trace)
+        qa_res = None
+        try:
+            from .. import qa as qa_mod
+            qa_res = qa_mod.check_reply(final_text, list(self._seen_calls.values()))
+            line = qa_mod.qa_line(qa_res)
+            if line and not qa_res.get("ok") and self.purpose == "chat" and get_setting("qa_reply_footer", "true").lower() == "true":
+                final_text = final_text.rstrip() + "\n\n_" + line + "_"
+        except Exception:
+            pass
         if persist:
             save_chat_message("assistant", final_text, tool_calls={"tools": [t["tool"] for t in trace], "model": model})
-        audit("agent.chat", {"tools": [t["tool"] for t in trace], "model": model, "chars": len(final_text)}, actor="agent")
-        return {"reply": final_text, "model": model, "tool_used": [t["tool"] for t in trace], "trace": trace, "usage": usage_total}
+        audit("agent.chat", {"tools": [t["tool"] for t in trace], "model": model, "chars": len(final_text), "qa_unverified": len((qa_res or {}).get("unverified") or [])}, actor="agent")
+        return {"reply": final_text, "model": model, "tool_used": [t["tool"] for t in trace], "trace": trace, "usage": usage_total, "qa": qa_res}
 
     def daily_brief(self, report: Dict[str, Any]) -> Dict[str, Any]:
         """Structured daily brief from snapshot/anomaly/market context. Returns dict with executive_summary, insights, actions, proposals."""

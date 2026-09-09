@@ -11,10 +11,13 @@ def test_brain_state_and_views_have_the_contract_shape():
     ds = brain.directives()
     assert all(d["severity"] in brain.SEV_COLOR and d["sev_label"] and d["actions"] for d in ds)
     board = brain.experiments_board()
-    assert [c["key"] for c in board["columns"]] == ["proposed", "simulated", "live", "read", "archive"]
+    assert [c["key"] for c in board["columns"]] == ["ideas", "proposed", "simulated", "live", "read", "archive"]
     ideas = brain.ideas("all")
     assert all({"id", "title", "hypothesis", "projectedLift", "confidence", "effort", "sourceSignal", "category"} <= set(i) for i in ideas)
     assert brain.ideas("market") == [i for i in ideas if i["category"] == "market"]
+    board = brain.experiments_board("structural")
+    assert board["columns"][0]["key"] == "ideas" and all(c.get("structural") for c in board["columns"][0]["cards"])
+    assert [c["key"] for c in board["columns"]] == ["ideas", "proposed", "simulated", "live", "read", "archive"]
     an = brain.anomalies_view()
     assert all(a["severity"] in ("ACT TODAY", "WATCH", "GOOD", "NORMAL") and isinstance(a["trend"], list) for a in an)
     mk = brain.market_view(); assert "tiles" in mk and "hooks" in mk

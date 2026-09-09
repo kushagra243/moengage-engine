@@ -6,6 +6,7 @@ metric has no source yet, the value is "—" with the reason in `sub`.
 """
 from __future__ import annotations
 import json
+import re
 from datetime import date, datetime, timedelta
 from typing import Any, Dict, List, Optional
 
@@ -106,7 +107,7 @@ def state() -> Dict[str, Any]:
     ctx = _ctx(); an = _anoms(); bu = an.get("by_urgency", {}) if isinstance(an, dict) else {}
     ci = ctx.get("competitors") or {}
     brief = _brief(latest, an, ctx, pend, read)
-    badges = {"exp": len(pend), "anom": bu.get("act_today", 0), "lab": sum(1 for a in (ci.get("actions") or []) if a.get("priority", 0) >= 80) or (1 if ctx.get("tier0") else 0)}
+    badges = {"exp": len(pend), "ideas": len(pend), "anom": bu.get("act_today", 0), "lab": sum(1 for a in (ci.get("actions") or []) if a.get("priority", 0) >= 80) or (1 if ctx.get("tier0") else 0)}
     return {"bus": bus, "load": load, "pipeline": pipeline, "brief": brief, "autopilot": get_setting("autopilot_enabled", "true").lower() == "true", "badges": badges, "mode": mode,
             "north_star": guardrails.north_star(), "stats": _stats(mode, pend, exps, running, read, days, an, ctx, ci, ideas_new), "region": get_setting("moengage_region", ""), "generated_at": datetime.utcnow().isoformat()}
 
@@ -161,9 +162,9 @@ def _stats(mode, pend, exps, running, read, days, an, ctx, ci, ideas_new) -> Dic
                   {"k": "ACTIONS", "v": str(len(acts)), "sub": f"{sum(1 for a in acts if a.get('priority', 0) >= 80)} priority", "c": "#ff5c9e" if any(a.get('priority', 0) >= 80 for a in acts) else "#6fe3ff"},
                   {"k": "INR-SPOT SHARE", "v": f"{ours.get('share_of_tracked_inr_spot_pct', '—')}%" if ours.get('share_of_tracked_inr_spot_pct') is not None else "—", "sub": "own INR markets vs tracked", "c": "#4dffa8"},
                   {"k": "LISTING GAPS", "v": str(len(ci.get("listing_gaps") or [])), "sub": "pairs they have, we don't · benchmarks below", "c": "#eaf7fc"}],
-        "ideas": [{"k": "IDEAS", "v": str(ideas_new), "sub": "new in feed", "c": "#eaf7fc"}, {"k": "HACKS", "v": str(len(hacks_mod.LIBRARY)), "sub": "sourced tactics", "c": "#6fe3ff"},
-                  {"k": "PROPOSED", "v": str(growth.counts().get("proposed", 0)), "sub": "turned into proposals", "c": "#4dffa8"}, {"k": "SAVED", "v": str(growth.counts().get("saved", 0)), "sub": "kept by the team", "c": "#eaf7fc"},
-                  {"k": "DATA ASKS", "v": str(len(datarequests.list_requests("open"))), "sub": "open requests", "c": "#ffb84d"}],
+        "ideas": [{"k": "IDEAS", "v": str(ideas_new), "sub": "in the backlog (feed + recommendations)", "c": "#eaf7fc"}, {"k": "PROPOSED", "v": str(len(pend)), "sub": "awaiting approval", "c": "#ffb84d"},
+                  {"k": "RUNNING", "v": str(len(running)), "sub": f"{sum(1 for e in running if (e.get('control_group_pct') or 0) >= 5)} with holdout", "c": "#6fe3ff"}, {"k": "READ", "v": str(len(read)), "sub": "window complete", "c": "#4dffa8"},
+                  {"k": "HACKS", "v": str(len(hacks_mod.LIBRARY)), "sub": "sourced tactics", "c": "#7fd8ec"}],
         "exp": [{"k": "PROPOSED", "v": str(len(pend)), "sub": "awaiting approval", "c": "#ffb84d"}, {"k": "RUNNING", "v": str(len(running)), "sub": f"{sum(1 for e in running if (e.get('control_group_pct') or 0) >= 5)} with holdout", "c": "#6fe3ff"},
                 {"k": "READ", "v": str(len(read)), "sub": "window complete", "c": "#4dffa8"}, {"k": "ABANDONED", "v": str(sum(1 for e in exps if e.get('status') == 'abandoned')), "sub": "rejected or expired", "c": "#7d95a3"},
                 {"k": "EXECUTED", "v": str(sum(1 for p in approvals.list_proposals(limit=400) if p['status'] == 'executed')), "sub": "all time", "c": "#eaf7fc"}],
@@ -339,7 +340,7 @@ def promote_idea(raw: str, actor: str = "user") -> Dict[str, Any]:
     return {"ok": True, "trace": f"idea/promote #HACK-{raw} → brain drafting proposals", "agent_prompt": f"Turn growth hack '{raw}' into an experiment via the matching SOP (list_sops) or propose_campaign with a full goal brief and two compliant variants."}
 
 
-def experiments_board() -> Dict[str, Any]:
+def experiments_board(filter_: str = "all") -> Dict[str, Any]:
     props = approvals.list_proposals(limit=400)
     exps = {e["proposal_id"]: e for e in experiments.list_experiments(400)}
     cols = {"proposed": [], "simulated": [], "live": [], "read": [], "archive": []}
@@ -369,7 +370,24 @@ def experiments_board() -> Dict[str, Any]:
             card["metric"] = st; cols["archive"].append(card)
     for k in cols:
         cols[k].sort(key=lambda c: (-((c.get("ice") or {}).get("score") or 0), -(c["id"] or 0)) if k == "proposed" else -(c["id"] or 0))
-    return {"columns": [{"key": "proposed", "name": "PROPOSED", "c": "#ffb84d", "cards": cols["proposed"][:30]}, {"key": "simulated", "name": "SIMULATED", "c": "#6fe3ff", "cards": cols["simulated"][:30]},
+    idea_cards: List[Dict[str, Any]] = []
+    try:
+        if filter_ in ("all", "structural", "market", "recommended"):
+            for r in recommendations():
+                if r.get("on_board") or (filter_ == "structural" and not r.get("structural")) or (filter_ == "market" and r.get("structural")):
+                    continue
+                idea_cards.append({"id": r["id"], "kind": "recommendation", "title": r["title"], "tag": "P0 structural" if r.get("structural") else f"P{r.get('priority')} market", "product": r.get("product"), "note": (r.get("why") or "")[:220], "metric": f"ICE {r['ice']['score']}", "ice": r.get("ice"), "tagline": r.get("tagline"),
+                                   "who": r.get("who"), "what": r.get("what"), "sop": r.get("sop"), "kpi": r.get("kpi"), "benchmark": r.get("benchmark"), "urgency": r.get("urgency"), "avoid": r.get("avoid"), "structural": bool(r.get("structural")), "category": "structural" if r.get("structural") else "market"})
+    except Exception as e:
+        idea_cards.append({"id": "rec:error", "kind": "recommendation", "title": "recommendations unavailable", "note": redact(str(e))[:120], "metric": "—", "tag": "error"})
+    rec_ids = {c["title"] for c in idea_cards}
+    for i in ideas(filter_ if filter_ != "recommended" else "__none__"):
+        if i["title"] in rec_ids:
+            continue
+        idea_cards.append({"id": i["id"], "raw_id": i["raw_id"], "kind": i["kind"], "title": i["title"], "tag": i["category"], "note": i.get("hypothesis") or "", "metric": f"ICE {(i.get('ice') or {}).get('score', '—')}", "ice": i.get("ice"), "tagline": i.get("tagline"), "how": i.get("how"),
+                           "projectedLift": i.get("projectedLift"), "confidence": i.get("confidence"), "effort": i.get("effort"), "sourceSignal": i.get("sourceSignal"), "structural": bool(i.get("structural")), "category": i["category"], "sop": i.get("sop"), "tags": i.get("tags")})
+    idea_cards.sort(key=lambda c: (-(1 if c.get("structural") else 0), -((c.get("ice") or {}).get("score") or 0)))
+    return {"filter": filter_, "filters": ["all", "structural", "market", "audience", "counter", "sop", "cadence"], "columns": [{"key": "ideas", "name": "IDEAS", "c": "#ff5c9e", "cards": idea_cards[:60]}, {"key": "proposed", "name": "PROPOSED", "c": "#ffb84d", "cards": cols["proposed"][:30]}, {"key": "simulated", "name": "SIMULATED", "c": "#6fe3ff", "cards": cols["simulated"][:30]},
                         {"key": "live", "name": "LIVE", "c": "#4dffa8", "cards": cols["live"][:30]}, {"key": "read", "name": "READ", "c": "#7fd8ec", "cards": cols["read"][:30]}, {"key": "archive", "name": "ARCHIVE", "c": "#7d95a3", "cards": cols["archive"][:30]}]}
 
 
@@ -495,19 +513,62 @@ def _rec_ice(r: Dict[str, Any]) -> Dict[str, Any]:
     return ice_mod.score(9 if pr >= 90 else 8 if pr >= 75 else 6 if pr >= 60 else 5, 8 if r.get("urgency") in ("now", "today") else 6, 8 if r.get("sop") else 5)
 
 
+def recommendations(ctx: Optional[Dict[str, Any]] = None, lab: Optional[Dict[str, Any]] = None) -> List[Dict[str, Any]]:
+    """The experiment backlog: structural P0 gaps first, then market-driven recommendations; every row carries ICE, tagline, who/what/why, SOP, KPI, benchmark and a stable id."""
+    from .market import moneyflow
+    from . import structural
+    ctx = ctx if ctx is not None else _ctx()
+    L = lab or moneyflow.lab(ctx)
+    recs = list(L.get("recommendations") or [])
+    for r in recs:
+        r["ice"] = _rec_ice(r); r["tagline"] = ice_mod.tagline(r["title"], r.get("kpi") or "", r.get("who") or "", r.get("what") or "")
+        r["id"] = "market:" + (r.get("sop") or re.sub(r"[^a-z0-9]+", "_", r["title"].lower())[:40])
+    try:
+        recs = structural.as_recommendations(6) + recs
+    except Exception:
+        pass
+    for r in recs:
+        if r.get("structural"):
+            r["id"] = "structural:" + str(r.get("id"))
+    recs.sort(key=lambda r: (-(1 if r.get("structural") else 0), -((r.get("ice") or {}).get("score") or 0), -(r.get("priority") or 0)))
+    try:
+        from . import qa as qa_mod
+        qa_mod.enrich_recommendations(recs)
+    except Exception:
+        pass
+    # hide what is already on the board (a pending or executed proposal for the same SOP)
+    live = " ".join(((p.get("payload") or {}).get("sop_id") or "") + " " + p["title"] for p in approvals.list_proposals(limit=300) if p["status"] in ("pending", "approved", "executed"))
+    for r in recs:
+        r["on_board"] = bool(r.get("sop")) and r["sop"] in live
+    return recs[:14]
+
+
+def queue_recommendation(rec_id: str, actor: str = "user") -> Dict[str, Any]:
+    """Turn a recommendation into approval-gated proposals through its SOP (dry-run first; nothing sends)."""
+    rec = next((r for r in recommendations() if r.get("id") == rec_id), None)
+    if not rec:
+        return {"ok": False, "error": "recommendation not found (the backlog is regenerated from live data; it may have expired)"}
+    if not rec.get("sop"):
+        return {"ok": False, "error": "this recommendation has no SOP; ask the brain to draft it with propose_campaign"}
+    ice = {**{k: rec["ice"][k] for k in ("impact", "confidence", "ease")}, "tagline": rec.get("tagline")}
+    dry = sops_mod.run_sop(rec["sop"], created_by=actor, dry_run=True, ice=ice)
+    if not dry.get("ok"):
+        problems = [c for c in (dry.get("preflight") or {}).get("checks", []) if not c.get("ok")] + [p["brief_check"]["problems"] for p in dry.get("plan", []) if not p.get("internal") and not p["brief_check"]["ok"]]
+        return {"ok": False, "error": "pre-flight blocked", "problems": problems, "hint": "usually the cohort segment is missing: approve or create it first, or ask the brain to propose_segment"}
+    real = sops_mod.run_sop(rec["sop"], created_by=actor, dry_run=False, ice=ice)
+    for pid in real.get("proposal_ids", []):
+        approvals.add_comment(pid, f"Queued from the Experiments backlog: {rec['title']}. Why: {rec.get('why')} ICE {rec['ice']['score']} ({rec['ice']['impact']}·{rec['ice']['confidence']}·{rec['ice']['ease']}). KPI {rec.get('kpi')}; benchmark {rec.get('benchmark') or '—'}. Copy is a compliant placeholder unless variants were written; edit before approval.", actor=actor)
+    audit("recommendation.queue", {"id": rec_id, "sop": rec["sop"], "proposals": real.get("proposal_ids")}, actor=actor)
+    return {"ok": True, "run_id": real.get("run_id"), "proposal_ids": real.get("proposal_ids", []), "sop": rec["sop"]}
+
+
 def lab_view() -> Dict[str, Any]:
     """Brain Lab: one intel-heavy page — situation, money flow, trader behaviour, recommendations (structural P0 first, ICE-ranked), global events, rivals that matter, campaigns, markets, benchmarks summary, HL vs CEX summary."""
     from .market import moneyflow, feed
     from . import structural
     ctx = _ctx()
     L = moneyflow.lab(ctx)
-    for r in L["recommendations"]:
-        r["ice"] = _rec_ice(r); r["tagline"] = ice_mod.tagline(r["title"], r.get("kpi") or "", r.get("who") or "", r.get("what") or "")
-    try:
-        L["recommendations"] = structural.as_recommendations(4) + L["recommendations"]
-    except Exception as e:
-        L["structural_error"] = redact(str(e))[:200]
-    L["recommendations"].sort(key=lambda r: (-(1 if r.get("structural") else 0), -((r.get("ice") or {}).get("score") or 0), -(r.get("priority") or 0)))
+    L["recommendations"] = recommendations(ctx, L)
     mv = market_view()
     it = intel()
     majors = [r for r in it.get("rivals", []) if not r.get("minor")]; minors = [r for r in it.get("rivals", []) if r.get("minor")]

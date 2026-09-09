@@ -30,8 +30,8 @@ def test_intel_share_surge_gap_edge_and_actions(monkeypatch):
             {"symbol": "ETH", "product": "spot", "quote": "USDT", "vol_24h_usd": 50_000_000, "inr_market": False, "price": 2500, "chg_24h": 0.5}]
     theirs = [{"symbol": "BTC", "product": "perp", "quote": "USD", "vol_24h_usd": 9_000_000, "oi_usd": 2e6, "funding_1h_pct": 0.02, "chg_24h": 1.0, "price": 80000},
               {"symbol": "XAU", "product": "perp", "quote": "USD", "vol_24h_usd": 1_500_000, "oi_usd": 1e5, "funding_1h_pct": 0.0, "chg_24h": 0.2, "price": 2500},
-              {"symbol": "SUI", "product": "perp", "quote": "USD", "vol_24h_usd": 2_000_000, "oi_usd": 1e5, "funding_1h_pct": 0.0, "chg_24h": 9.0, "price": 1.2}]
-    prev = [{"symbol": "BTC", "product": "perp", "vol_24h_usd": 8_500_000}, {"symbol": "SUI", "product": "perp", "vol_24h_usd": 400_000}]
+              {"symbol": "SUI", "product": "perp", "quote": "USD", "vol_24h_usd": 10_000_000, "oi_usd": 1e5, "funding_1h_pct": 0.0, "chg_24h": 9.0, "price": 1.2}]
+    prev = [{"symbol": "BTC", "product": "perp", "vol_24h_usd": 8_500_000}, {"symbol": "SUI", "product": "perp", "vol_24h_usd": 2_000_000}]
     c = _snap(monkeypatch, ours, theirs, prev)
     i = c.intel({"crypto_markets": []}, force=True)
     dcx = next(t for t in i["exchanges"] if t["exchange"] == "coindcx")

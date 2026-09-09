@@ -372,7 +372,8 @@ def intel(universe_ctx: Optional[Dict[str, Any]] = None, force: bool = False) ->
                 battles.append({"symbol": p["symbol"], "product": p["product"], "competitor": cid, "their_vol_usd": round(v), "our_vol_usd": round(ours_v), "our_share_pct": round(ours_v / (ours_v + v) * 100, 1) if (ours_v + v) else None})
             if prev is not None:
                 pv = (prev.get(k) or {}).get("vol_24h_usd") or 0
-                if pv >= 50_000 and v >= min_usd and (v / pv - 1) * 100 >= surge_pct:
+                # a prior volume under $1M or a jump beyond 500% is a history gap (fresh listing, partial snapshot), not a surge
+                if pv >= 1_000_000 and v >= min_usd and surge_pct <= (v / pv - 1) * 100 <= 500:
                     surges.append({"symbol": p["symbol"], "product": p["product"], "competitor": cid, "vol_now_usd": round(v), "vol_prev_usd": round(pv), "surge_pct": round((v / pv - 1) * 100), "chg_24h": p.get("chg_24h"), "we_list_it": p["symbol"] in our_syms, "our_vol_usd": round(ours_v)})
             if p["symbol"] not in our_syms and v >= min_usd and p["product"] in ("spot", "perp"):
                 gaps.append({"symbol": p["symbol"], "product": p["product"], "competitor": cid, "their_vol_usd": round(v), "first_seen_there": fs.get(k)})

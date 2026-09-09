@@ -138,3 +138,26 @@ h1 { margin:2px 0 4px; font:600 30px/1.05 var(--display); color:var(--text-hi); 
 .lab-nav { display:flex; flex-wrap:wrap; gap:4px 14px; margin:0 0 12px; font:600 10px/1 var(--display); letter-spacing:.18em; text-transform:uppercase; }
 .lab-nav a { color:var(--text-mute); border-bottom:1px solid transparent; padding:4px 0; } .lab-nav a:hover { color:var(--cyan); border-color:var(--cyan); }
 .btn.ghost { border-color:var(--line-soft); color:var(--text-mute); }
+.xcard.p0 { border-color:rgba(255,92,158,.55); }
+.kanban .col:first-child { grid-column: span 1; }
+
+/* ── readability pass: brighter secondary text, larger minimum sizes, roomier line height ── */
+:root { --text:#dbeaf1; --text-dim:#9db3c0; --text-mute:#7f9aa8; --text-ghost:#6c8794; }
+body { font-size:14px; line-height:1.6; }
+.sub { font-size:13px; } .empty { font-size:13px; }
+.card .mv, .xcard .nt, .grid-tbl, .soplist .nm, .step .d, .rules .v, .an .ca, .an .op, .brief, .md { font-size:13px; line-height:1.55; }
+.xcard .tt { font-size:13px; } .card .nm { font-size:16px; } .tagline { font-size:13px; line-height:1.5; }
+.chip { font-size:10.5px; } .lab10 { font-size:10.5px; } .grid-tbl .h { font-size:10.5px; } .rail .item { font-size:12px; }
+[style*="font-size:10px"] { font-size:11.5px !important; line-height:1.5; }
+[style*="font-size:11px"] { font-size:12.5px !important; line-height:1.5; }
+[style*="font-size:12px"] { font-size:13px !important; line-height:1.55; }
+.ghost { color:var(--text-ghost); } .mute, .muted { color:var(--text-dim); }
+/* large-text mode (rail toggle) */
+body.text-lg { font-size:15.5px; }
+body.text-lg [style*="font-size:10px"] { font-size:12.5px !important; } body.text-lg [style*="font-size:11px"] { font-size:13.5px !important; } body.text-lg [style*="font-size:12px"] { font-size:14.5px !important; }
+body.text-lg .card .mv, body.text-lg .xcard .nt, body.text-lg .grid-tbl, body.text-lg .an .ca, body.text-lg .an .op, body.text-lg .tagline, body.text-lg .md { font-size:14.5px; }
+body.text-lg .xcard .tt, body.text-lg .sub { font-size:14.5px; } body.text-lg .chip, body.text-lg .lab10, body.text-lg .grid-tbl .h { font-size:11.5px; }
+.kanban.board { grid-template-columns:minmax(340px,1.9fr) repeat(5,minmax(190px,1fr)); align-items:start; }
+@media (max-width:1500px) { .kanban.board { grid-template-columns:minmax(320px,1.6fr) repeat(2,minmax(200px,1fr)); } }
+@media (max-width:1000px) { .kanban.board { grid-template-columns:1fr; } }
+.kanban .col.wide .xcard { padding:12px 14px; }

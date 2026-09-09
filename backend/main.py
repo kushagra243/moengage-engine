@@ -1170,9 +1170,9 @@ def brain_idea_promote(raw: str, request: Request):
 
 
 @app.get("/api/brain/experiments")
-def brain_experiments():
+def brain_experiments(filter: str = "all"):
     from . import brain
-    return brain.experiments_board()
+    return brain.experiments_board(filter)
 
 
 @app.get("/api/brain/intel")
@@ -1203,6 +1203,29 @@ def brain_lab():
 def brain_atlas():
     from . import brain
     return brain.atlas_view()
+
+
+class RecQueuePayload(BaseModel):
+    id: str
+
+
+@app.post("/api/brain/recommendations/queue")
+def brain_recommendation_queue(payload: RecQueuePayload, request: Request):
+    from . import brain
+    return brain.queue_recommendation(payload.id, actor=request_actor(request))
+
+
+@app.get("/api/brain/qa")
+def brain_qa(force: bool = False):
+    from . import qa
+    return qa.report(force=force)
+
+
+@app.post("/api/brain/qa/run")
+def brain_qa_run(request: Request):
+    from . import qa
+    audit("qa.manual", {}, actor=request_actor(request))
+    return qa.run()
 
 
 @app.get("/api/brain/structural")

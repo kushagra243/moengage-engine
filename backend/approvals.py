@@ -15,7 +15,7 @@ from typing import Any, Callable, Dict, List, Optional
 from .database import get_db
 from .security import audit, redact
 
-KINDS = ("create_segment", "create_campaign", "create_flow", "pause_campaign", "resume_campaign", "update_segment", "custom_segment_upload")
+KINDS = ("create_segment", "create_campaign", "create_flow", "pause_campaign", "resume_campaign", "update_segment", "custom_segment_upload", "code_change")
 
 _executors: Dict[str, Dict[str, Callable[..., Dict[str, Any]]]] = {}
 
@@ -97,6 +97,13 @@ def propose(kind: str, title: str, payload: Dict[str, Any], rationale: str = "",
     return row
 
 
+def update_preview(pid: int, preview: Dict[str, Any]) -> None:
+    """Executors that draft asynchronously (code changes) refresh the stored preview."""
+    conn = get_db()
+    conn.execute("UPDATE proposals SET preview_json=? WHERE id=?", (json.dumps(preview, default=str), pid))
+    conn.commit(); conn.close()
+
+
 def list_proposals(status: Optional[str] = None, limit: int = 100) -> List[Dict[str, Any]]:
     init_approval_tables()
     conn = get_db()
@@ -126,6 +133,12 @@ def reject(pid: int, note: str = "", decided_by: str = "user") -> Dict[str, Any]
     conn.execute("UPDATE proposals SET status='rejected', decided_at=CURRENT_TIMESTAMP, decided_by=?, decision_note=? WHERE id=?", (decided_by, note[:1000], pid))
     conn.commit(); conn.close()
     audit("proposal.rejected", {"id": pid, "note": note}, actor=decided_by)
+    if p["kind"] == "code_change":
+        try:
+            from .devagent import cleanup
+            cleanup(pid)
+        except Exception:
+            pass
     return get_proposal(pid)  # type: ignore[return-value]
 
 
@@ -144,7 +157,7 @@ def approve_and_execute(pid: int, decided_by: str = "user", note: str = "") -> D
     conn.commit(); conn.close()
     audit("proposal.approved", {"id": pid, "kind": p["kind"], "title": p["title"]}, actor=decided_by)
     try:
-        result = ex["execute"](p["payload"])
+        result = ex["execute"]({**p["payload"], "_proposal_id": pid})
         conn = get_db()
         conn.execute("UPDATE proposals SET status='executed', executed_at=CURRENT_TIMESTAMP, result_json=? WHERE id=?", (json.dumps(result, default=str), pid))
         conn.commit(); conn.close()

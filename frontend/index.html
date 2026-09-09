@@ -111,6 +111,25 @@
             <div class="ctx-strip" id="agent-ctx"></div>
             <div class="ctx-issues" id="agent-issues"></div>
             <div class="quick compact" id="agent-quick"></div>
+            <details class="teach" id="teach-panel">
+              <summary><span data-icon="gear"></span> Teach the agent · change the engine <span class="small dim" id="teach-meta"></span></summary>
+              <div class="teach-grid">
+                <div>
+                  <label class="small muted">Standing instruction (applies to every future conversation)</label>
+                  <div class="row"><select id="teach-scope" class="sm"><option>general</option><option>copy</option><option>audience</option><option>channel</option><option>measurement</option><option>market</option><option>process</option><option>ui</option></select>
+                  <input type="text" id="teach-text" placeholder="e.g. Always exclude KYC-pending users from promotions; brand voice is calm and factual"><button class="btn sm" id="teach-save" data-icon="plus">Save</button></div>
+                  <div class="teach-list" id="teach-list"></div>
+                </div>
+                <div>
+                  <label class="small muted">Change request — the engine codes it on a branch, you approve the diff</label>
+                  <div class="row"><select id="change-scope" class="sm"><option value="any">any</option><option value="frontend">view / UI</option><option value="backend">backend</option><option value="cli">CLI</option><option value="docs">docs</option><option value="tests">tests</option></select>
+                  <input type="text" id="change-title" placeholder="short title"></div>
+                  <textarea id="change-text" rows="3" placeholder="Describe precisely: where, what, how to verify. e.g. Add a 'Reach' column to the Anomalies table showing delivered count, sortable."></textarea>
+                  <div class="row spread"><span class="small dim" id="change-engine"></span><button class="btn sm primary" id="change-queue" data-icon="zap">Queue &amp; draft</button></div>
+                  <div class="teach-list" id="change-list"></div>
+                </div>
+              </div>
+            </details>
           </div>
           <div class="chat-log" id="chat-log"></div>
           <div class="composer">

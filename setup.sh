@@ -3,6 +3,8 @@
 #   ./setup.sh            → venv, deps, Claude Code check, provider config, start server
 #   ./setup.sh --no-start → everything except starting the server
 #   ./setup.sh --openrouter → configure the OpenRouter provider instead of Claude Code (key entered later in Settings)
+#   Re-runs are fast: the venv is kept, pip is skipped when requirements.txt is unchanged, settings/keys/DB persist in data/ and the Keychain.
+#   To start later without setup: .venv/bin/python start.py   (or ./cli.py service install for a persistent launchd service)
 set -euo pipefail
 cd "$(dirname "$0")"
 
@@ -33,9 +35,15 @@ ok "$($PY --version) at $PY"
 
 step 2/6 "Virtualenv + dependencies"
 if [ ! -x .venv/bin/python3 ]; then "$PY" -m venv .venv; ok "created .venv"; else ok ".venv exists"; fi
-.venv/bin/python -m pip install -q --upgrade pip >/dev/null 2>&1 || true
-.venv/bin/python -m pip install -q -r requirements.txt
-ok "dependencies installed"
+REQ_HASH="$(shasum -a 256 requirements.txt | cut -c1-16)"
+if [ -f .venv/.req-hash ] && [ "$(cat .venv/.req-hash)" = "$REQ_HASH" ] && .venv/bin/python -c "import fastapi, uvicorn, cryptography, feedparser, yaml" 2>/dev/null; then
+  ok "dependencies unchanged (skipped install)"
+else
+  .venv/bin/python -m pip install -q --upgrade pip >/dev/null 2>&1 || true
+  .venv/bin/python -m pip install -q -r requirements.txt
+  echo "$REQ_HASH" > .venv/.req-hash
+  ok "dependencies installed"
+fi
 mkdir -p data/logs data/captures
 .venv/bin/python -c "import sys; sys.path.insert(0,'.'); from backend.database import init_db; init_db(); from backend.security import secret_store; print('  ✓ database initialised; secret backend:', secret_store.status()['backend'])"
 
@@ -56,7 +64,8 @@ ok "engine set to provider=$PROVIDER model=$MODEL"
 [ "$PROVIDER" = "openrouter" ] && warn "paste your OpenRouter key in Settings → LLM (or: ./cli.py set-key llm)"
 
 step 4/6 "Tests"
-if .venv/bin/python -m pytest -q tests >/dev/null 2>&1; then ok "test suite passes"; else warn "some tests failed; run .venv/bin/python -m pytest -q tests"; fi
+if [ "${SKIP_TESTS:-0}" = "1" ]; then ok "tests skipped (SKIP_TESTS=1)"
+elif .venv/bin/python -m pytest -q tests >/dev/null 2>&1; then ok "test suite passes"; else warn "some tests failed; run .venv/bin/python -m pytest -q tests"; fi
 
 step 5/6 "MoEngage access (do this in the browser console after start)"
 echo "  Settings → Integration: choose your dashboard region, paste the DevTools 'Request Headers'"

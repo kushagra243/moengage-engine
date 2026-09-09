@@ -48,10 +48,14 @@ init_analysis_tables()
 from .autopilot import init_autopilot_tables
 from .experiments import init_experiment_tables
 init_autopilot_tables(); init_experiment_tables()
+from .guidance import init_guidance_tables
+init_guidance_tables()
 _migrated = migrate_plaintext_secrets()
 if _migrated:
     logging.getLogger("moengage").info("encrypted %d legacy plaintext secret(s)", _migrated)
 register_executors()
+from . import devagent as _devagent
+_devagent.register()
 # demo mode: make sure there is history to look at
 try:
     if get_setting("mock_mode", "true").lower() == "true" and snapshot_count("mock") < 7:
@@ -134,7 +138,7 @@ def status():
 
 
 # ── settings ───────────────────────────────────────────────────────────────────
-ALLOWED_SETTING_PREFIXES = ("moengage_", "llm_", "market_", "schedule_", "refresh_", "analysis_", "taxonomy_", "autopilot_", "mock_mode")
+ALLOWED_SETTING_PREFIXES = ("moengage_", "llm_", "market_", "schedule_", "refresh_", "analysis_", "taxonomy_", "autopilot_", "devagent_", "mock_mode")
 
 
 @app.get("/api/settings")
@@ -695,6 +699,97 @@ def agent_history():
 def agent_clear():
     clear_chat_history()
     return {"success": True}
+
+
+# ── teach the agent / skills / API catalog / dev agent ─────────────────────────
+class GuidancePayload(BaseModel):
+    text: str
+    scope: str = "general"
+
+class GuidanceToggle(BaseModel):
+    active: bool
+
+class EngineSettingPayload(BaseModel):
+    key: str
+    value: Any
+
+
+@app.get("/api/guidance")
+def guidance_list():
+    from . import guidance
+    return {"guidance": guidance.list_guidance(), "scopes": list(guidance.SCOPES), "engine_settings": {k: {**v, "current": get_setting(k, "")} for k, v in guidance.ENGINE_SETTINGS.items()}}
+
+
+@app.post("/api/guidance")
+def guidance_add(payload: GuidancePayload, request: Request):
+    from . import guidance
+    try:
+        return guidance.add(payload.text, author=request_actor(request), scope=payload.scope)
+    except ValueError as e:
+        raise HTTPException(400, str(e))
+
+
+@app.post("/api/guidance/{gid}/toggle")
+def guidance_toggle(gid: int, payload: GuidanceToggle, request: Request):
+    from . import guidance
+    r = guidance.set_active(gid, payload.active, actor=request_actor(request))
+    if not r:
+        raise HTTPException(404, "not found")
+    return r
+
+
+@app.post("/api/guidance/{gid}/delete")
+def guidance_delete(gid: int, request: Request):
+    from . import guidance
+    return {"deleted": guidance.delete(gid, actor=request_actor(request))}
+
+
+@app.post("/api/engine/setting")
+def engine_setting(payload: EngineSettingPayload, request: Request):
+    from . import guidance
+    r = guidance.set_engine_setting(payload.key, payload.value, actor=request_actor(request))
+    if r.get("error"):
+        raise HTTPException(400, r["error"])
+    return r
+
+
+@app.get("/api/skills")
+def skills_list():
+    from .skills import list_skills
+    return {"skills": list_skills()}
+
+
+@app.get("/api/skills/{name}")
+def skills_get(name: str):
+    from .skills import read_skill
+    r = read_skill(name)
+    if r.get("error"):
+        raise HTTPException(404, r["error"])
+    return r
+
+
+@app.get("/api/api-catalog")
+def api_catalog_view(q: Optional[str] = None, method: Optional[str] = None, path: Optional[str] = None):
+    from . import api_catalog
+    if method and path:
+        return api_catalog.operation_detail(method, path)
+    if q:
+        return {"matches": api_catalog.search(q, limit=25)}
+    return api_catalog.overview()
+
+
+@app.get("/api/devagent/status")
+def devagent_status():
+    return _devagent.status()
+
+
+@app.post("/api/devagent/{pid}/draft")
+def devagent_draft(pid: int, request: Request):
+    try:
+        _devagent.draft_async(pid, actor=request_actor(request))
+        return {"started": True, "id": pid}
+    except ValueError as e:
+        raise HTTPException(400, str(e))
 
 
 @app.get("/api/llm/models")

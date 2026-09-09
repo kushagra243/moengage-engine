@@ -1,0 +1,9 @@
+{
+  "mcpServers": {
+    "moengage-docs": {
+      "type": "http",
+      "url": "https://moengage.com/docs/mcp",
+      "_comment": "MoEngage documentation search only (no workspace data). The workspace MCP at mcp.moengage.com is deliberately NOT configured: it runs in the AI vendor's cloud with your data."
+    }
+  }
+}

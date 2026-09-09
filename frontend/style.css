@@ -623,3 +623,23 @@ input:focus, select:focus, textarea:focus { box-shadow: var(--glow); border-colo
 .exp-item { padding: 8px 10px; border-bottom: 1px solid var(--line); font-size: 12.5px; }
 .exp-item:last-child { border-bottom: 0; }
 .exp-item .m { font-family: var(--mono); font-size: 11px; color: var(--muted); }
+
+/* teach the agent / change the engine */
+.teach { margin: 6px 0 8px; border: 1px solid var(--line); border-radius: 6px; background: var(--bg-2); }
+.teach > summary { cursor: pointer; padding: 6px 10px; font-size: 12px; color: var(--muted); display: flex; align-items: center; gap: 6px; }
+.teach > summary svg { width: 13px; height: 13px; }
+.teach[open] > summary { border-bottom: 1px solid var(--line); color: var(--text); }
+.teach-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; padding: 10px; }
+@media (max-width: 1100px) { .teach-grid { grid-template-columns: 1fr; } }
+.teach-grid label { display: block; margin-bottom: 4px; }
+.teach-grid .row { display: flex; gap: 6px; align-items: center; margin-bottom: 6px; }
+.teach-grid .row input[type=text] { flex: 1; }
+.teach-grid textarea { width: 100%; box-sizing: border-box; margin-bottom: 6px; font: inherit; font-size: 12px; }
+.teach-list { max-height: 180px; overflow: auto; font-size: 12px; }
+.teach-list .gi { display: flex; gap: 8px; align-items: flex-start; padding: 5px 4px; border-top: 1px solid var(--line); }
+.teach-list .gi.off { opacity: .5; }
+.teach-list .gi .t { flex: 1; min-width: 0; overflow-wrap: anywhere; }
+.teach-list .gi .pill { flex: none; }
+.teach-list .gi button { flex: none; padding: 0 6px; font-size: 11px; }
+.diff { max-height: 320px; overflow: auto; font-size: 11px; line-height: 1.35; }
+.diff .add { color: var(--ok); } .diff .del { color: var(--bad); } .diff .hunk { color: var(--info); }

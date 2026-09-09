@@ -5,6 +5,7 @@ pydantic>=2.6.0
 cryptography>=42.0.0
 feedparser>=6.0.11
 python-multipart>=0.0.9
+pyyaml>=6.0
 # dev / tests
 pytest>=8.0.0
 responses>=0.25.0

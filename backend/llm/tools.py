@@ -363,6 +363,56 @@ def record_ideas(ideas: List[Dict[str, Any]]) -> Dict[str, Any]:
     return {"captured": res["added"], "already_known": res["refreshed"], "feed_counts": growth.counts()}
 
 
+def moengage_api_reference(query: Optional[str] = None, method: Optional[str] = None, path: Optional[str] = None) -> Dict[str, Any]:
+    """Local catalog of every documented MoEngage API (131 operations, 32 OpenAPI specs). Search by words, or give method+path for full detail."""
+    from .. import api_catalog
+    if method and path:
+        return api_catalog.operation_detail(method, path)
+    if query:
+        return {"matches": api_catalog.search(query, limit=12), "next": "call again with method + path for parameters, body schema and auth", "overview": api_catalog.overview()["specs"]}
+    return api_catalog.overview()
+
+
+def moengage_api_read(method: str, path: str, path_vars: Optional[Dict[str, str]] = None, params: Optional[Dict[str, Any]] = None, body: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
+    """Call a documented READ-SAFE MoEngage API directly (GET, or POST search/meta/stats). Writes are refused; propose them instead."""
+    c = _client()
+    if c.mock_mode:
+        return {"mock": True, "note": "mock mode: no live API call; switch Demo/mock off in Settings to use real endpoints", "would_call": f"{method.upper()} {path}"}
+    return c.api().call_documented(method, path, path_vars=path_vars, params=params, body=body)
+
+
+def skill(name: str) -> Dict[str, Any]:
+    """Load one of the shared skills (.claude/skills) into context: moengage, moengage-api, moengage-engine, clm-operator."""
+    from ..skills import read_skill
+    return read_skill(name)
+
+
+def remember_guidance(text: str, scope: str = "general") -> Dict[str, Any]:
+    """Persist a standing instruction the operator gave ('from now on…', 'always…', 'never…'). It is injected into every future system prompt and shown in the Agent tab."""
+    from .. import guidance
+    try:
+        return {"saved": guidance.add(text, author="agent", scope=scope)}
+    except ValueError as e:
+        return {"error": str(e)}
+
+
+def set_engine_setting(key: str, value: Any) -> Dict[str, Any]:
+    """Change an allowlisted engine knob immediately (autopilot, schedule, refresh cadence, analysis batch, market universe, taxonomy codes, model temperature…). Secrets/provider/security are not changeable here."""
+    from .. import guidance
+    return guidance.set_engine_setting(key, value, actor="agent")
+
+
+def propose_code_change(title: str, request: str, scope: str = "any", rationale: str = "", context: str = "", draft_now: bool = True) -> Dict[str, Any]:
+    """Queue a change to the engine's own code/UI/CLI (new view, column, chart, command, rule, tool). It is implemented on an isolated git branch by Claude Code (or the model), tests run, and the human approves the diff before it merges and the server restarts."""
+    from .. import approvals, devagent
+    p = approvals.propose("code_change", title[:120], {"request": request, "scope": scope if scope in devagent.SCOPES else "any", "context": context[:3000]}, rationale=rationale or request[:400], risk="medium", created_by="agent")
+    if draft_now and not p.get("duplicate_of_pending") and (p.get("preview") or {}).get("status") == "draft_pending":
+        devagent.draft_async(p["id"], actor="agent")
+        p["drafting"] = "started in background; the diff appears on the proposal in a few minutes"
+    _capture_proposal_idea("fix", title, {"request": request[:500], "scope": scope}, rationale or request[:300], p["id"])
+    return {"proposal_id": p["id"], "status": p["status"], "preview": p.get("preview"), "drafting": p.get("drafting"), "duplicate_of_pending": p.get("duplicate_of_pending", False)}
+
+
 def _capture_proposal_idea(kind: str, title: str, payload: Dict[str, Any], rationale: str, proposal_id: int) -> None:
     try:
         from .. import growth
@@ -428,6 +478,18 @@ TOOL_SCHEMAS: List[Dict[str, Any]] = [
     _fn("record_ideas", "Capture every recommendation you make (campaign, segment, experiment, growth hack, fix) into the persistent growth feed so nothing is lost. ideas: [{title, kind: trending_campaign|growth_hack|market_play|moengage_activity|fix, why (cite data), how (MoEngage steps), segment, channel, angle, kpi, transition, effort, expected_impact, priority}].",
         {"ideas": {"type": "array", "items": OBJ}}, ["ideas"]),
     _fn("propose_pause_campaign", "Propose pausing a campaign (e.g. deliverability collapse or market suppression rule).", {"campaign_id": STR, "rationale": STR}, ["campaign_id", "rationale"]),
+    _fn("moengage_api_reference", "Search the complete local catalog of documented MoEngage APIs (131 operations across data, segments, campaigns v1/v5, stats, flows, templates, content blocks, catalog, coupons, inform, analytics, subscriptions, GDPR…). query → matches; method+path → parameters, body schema, auth key, rate limit, doc URL. No network.",
+        {"query": STR, "method": STR, "path": STR}),
+    _fn("moengage_api_read", "Call a documented READ-SAFE MoEngage API directly (any GET, or POST search/meta/stats endpoints), e.g. GET /v5/flows/{flow_id}, POST /v5/campaigns/search, GET /v5/analytics/dashboards. Writes are refused — propose them. Live mode only.",
+        {"method": STR, "path": STR, "path_vars": OBJ, "params": OBJ, "body": OBJ}, ["method", "path"]),
+    _fn("skill", "Load a shared skill into context before specialised work: 'moengage' (product + when-to-use), 'moengage-api' (auth, endpoints, key scopes, limits, how this engine calls them), 'moengage-engine' (this codebase: views, CLI, tools, how to change it), 'clm-operator' (goal discipline, brief format, compliance).",
+        {"name": STR}, ["name"]),
+    _fn("remember_guidance", "Save a standing instruction from the operator so it applies to every future conversation (brand voice, exclusions, channel rules, cadence, process). Use whenever the operator says 'from now on', 'always', 'never', 'remember'. scope: general|copy|audience|channel|measurement|market|process|ui.",
+        {"text": STR, "scope": STR}, ["text"]),
+    _fn("set_engine_setting", "Change an engine knob right now (allowlisted, non-secret): autopilot_enabled, autopilot_max_actions, schedule_enabled, schedule_time, refresh_interval_hours, analysis_batch, market_universe_mode, market_top_n, taxonomy_codes (merge), llm_temperature, llm_max_tokens, llm_model_bulk, mock_scenario, devagent_enabled. Returns before/after.",
+        {"key": STR, "value": {}}, ["key", "value"]),
+    _fn("propose_code_change", "Ask for a change to the engine itself — a new view/column/chart in the console, a CLI command, a new tool, a detection rule, a report. Give a precise, testable request. It is implemented on an isolated branch (Claude Code headless, or the model), tests run, and the operator approves the diff; the server then restarts with the change. Use when the operator asks for something the current UI/tools cannot do.",
+        {"title": STR, "request": STR, "scope": {"type": "string", "enum": ["frontend", "backend", "cli", "docs", "tests", "any"]}, "rationale": STR, "context": STR, "draft_now": {"type": "boolean"}}, ["title", "request"]),
 ]
 
 TOOLS: Dict[str, Callable[..., Dict[str, Any]]] = {
@@ -440,4 +502,6 @@ TOOLS: Dict[str, Callable[..., Dict[str, Any]]] = {
     "record_ideas": _safe(record_ideas), "growth_hacks": _safe(growth_hacks), "campaign_content": _safe(campaign_content), "segment_detail": _safe(segment_detail),
     "analytics_query": _safe(analytics_query), "experiment_readouts": _safe(experiment_readouts), "campaign_taxonomy": _safe(campaign_taxonomy), "campaign_deep_dive": _safe(campaign_deep_dive), "clm_program_audit": _safe(clm_program_audit), "experiment_plan": _safe(experiment_plan), "campaign_brief_check": _safe(campaign_brief_check),
     "propose_flow": _safe(propose_flow), "propose_pause_campaign": _safe(propose_pause_campaign),
+    "moengage_api_reference": _safe(moengage_api_reference), "moengage_api_read": _safe(moengage_api_read), "skill": _safe(skill),
+    "remember_guidance": _safe(remember_guidance), "set_engine_setting": _safe(set_engine_setting), "propose_code_change": _safe(propose_code_change),
 }

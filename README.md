@@ -91,6 +91,14 @@ git pull && ./setup.sh --no-start                         # update
 Prefer to have Claude do steps 2–7? Run `claude` inside the folder and type `/setup`.
 Full detail, storage map and team hosting: [SETUP-MAC.md](SETUP-MAC.md), [HOSTING.md](HOSTING.md).
 
+## Teach the agent, change the engine, know the whole API
+
+- **Teach** — Agent tab → *Teach the agent*: standing instructions (brand voice, exclusions, cadence) that apply to every conversation; or just say "from now on…" in chat and the agent saves it. Toggle or delete any entry.
+- **Knobs** — the agent can change allowlisted settings on the spot (autopilot, schedule, refresh cadence, market universe, taxonomy codes, model temperature). Secrets and security settings are never in the list.
+- **Code** — *Change request* in the Agent tab (or ask the agent): the change is implemented on an isolated git branch by Claude Code headless (fallback: the configured model writes a diff), tests run, and the diff waits in Approvals. Approve = merge + automatic restart. Reject = branch discarded.
+- **API catalog** — every documented MoEngage API (131 operations, 32 OpenAPI specs) is vendored under `backend/knowledge/moengage-api/` and searchable: `GET /api/api-catalog?q=flow status`, or the agent's `moengage_api_reference` / `moengage_api_read` (read-safe calls only). Refresh with `.venv/bin/python tools/build_api_catalog.py`.
+- **Skills** — `.claude/skills/{moengage,moengage-api,moengage-engine,clm-operator}` are shared by Claude Code and the in-app agent. `CLAUDE.md` is the committed project memory, so a fresh clone on another Mac starts with full context and `./setup.sh` re-runs are instant.
+
 ## Connecting to MoEngage
 
 Two transports are implemented; the client prefers the documented one and

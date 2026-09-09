@@ -74,5 +74,28 @@ class CLMIntelligenceEngine:
             out["segments_count"] = len(self.moe.get_segments())
         except DataUnavailable:
             out["segments_count"] = None
+        # plain-language layer: per-channel KPIs, lights + so-what per campaign, 14d sparkline series
+        try:
+            from .metrics import channel_kpis, lights_from_diagnosis, so_what
+            from .anomaly.diagnose import diagnose_campaign
+            from .anomaly.store import get_history
+            camps = campaigns if "campaigns" in dir() else []
+            out["kpis"] = channel_kpis(camps)
+            for a in out.get("audited_campaigns", []):
+                try:
+                    dg = diagnose_campaign(a["id"], self.moe.mode)
+                    lights = lights_from_diagnosis(dg) if not dg.get("error") else {}
+                    a["lights"] = lights
+                    a["so_what"] = so_what(dg, lights) if lights else "No history yet."
+                    a["urgency"] = "act_today" if any(v.get("state") == "red" for v in lights.values()) else ("watch" if any(v.get("state") == "amber" for v in lights.values()) else "normal")
+                    hist = get_history(a["id"], self.moe.mode, 14)
+                    a["spark"] = {"ctr": [h.get("ctr") for h in hist], "delivery_rate": [h.get("delivery_rate") for h in hist], "days": len(hist)}
+                    a["delivered"] = a.get("sent") and round(a["sent"] * (a["delivery_rate"] or 0) / 100)
+                except Exception:
+                    a.setdefault("lights", {}); a.setdefault("so_what", "")
+            order = {"act_today": 0, "watch": 1, "normal": 2}
+            out["audited_campaigns"].sort(key=lambda a: (order.get(a.get("urgency"), 3), -(a.get("delivered") or 0)))
+        except Exception as e:
+            out["kpis_error"] = str(e)
         out["lifecycle_templates"] = self.lifecycle_templates()
         return out

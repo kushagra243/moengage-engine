@@ -337,6 +337,12 @@ def analytics():
         return _unavailable(e)
 
 
+@app.get("/api/metrics/dictionary")
+def metrics_dictionary():
+    from .metrics import dictionary
+    return dictionary()
+
+
 @app.get("/api/clm/board")
 def clm_board():
     return CLMIntelligenceEngine().get_full_board()

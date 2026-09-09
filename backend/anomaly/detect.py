@@ -225,16 +225,17 @@ def detect_anomalies(source: str = "live", snapshot_date: Optional[str] = None, 
                 "snapshot_date": snapshot_date, "source": source, "campaign_id": cid,
                 "campaign_name": today.get("campaign_name"), "channel": today.get("channel"),
                 "metric": metric, "value": x, "baseline": res["baseline"], "score": res["score"],
-                "method": res["method"], "severity": res["severity"], "direction": res["direction"],
+                "method": res["method"], "severity": res["severity"], "direction": res["direction"], "n_history": res.get("n_history", len(hist_vals)),
                 "confidence": res.get("confidence", "medium"), "impact": good_or_bad, "message": msg,
             })
     sev_rank = {"critical": 0, "warning": 1}
     events.sort(key=lambda e: (sev_rank.get(e["severity"], 9), -abs(e["score"])))
     if persist:
         save_events(events)
-    return {
+    from ..metrics import enrich_anomalies
+    return enrich_anomalies({
         "snapshot_date": snapshot_date, "source": source, "campaigns_evaluated": evaluated,
         "campaigns_with_insufficient_history": insufficient, "policy": {k: v for k, v in policy.items() if k != "metrics"},
         "anomalies": events, "critical": sum(1 for e in events if e["severity"] == "critical"),
         "warnings": sum(1 for e in events if e["severity"] == "warning"),
-    }
+    })

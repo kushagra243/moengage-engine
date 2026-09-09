@@ -20,7 +20,6 @@
       <button class="nav-item" data-tab="anomalies" data-icon="alert">Anomalies <span class="count" id="nav-count-anomalies" hidden></span></button>
       <button class="nav-item" data-tab="market" data-icon="trend">Market</button>
       <button class="nav-item" data-tab="approvals" data-icon="check">Approvals <span class="count" id="nav-count-approvals" hidden></span></button>
-      <button class="nav-item" data-tab="hacks" data-icon="zap">Growth hacks</button>
       <button class="nav-item" data-tab="explorer" data-icon="table">Explorer</button>
       <button class="nav-item" data-tab="integration" data-icon="plug">Integration</button>
       <button class="nav-item" data-tab="settings" data-icon="gear">Settings</button>
@@ -238,29 +237,12 @@
       </section>
 
       <!-- ── Growth hacks ──────────────────────────────────────────────── -->
-      <section class="tab" id="tab-hacks">
-        <div class="page-head">
-          <div><h2>Growth hacks</h2><div class="sub" id="hk-sub">Sourced tactics working in crypto and fintech lifecycle marketing, ranked for this workspace today.</div></div>
-          <div class="actions">
-            <button class="btn" id="hk-suggest-btn" data-icon="zap" title="Ask the bulk model for tactics not in the library (marked unverified)">Ask model for more</button>
-            <button class="btn ghost sm" id="hk-refresh-btn" data-icon="refresh"></button>
-          </div>
-        </div>
-        <div class="row small mb" id="hk-ctx"></div>
-        <div class="subtabs" id="hk-tabs">
-          <button class="subtab active" data-hstatus="">All</button>
-          <button class="subtab" data-hstatus="new">New</button>
-          <button class="subtab" data-hstatus="saved">Saved</button>
-          <button class="subtab" data-hstatus="proposed">Proposed</button>
-        </div>
-        <div class="row small mb" id="hk-cats"></div>
-        <div class="hooks" id="hk-list"></div>
-      </section>
+      
 
       <!-- ── Approvals ────────────────────────────────────────────────── -->
       <section class="tab" id="tab-approvals">
         <div class="page-head">
-          <div><h2>Experiments</h2><div class="sub">Every write to MoEngage is proposed here first. Nothing executes without an explicit approval.</div></div>
+          <div><h2>Experiments</h2><div class="sub">Ideas and hacks → proposals awaiting approval → running → read. Every proposal is an experiment; edit, comment or ask the agent to improve it before approving.</div></div>
           <div class="actions">
             <button class="btn" id="ap-new-btn" data-icon="plus">New proposal</button>
             <button class="btn ghost sm" id="ap-refresh-btn" data-icon="refresh"></button>
@@ -278,13 +260,33 @@
           <div class="form-foot"><button class="btn primary" id="ap-submit">Submit proposal</button></div>
         </div>
         <div class="subtabs" id="ap-subtabs">
-          <button class="subtab active" data-status="pending">Pending <span class="count" data-count="pending">0</span></button>
+          <button class="subtab" data-status="ideas">Ideas &amp; hacks</button>
+          <button class="subtab active" data-status="pending">Awaiting approval <span class="count" data-count="pending">0</span></button>
           <button class="subtab" data-status="approved">Approved <span class="count" data-count="approved">0</span></button>
           <button class="subtab" data-status="executed">Executed <span class="count" data-count="executed">0</span></button>
           <button class="subtab" data-status="rejected">Rejected <span class="count" data-count="rejected">0</span></button>
           <button class="subtab" data-status="failed">Failed <span class="count" data-count="failed">0</span></button>
         </div>
+        <div class="row small mb" id="ap-class"></div>
         <div id="ap-list"></div>
+<div id="ap-ideas" hidden>
+        <div class="row spread mb">
+          <div><h3>Ideas &amp; hacks</h3><div class="sub" id="hk-sub">Sourced tactics working in crypto and fintech lifecycle marketing, ranked for this workspace today.</div></div>
+          <div class="actions">
+            <button class="btn" id="hk-suggest-btn" data-icon="zap" title="Ask the bulk model for tactics not in the library (marked unverified)">Ask model for more</button>
+            <button class="btn ghost sm" id="hk-refresh-btn" data-icon="refresh"></button>
+          </div>
+        </div>
+        <div class="row small mb" id="hk-ctx"></div>
+        <div class="subtabs" id="hk-tabs">
+          <button class="subtab active" data-hstatus="">All</button>
+          <button class="subtab" data-hstatus="new">New</button>
+          <button class="subtab" data-hstatus="saved">Saved</button>
+          <button class="subtab" data-hstatus="proposed">Proposed</button>
+        </div>
+        <div class="row small mb" id="hk-cats"></div>
+        <div class="hooks" id="hk-list"></div>
+      </div>
       </section>
 
       <!-- ── Explorer ─────────────────────────────────────────────────── -->

@@ -463,6 +463,31 @@ def approvals_approve(pid: int, payload: DecisionPayload, request: Request):
         raise HTTPException(400, str(e))
 
 
+class EditPayload(BaseModel):
+    changes: Dict[str, Any]
+    note: str = ""
+    replace: bool = False
+
+class CommentPayload(BaseModel):
+    text: str
+
+
+@app.post("/api/approvals/{pid}/edit")
+def approvals_edit(pid: int, payload: EditPayload, request: Request):
+    try:
+        return approvals.update_payload(pid, payload.changes, actor=request_actor(request), note=payload.note, replace=payload.replace)
+    except (approvals.ApprovalError, ValueError) as e:
+        raise HTTPException(400, str(e))
+
+
+@app.post("/api/approvals/{pid}/comment")
+def approvals_comment(pid: int, payload: CommentPayload, request: Request):
+    try:
+        return approvals.add_comment(pid, payload.text, actor=request_actor(request))
+    except approvals.ApprovalError as e:
+        raise HTTPException(400, str(e))
+
+
 @app.post("/api/approvals/{pid}/reject")
 def approvals_reject(pid: int, payload: DecisionPayload, request: Request):
     try:

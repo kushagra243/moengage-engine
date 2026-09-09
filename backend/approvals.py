@@ -44,6 +44,11 @@ def init_approval_tables() -> None:
         )
     """)
     conn.commit()
+    try:
+        conn.execute("ALTER TABLE proposals ADD COLUMN revisions_json TEXT")
+        conn.commit()
+    except Exception:
+        pass
     conn.close()
 
 
@@ -55,12 +60,123 @@ def register_executor(kind: str, execute: Callable[[Dict[str, Any]], Dict[str, A
 
 def _row(r) -> Dict[str, Any]:
     d = dict(r)
-    for k in ("payload_json", "preview_json", "result_json"):
+    for k in ("payload_json", "preview_json", "result_json", "revisions_json"):
         try:
             d[k[:-5]] = json.loads(d.pop(k) or "null")
         except Exception:
             d[k[:-5]] = None
+    d["revisions"] = d.get("revisions") or []
+    d.update(classify(d))
     return d
+
+
+TRANSITION_CATEGORY = {"acquired_verified": "onboarding", "verified_funded": "onboarding", "funded_activated": "activation", "activated_habitual": "activation", "habitual_core": "retention",
+                       "slipping": "retention", "dormant_activated": "winback", "churned": "winback", "promotional": "promotion", "intent_dropoff": "activation"}
+
+
+def classify(p: Dict[str, Any]) -> Dict[str, Any]:
+    """Experiment classification for the board: category (campaign type), product (affinity), stage."""
+    pl = p.get("payload") or {}
+    category = None
+    if pl.get("sop_id"):
+        try:
+            from .sops import get_sop
+            category = (get_sop(pl["sop_id"]) or {}).get("campaign_type")
+        except Exception:
+            category = None
+    if not category:
+        tr = (pl.get("goal") or {}).get("transition")
+        category = TRANSITION_CATEGORY.get(tr) if tr else None
+    if not category:
+        category = {"create_segment": "audience", "create_flow": "journey", "pause_campaign": "risk", "resume_campaign": "risk", "code_change": "engine", "custom_segment_upload": "audience"}.get(p.get("kind"), "campaign")
+    if pl.get("market_hook_id") or pl.get("ttl_hours"):
+        category = "market" if category in ("campaign", "activation", "retention") else category
+    product = None
+    try:
+        from .products import affinity_from_tokens
+        from .taxonomy import tokens
+        words = tokens(str(pl.get("target_segment") or "")) + tokens(str(pl.get("name") or p.get("title") or ""))
+        aff = affinity_from_tokens(words, {})
+        product = aff[0] if aff else None
+    except Exception:
+        product = None
+    st = p.get("status")
+    stage = {"pending": "awaiting_approval", "approved": "approved", "rejected": "rejected", "failed": "failed", "expired": "expired"}.get(st, st)
+    if st == "executed":
+        stage = "running"
+        try:
+            conn = get_db()
+            e = conn.execute("SELECT status FROM experiments WHERE proposal_id=? ORDER BY id DESC LIMIT 1", (p.get("id"),)).fetchone()
+            conn.close()
+            if e and e["status"] == "window_complete":
+                stage = "read"
+        except Exception:
+            pass
+    return {"category": category, "product": product, "stage": stage}
+
+
+def _push_revision(pid: int, entry: Dict[str, Any]) -> None:
+    conn = get_db()
+    r = conn.execute("SELECT revisions_json FROM proposals WHERE id=?", (pid,)).fetchone()
+    try:
+        revs = json.loads((r["revisions_json"] if r else None) or "[]")
+    except Exception:
+        revs = []
+    revs.append({**entry, "at": datetime.utcnow().strftime("%Y-%m-%d %H:%M:%S")})
+    conn.execute("UPDATE proposals SET revisions_json=? WHERE id=?", (json.dumps(revs[-50:], default=str), pid))
+    conn.commit(); conn.close()
+
+
+def _deep_merge(base: Dict[str, Any], patch: Dict[str, Any]) -> Dict[str, Any]:
+    out = dict(base)
+    for k, v in (patch or {}).items():
+        if isinstance(v, dict) and isinstance(out.get(k), dict):
+            out[k] = _deep_merge(out[k], v)
+        else:
+            out[k] = v
+    return out
+
+
+def update_payload(pid: int, changes: Dict[str, Any], actor: str = "user", note: str = "", replace: bool = False) -> Dict[str, Any]:
+    """Edit a pending proposal before approval: merge (or replace) the payload, re-validate, re-preview, record the revision."""
+    p = get_proposal(pid)
+    if not p:
+        raise ApprovalError("proposal not found")
+    if p["status"] != "pending":
+        raise ApprovalError(f"proposal is {p['status']}; only pending proposals can be edited")
+    new_payload = dict(changes) if replace else _deep_merge(p["payload"] or {}, changes or {})
+    ex = _executors.get(p["kind"])
+    preview = p.get("preview") or {}
+    if ex:
+        ex["validate"](new_payload)
+        try:
+            preview = ex["preview"](new_payload)
+        except Exception as e:
+            preview = {"preview_error": redact(str(e))}
+    if p["kind"] == "create_campaign":
+        from .llm.tools import campaign_brief_check
+        chk = campaign_brief_check(new_payload.get("goal") or {}, new_payload.get("variants") or [], channel=str(new_payload.get("channel") or "push"), market_linked=bool(new_payload.get("market_hook_id") or new_payload.get("ttl_hours")), ttl_hours=new_payload.get("ttl_hours"))
+        if not chk["ok"]:
+            raise ApprovalError("edit rejected by the brief check: " + "; ".join(chk["problems"]))
+    changed = sorted(k for k in (changes or {}).keys())
+    conn = get_db()
+    conn.execute("UPDATE proposals SET payload_json=?, preview_json=? WHERE id=?", (json.dumps(new_payload, default=str), json.dumps(preview, default=str), pid))
+    conn.commit(); conn.close()
+    _push_revision(pid, {"type": "edit", "actor": actor, "note": redact(note or "")[:500], "changed": changed})
+    audit("proposal.edited", {"id": pid, "actor": actor, "changed": changed}, actor=actor)
+    return get_proposal(pid)  # type: ignore[return-value]
+
+
+def add_comment(pid: int, text: str, actor: str = "user") -> Dict[str, Any]:
+    p = get_proposal(pid)
+    if not p:
+        raise ApprovalError("proposal not found")
+    text = redact((text or "").strip())[:1000]
+    if len(text) < 2:
+        raise ApprovalError("empty comment")
+    _push_revision(pid, {"type": "comment", "actor": actor, "text": text})
+    audit("proposal.commented", {"id": pid, "actor": actor}, actor=actor)
+    return get_proposal(pid)  # type: ignore[return-value]
 
 
 def propose(kind: str, title: str, payload: Dict[str, Any], rationale: str = "", risk: str = "medium", created_by: str = "agent") -> Dict[str, Any]:

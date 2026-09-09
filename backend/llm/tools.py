@@ -302,6 +302,32 @@ def campaign_brief_check(goal: Dict[str, Any], variants: Optional[List[Dict[str,
 
 
 # ── write tools (proposals only) ──────────────────────────────────────────────
+def proposal_detail(proposal_id: int) -> Dict[str, Any]:
+    """Full proposal: payload, goal brief, preview, classification (category/product/stage), revisions and operator comments. Read before improving one."""
+    from .. import approvals
+    p = approvals.get_proposal(int(proposal_id))
+    return p or {"error": "not found"}
+
+
+def revise_proposal(proposal_id: int, changes: Dict[str, Any], note: str) -> Dict[str, Any]:
+    """Improve a pending proposal before approval: partial payload merge (e.g. {"variants": [...]} or {"goal": {"control_group_pct": 20}} or {"exclusions": [...]}). Re-validated (brief check) and re-previewed; the revision and your note are recorded."""
+    from .. import approvals
+    try:
+        p = approvals.update_payload(int(proposal_id), changes, actor="agent", note=note)
+        return {"ok": True, "id": p["id"], "changed": sorted(changes.keys()), "stage": p.get("stage"), "preview_mode": (p.get("preview") or {}).get("mode")}
+    except (approvals.ApprovalError, ValueError) as e:
+        return {"ok": False, "error": str(e)}
+
+
+def comment_proposal(proposal_id: int, text: str) -> Dict[str, Any]:
+    """Leave a review note on a proposal (a suggestion the operator can accept, or a reply to their comment)."""
+    from .. import approvals
+    try:
+        approvals.add_comment(int(proposal_id), text, actor="agent"); return {"ok": True}
+    except approvals.ApprovalError as e:
+        return {"ok": False, "error": str(e)}
+
+
 def propose_segment(name: str, criteria: Dict[str, Any], rationale: str, description: str = "", estimated_reach: Optional[int] = None) -> Dict[str, Any]:
     p = approvals.propose("create_segment", f"Segment: {name}", {"name": name, "description": description, "criteria": criteria, "estimated_reach": estimated_reach}, rationale, risk="low")
     _capture_proposal_idea("create_segment", f"Segment: {name}", {"name": name}, rationale, p["id"])
@@ -681,6 +707,9 @@ TOOL_SCHEMAS: List[Dict[str, Any]] = [
     _fn("moengage_guidance", "Search the local MoEngage/CLM playbooks (channels, lifecycle stages, segmentation, measurement, market intelligence).", {"topic": STR}, ["topic"]),
     _fn("integration_status", "Which dashboard endpoints are learned/verified/unknown and what is needed to unlock them."),
     _fn("list_proposals", "Pending/approved/executed proposals in the approval queue.", {"status": STR}),
+    _fn("proposal_detail", "Full proposal with goal brief, preview, classification, revisions and operator comments.", {"proposal_id": {"type": "integer"}}, ["proposal_id"]),
+    _fn("revise_proposal", "Improve a pending proposal before approval by merging changes into its payload (variants, goal fields, exclusions, schedule, target_segment…). Brief check re-runs; revision recorded with your note.", {"proposal_id": {"type": "integer"}, "changes": OBJ, "note": STR}, ["proposal_id", "changes", "note"]),
+    _fn("comment_proposal", "Leave a suggestion or reply on a proposal thread.", {"proposal_id": {"type": "integer"}, "text": STR}, ["proposal_id", "text"]),
     _fn("propose_segment", "Propose a new segment for human approval. criteria is a structured filter object.",
         {"name": STR, "description": STR, "criteria": OBJ, "rationale": STR, "estimated_reach": {"type": "integer"}}, ["name", "criteria", "rationale"]),
     _fn("clm_program_audit", "Map every campaign to the lifecycle transition it serves; returns coverage per transition, uncovered transitions, broadcast share and unmapped campaigns. Start here for any programme-level question."),
@@ -750,7 +779,7 @@ TOOLS: Dict[str, Callable[..., Dict[str, Any]]] = {
     "estimate_segment": _safe(estimate_segment), "rule_based_audit": _safe(rule_based_audit), "anomaly_report": _safe(anomaly_report),
     "campaign_history": _safe(campaign_history), "campaign_diagnosis": _safe(campaign_diagnosis), "market_snapshot": _safe(market_snapshot), "market_news": _safe(market_news),
     "market_campaign_hooks": _safe(market_campaign_hooks), "moengage_guidance": _safe(moengage_guidance), "integration_status": _safe(integration_status),
-    "list_proposals": _safe(list_proposals), "propose_segment": _safe(propose_segment), "propose_campaign": _safe(propose_campaign),
+    "list_proposals": _safe(list_proposals), "proposal_detail": _safe(proposal_detail), "revise_proposal": _safe(revise_proposal), "comment_proposal": _safe(comment_proposal), "propose_segment": _safe(propose_segment), "propose_campaign": _safe(propose_campaign),
     "record_ideas": _safe(record_ideas), "growth_hacks": _safe(growth_hacks), "campaign_content": _safe(campaign_content), "segment_detail": _safe(segment_detail),
     "analytics_query": _safe(analytics_query), "experiment_readouts": _safe(experiment_readouts), "campaign_taxonomy": _safe(campaign_taxonomy), "campaign_deep_dive": _safe(campaign_deep_dive), "clm_program_audit": _safe(clm_program_audit), "experiment_plan": _safe(experiment_plan), "campaign_brief_check": _safe(campaign_brief_check),
     "propose_flow": _safe(propose_flow), "propose_pause_campaign": _safe(propose_pause_campaign),

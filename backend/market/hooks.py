@@ -164,6 +164,20 @@ def _web3_hooks(web3: Dict[str, Any], regime: str) -> List[Dict[str, Any]]:
     return out[:5]
 
 
+def _competitor_hooks(ci: Dict[str, Any], regime: str) -> List[Dict[str, Any]]:
+    out = []
+    for a in (ci or {}).get("actions") or []:
+        if a.get("type") not in ("counter_surge", "press_advantage", "share_defence"):
+            continue
+        out.append({"id": f"compete_{a['type']}_{a['symbol']}", "trigger": a["what"], "asset_class": "competitive", "regime": regime,
+                    "segments": [f"{a['symbol']} watchers / holders / traders (30d)", "Habitual traders of the sector"], "clm_stages": ["Habitual", "Core"],
+                    "channel": "Push to watchers (TTL 4h) + in-app card", "angle": "watchlist_adoption" if a["type"] != "share_defence" else "product_education",
+                    "copy_direction": f"Asset spotlight for {a['symbol']} on CoinDCX: verifiable fact (volume record / move / availability), tool CTA. Never name the competitor or venue; no direction, no urgency on price.",
+                    "timing": "Same day, 10:00–20:00 IST; TTL 4h", "guardrails": ["regime policy", "1 spotlight per user per week", "exclude liquidated-14d / loss-dormant", "internal intel stays internal"],
+                    "kpi": "watchlist adds and first trades on the pair vs holdout; our share of the pair next day", "owner": a.get("owner"), "sop": a.get("sop")})
+    return out[:4]
+
+
 def build_hooks(ctx: Dict[str, Any]) -> Dict[str, Any]:
     regime = ((ctx.get("crypto") or {}).get("regime") or {}).get("label", "unknown")
     policy = ANGLE_POLICY.get(regime, ANGLE_POLICY["unknown"])
@@ -178,6 +192,7 @@ def build_hooks(ctx: Dict[str, Any]) -> Dict[str, Any]:
     hooks += _listing_hooks(ctx.get("listings") or {}, regime)
     hooks += _oi_hooks(ctx.get("oi_movers") or {}, regime)
     hooks += _web3_hooks(ctx.get("web3") or {}, regime)
+    hooks += _competitor_hooks(ctx.get("competitors") or {}, regime)
     hooks += _calendar_hooks(ctx.get("calendar") or [])
     allowed = [h for h in hooks if h.get("angle") not in policy["block"]]
     blocked = [h["id"] for h in hooks if h.get("angle") in policy["block"]]

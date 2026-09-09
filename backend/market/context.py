@@ -106,6 +106,12 @@ def market_context(force: bool = False, include_news: bool = True) -> Dict[str, 
     ctx["equity_movers"] = _movers(ctx.get("equities") or [])
     ctx["index_movers"] = _movers(ctx.get("indices") or [])
     ctx["commodity_movers"] = _movers(ctx.get("commodities") or [])
+    # competitive intelligence (internal): Indian + global venues vs our own markets
+    try:
+        from . import competitors
+        ctx["competitors"] = competitors.intel({"crypto_markets": ctx.get("crypto_markets") or []})
+    except Exception as e:
+        ctx["errors"].append("competitors: " + redact(str(e))[:100]); ctx["competitors"] = {"actions": [], "surges": []}
     # derivatives-grade signals: new listings (persisted) and open-interest movers vs ~24h ago
     try:
         from . import derivs
@@ -122,6 +128,11 @@ def market_context(force: bool = False, include_news: bool = True) -> Dict[str, 
     except Exception:
         ctx["sources"] = {}
     ctx["hooks"] = build_hooks(ctx)
+    try:
+        from ..autopilot import tier0_trigger
+        ctx["tier0"] = tier0_trigger(ctx)
+    except Exception:
+        ctx["tier0"] = None
     ctx["narrative"] = narrative(ctx)
     _init()
     conn = get_db()
@@ -166,6 +177,9 @@ def narrative(ctx: Dict[str, Any]) -> str:
         lines.append("Angles that fit: " + ", ".join(pol["prefer"]) + ".")
     if pol.get("block"):
         lines.append("Angles REFUSED: " + ", ".join(pol["block"]) + ".")
+    ci = ctx.get("competitors") or {}
+    if ci.get("surges") or ci.get("actions"):
+        lines.append("Competitive: " + "; ".join(f"{a['type']} {a['symbol']}" for a in (ci.get("actions") or [])[:4]) + (f"; {len(ci.get('surges') or [])} surge(s) at tracked venues" if ci.get("surges") else "") + " (internal).")
     w3 = ctx.get("web3") or {}
     if w3.get("trending"):
         lines.append("Web3 trending (unverified, quality-gated): " + "; ".join(f"{c}: " + ", ".join(r["symbol"] for r in rows[:3]) for c, rows in (w3.get("by_chain") or {}).items() if rows) + ".")

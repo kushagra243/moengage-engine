@@ -108,6 +108,7 @@ MARKET_HOSTS = [
     "api.frankfurter.app", "open.er-api.com", "production.dataviz.cnn.io", "www.livemint.com", "www.business-standard.com", "www.sec.gov", "www.sebi.gov.in", "www.rbi.org.in",
     "feeds.finance.yahoo.com", "www.nasdaq.com", "api.nasdaq.com", "feeds.bbci.co.uk",
     "api.dexscreener.com", "api.geckoterminal.com",          # web3: trending pools / token profiles (public, keyless)
+    "api.india.delta.exchange", "api.delta.exchange", "api.wazirx.com", "api.bybit.com",   # competitive intelligence: public tickers (keyless)
 ]
 
 _sessions: Dict[str, GuardedSession] = {}

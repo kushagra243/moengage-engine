@@ -526,6 +526,20 @@ def run_sop(sop_id: str, segment_name: Optional[str] = None, start_date: Optiona
     return sops.run_sop(sop_id, segment_name=segment_name, start_date=start_date, variants_by_step=variants_by_step, created_by="agent", dry_run=dry_run)
 
 
+def competitor_intel(force: bool = False) -> Dict[str, Any]:
+    """Internal competitive intelligence: tracked Indian and global venues vs CoinDCX — exchange volume table with INR-spot share, pair battles (our share per pair), volume surges at competitors vs earlier today, listing gaps (pairs they have, we don't), our edges, funding edges, and ranked actions with an owner (marketing / product / liquidity) and the SOP to run. Never name competitors in copy."""
+    from ..market import competitors
+    from ..market.context import _latest
+    ctx = _latest(6 * 3600) or {}
+    return competitors.intel({"crypto_markets": ctx.get("crypto_markets") or []}, force=force)
+
+
+def pair_battle(symbol: str) -> Dict[str, Any]:
+    """One pair across every tracked venue: 24h volume, share, OI, funding, 24h change; whether we list it."""
+    from ..market import competitors
+    return competitors.pair_battle(symbol)
+
+
 def web3_trending(chain: Optional[str] = None, force: bool = False) -> Dict[str, Any]:
     """Trending on-chain tokens for our Web3 chains (Solana, Base, BNB Chain, Ethereum, Robinhood Chain), quality-gated (liquidity, volume, age) and labelled unverified; paid boosts listed separately. Data only — never a recommendation, never name the data venue in copy."""
     from ..market.onchain import trending
@@ -752,6 +766,8 @@ TOOL_SCHEMAS: List[Dict[str, Any]] = [
     _fn("sop_detail", "Full SOP: audience, steps (day/channel/purpose/copy brief), kill criteria, checks, compliance.", {"sop_id": STR}, ["sop_id"]),
     _fn("define_sop", "Create or update an SOP from a full spec; validated against the framework (one KPI, holdout, caps, DND windows, exclusions for derivatives, disclaimers, kill criteria).", {"spec": OBJ}, ["spec"]),
     _fn("run_sop", "Run an SOP on a cohort: resolve segment (name or family → latest version), pre-flight, then one approval-gated proposal per step. Write variants_by_step per crypto-copywriting; dry_run first to see the plan.", {"sop_id": STR, "segment_name": STR, "start_date": STR, "variants_by_step": OBJ, "dry_run": {"type": "boolean"}}, ["sop_id"]),
+    _fn("competitor_intel", "Internal competitive picture vs tracked Indian/global venues: volume table, pair battles (our share), surges elsewhere, listing gaps, our edges, funding edges, ranked actions with owner + SOP. Internal only.", {"force": {"type": "boolean"}}),
+    _fn("pair_battle", "One pair across all tracked venues: volume share, OI, funding, change; whether we list it.", {"symbol": STR}, ["symbol"]),
     _fn("web3_trending", "Trending on-chain tokens on our Web3 chains (quality-gated, unverified, paid boosts separate). Data for analysis; copy never picks tokens or names the data venue.", {"chain": STR, "force": {"type": "boolean"}}),
     _fn("product_cohorts", "Families grouped by product affinity with reach/performance and the product treatment matrix (pillars, cadence, never-list, cross-sell on intent, SOPs, Tier-0 lens)."),
     _fn("announcement_lenses", "Tier-0 plan for a major move / geopolitical / regulatory event: one fact, one lens per product cohort, suppressions, channels, regime rule.", {"event": STR}, ["event"]),
@@ -789,5 +805,5 @@ TOOLS: Dict[str, Callable[..., Dict[str, Any]]] = {
     "north_star": _safe(north_star), "set_north_star": _safe(set_north_star), "comms_limits": _safe(comms_limits), "set_comms_limits": _safe(set_comms_limits), "peace_index": _safe(peace_index),
     "guardrail_monitor": _safe(guardrail_monitor), "write_flight_plan": _safe(write_flight_plan), "flight_plans": _safe(flight_plans),
     "segment_study": _safe(segment_study), "define_nomenclature": _safe(define_nomenclature), "list_sops": _safe(list_sops), "sop_detail": _safe(sop_detail), "define_sop": _safe(define_sop), "run_sop": _safe(run_sop), "sop_runs": _safe(sop_runs), "channel_matrix": _safe(channel_matrix),
-    "web3_trending": _safe(web3_trending), "product_cohorts": _safe(product_cohorts), "announcement_lenses": _safe(announcement_lenses), "request_data": _safe(request_data), "data_requests": _safe(data_requests),
+    "competitor_intel": _safe(competitor_intel), "pair_battle": _safe(pair_battle), "web3_trending": _safe(web3_trending), "product_cohorts": _safe(product_cohorts), "announcement_lenses": _safe(announcement_lenses), "request_data": _safe(request_data), "data_requests": _safe(data_requests),
 }

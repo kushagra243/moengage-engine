@@ -194,6 +194,23 @@ def run(max_actions: int = 3, force: bool = False) -> Dict[str, Any]:
     except Exception as ex:
         results.append({"mission": "ride_the_market", "outcome": "error", "detail": redact(str(ex))[:200]})
 
+    # 5b. compete: surges elsewhere we list → spotlight; listing gaps → product asks
+    try:
+        if budget > 0:
+            from .market.context import _latest
+            ci = ((_latest(6 * 3600) or {}).get("competitors") or {})
+            acts = [a for a in (ci.get("actions") or []) if a["type"] in ("counter_surge", "share_defence")][:2]
+            gaps = [a for a in (ci.get("actions") or []) if a["type"] in ("listing_gap", "listing_request")][:2]
+            if acts or gaps:
+                target = "compete:" + ",".join(sorted({a["symbol"] for a in acts + gaps}))
+                if not _done_today("compete", target):
+                    prompt = (f"MISSION compete. competitor_intel shows: {json.dumps([{k: a[k] for k in ('type', 'symbol', 'product', 'owner', 'what', 'sop')} for a in acts + gaps])[:1800]}. "
+                              f"For each marketing action: pair_battle(symbol), then run_sop('sop_asset_spotlight', segment_name=<our watchers/holders family for that symbol or the closest cohort>, dry_run=True) and run for real with two compliant variants (no venue names, fact + tool, TTL 4h). "
+                              f"For each listing gap: request_data(kind='other', title='List <symbol>', why=<volume evidence>, unblocks=['sop_asset_spotlight']). Record ideas. {BRIEF_RULES}")
+                    results.append(_run_mission(agent, "compete", target, prompt)); budget -= 1
+    except Exception as ex:
+        results.append({"mission": "compete", "outcome": "error", "detail": redact(str(ex))[:200]})
+
     # 6. new cohort uploads → study + re-point (monthly)
     try:
         if budget > 0:

@@ -45,6 +45,9 @@ approvals.init_approval_tables()
 growth.init_growth_tables()
 from .analysis import init_analysis_tables
 init_analysis_tables()
+from .autopilot import init_autopilot_tables
+from .experiments import init_experiment_tables
+init_autopilot_tables(); init_experiment_tables()
 _migrated = migrate_plaintext_secrets()
 if _migrated:
     logging.getLogger("moengage").info("encrypted %d legacy plaintext secret(s)", _migrated)
@@ -131,7 +134,7 @@ def status():
 
 
 # ── settings ───────────────────────────────────────────────────────────────────
-ALLOWED_SETTING_PREFIXES = ("moengage_", "llm_", "market_", "schedule_", "refresh_", "analysis_", "taxonomy_", "mock_mode")
+ALLOWED_SETTING_PREFIXES = ("moengage_", "llm_", "market_", "schedule_", "refresh_", "analysis_", "taxonomy_", "autopilot_", "mock_mode")
 
 
 @app.get("/api/settings")
@@ -541,6 +544,44 @@ def analysis_run(payload: AnalysisRun):
                 out.append({"campaign_id": cid, "error": redact(str(e))[:200]})
         return {"analysed": out}
     return analyse_priority(limit=payload.limit, force=payload.force)
+
+
+# ── autopilot & experiments ────────────────────────────────────────────────────
+class AutopilotRun(BaseModel):
+    max_actions: int = 3
+    force: bool = True
+
+
+@app.get("/api/autopilot/queue")
+def autopilot_queue():
+    from .autopilot import action_queue
+    q = action_queue()
+    q["enabled"] = get_setting("autopilot_enabled", "true").lower() == "true"
+    return q
+
+
+@app.post("/api/autopilot/run")
+def autopilot_run(payload: AutopilotRun):
+    from .autopilot import run as ap_run
+    return ap_run(max_actions=max(1, min(6, payload.max_actions)), force=payload.force)
+
+
+@app.get("/api/autopilot/runs")
+def autopilot_runs(limit: int = 30):
+    from .autopilot import recent
+    return {"runs": recent(limit)}
+
+
+@app.get("/api/experiments")
+def experiments_list(limit: int = 50):
+    from .experiments import list_experiments
+    return {"experiments": list_experiments(limit)}
+
+
+@app.post("/api/experiments/refresh")
+def experiments_refresh():
+    from .experiments import refresh_all
+    return refresh_all()
 
 
 # ── growth hacks (curated + model-suggested, ranked for this workspace) ────────

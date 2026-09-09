@@ -48,6 +48,10 @@
           <div class="card-head"><h3>Demo walkthrough</h3><div class="actions"><span class="small dim" id="ov-walk-meta"></span><button class="btn sm" id="ov-walk-seed" data-icon="zap">Re-seed 30 days</button><button class="btn ghost sm" id="ov-walk-hide">Hide</button></div></div>
           <div id="ov-walk-steps" class="steps"></div>
         </div>
+        <div class="card mb" id="ov-queue-card">
+          <div class="card-head"><h3>Action queue — ready to approve</h3><div class="actions"><span class="small dim" id="ov-queue-meta"></span><label class="toggle small"><input type="checkbox" id="ov-autopilot-toggle"><span class="sw"></span><span>autopilot</span></label><button class="btn sm" id="ov-autopilot-run" data-icon="zap" title="Run missions now on the bulk model">Run missions</button></div></div>
+          <div id="ov-queue"></div>
+        </div>
         <div class="grid grid-5 mb" id="ov-tiles"></div>
         <div class="ov-grid">
           <div class="stack">
@@ -58,6 +62,10 @@
             <div class="card">
               <div class="card-head"><h3>Anomaly summary</h3><button class="btn ghost sm" id="ov-goto-anomalies">Open anomalies →</button></div>
               <div id="ov-anomaly"></div>
+            </div>
+            <div class="card">
+              <div class="card-head"><h3>Experiments — what we learned</h3><button class="btn ghost sm" id="ov-exp-refresh" data-icon="refresh"></button></div>
+              <div id="ov-exp"></div>
             </div>
             <div class="card">
               <div class="card-head"><h3>Latest daily run</h3><span class="small dim" id="ov-run-meta"></span></div>

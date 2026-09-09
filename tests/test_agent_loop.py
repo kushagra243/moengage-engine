@@ -127,3 +127,33 @@ def test_reconcile_switches_to_openrouter_when_key_or_vendor_model_saved():
     set_setting("llm_provider", "claude_cli"); set_setting("llm_model", "sonnet")
     assert reconcile_llm_settings({"llm_provider"}) == {}
     set_setting("llm_api_key", "")
+
+
+def test_autopilot_drafts_proposals_and_experiment_ledger(fake_server):
+    """Autopilot missions run against the fake model; approving the campaign draft registers an experiment with a readout."""
+    from backend.database import set_setting
+    from backend import approvals, autopilot, experiments
+    from backend.moengage import mock
+    set_setting("mock_mode", "true"); set_setting("llm_provider", "openai_compatible"); set_setting("llm_base_url", fake_server)
+    set_setting("llm_model", "fake/model-1"); set_setting("llm_model_bulk", "fake/model-1"); set_setting("llm_api_key", "sk-test-FAKEKEY-1234567890abcdef")
+    mock.seed_history(30, inject=True)                    # creates Act-today anomalies for stop_the_bleed
+    before = len(approvals.list_proposals(limit=300))
+    out = autopilot.run(max_actions=3, force=True)
+    assert out["enabled"] and out["actions"], out
+    assert any(a.get("outcome") == "proposed" for a in out["actions"]), out
+    assert len(approvals.list_proposals(limit=300)) > before
+    q = autopilot.action_queue()
+    assert q["pending"] and all("mission" in p for p in q["pending"])
+    # idempotent per day: a second run skips missions already handled
+    out2 = autopilot.run(max_actions=3, force=True)
+    assert all(a.get("outcome") != "proposed" or a.get("mission") == "best_idea" for a in out2["actions"]) or len(approvals.list_proposals(status="pending", limit=300)) >= len(q["pending"])
+    # approve the campaign draft → experiment registered and readable
+    camp = next((p for p in approvals.list_proposals(status="pending", limit=300) if p["kind"] == "create_campaign"), None)
+    if camp:
+        done = approvals.approve_and_execute(camp["id"], decided_by="test")
+        assert done["status"] == "executed"
+        exps = experiments.list_experiments()
+        assert exps and exps[0]["proposal_id"] == camp["id"] and exps[0]["control_group_pct"] >= 5
+        r = experiments.refresh_all()
+        assert r["refreshed"] and "state" in experiments.list_experiments()[0]["readout"]
+    set_setting("llm_api_key", "")

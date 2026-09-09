@@ -95,8 +95,36 @@ def normalize_campaign(r: Dict[str, Any]) -> Dict[str, Any]:
         "conversion_goals": [g.get("name") for g in (r.get("conversion_goal_details") or {}).get("goals", []) if isinstance(g, dict) and g.get("name")],
         "is_all_user_campaign": bool(seg.get("is_all_user_campaign")),
         "segment_count": len(names),
+        "segment_filters": [{k: f.get(k) for k in ("name", "filter_type", "operator", "value", "count", "date_filter") if k in f} for f in ((seg.get("included_filters") or {}).get("filters") or [])[:6] if isinstance(f, dict)],
+        "content_preview": _content_preview(r.get("campaign_content") or r.get("content") or {}),
+        "schedule": {k: r.get(k) for k in ("campaign_delivery_type", "scheduled_time", "sent_time", "periodic_details", "trigger_details", "time_to_live", "frequency_capping", "dnd") if r.get(k) is not None},
     })
     return out
+
+
+def _content_preview(content: Any, limit: int = 320) -> Dict[str, Any]:
+    """Small, safe summary of campaign content: subject/title/body text, CTA, personalisation tokens. Never the HTML."""
+    import re as _re
+    found: Dict[str, str] = {}
+    def walk(o, depth=0):
+        if depth > 6 or len(found) > 8:
+            return
+        if isinstance(o, dict):
+            for k, v in o.items():
+                kl = str(k).lower()
+                if isinstance(v, str) and v.strip() and any(t in kl for t in ("subject", "title", "header", "body", "message", "text", "cta", "button", "preheader", "summary")) and "html" not in kl:
+                    txt = _re.sub(r"<[^>]+>", " ", v); txt = _re.sub(r"\s+", " ", txt).strip()
+                    if txt and kl not in found:
+                        found[kl] = txt[:limit]
+                else:
+                    walk(v, depth + 1)
+        elif isinstance(o, list):
+            for v in o[:6]:
+                walk(v, depth + 1)
+    walk(content)
+    blob = json.dumps(content, default=str)[:20000] if content else ""
+    tokens = sorted(set(_re.findall(r"\{\{[^}]{2,60}\}\}", blob)))[:8]
+    return {"fields": found, "personalisation_tokens": tokens, "has_html": "<html" in blob.lower() or "<table" in blob.lower()}
 
 
 class MoEngageClient:

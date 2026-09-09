@@ -87,6 +87,24 @@ class DailyAutomationScheduler:
             except Exception as e:
                 report["deep_dives_error"] = redact(str(e))
 
+            # 3c) experiments: read back results of executed proposals
+            try:
+                from .experiments import refresh_all
+                report["experiments"] = refresh_all()
+                report["steps"].append("experiments")
+            except Exception as e:
+                report["experiments_error"] = redact(str(e))
+
+            # 3d) autopilot missions → approval-ready proposals (bulk model tier)
+            cfg0 = llm_settings()
+            if (cfg0["api_key"] or cfg0["provider"] == "claude_cli") and get_setting("autopilot_enabled", "true").lower() == "true" and (use_llm is None or use_llm):
+                try:
+                    from .autopilot import run as ap_run
+                    report["autopilot"] = ap_run(max_actions=int(get_setting("autopilot_max_actions", "3") or 3))
+                    report["steps"].append("autopilot")
+                except Exception as e:
+                    report["autopilot_error"] = redact(str(e))
+
             # 4) agent brief + agent ideas (only when a model is configured)
             cfg = llm_settings()
             want_llm = (cfg["api_key"] or cfg["provider"] == "claude_cli") if use_llm is None else use_llm

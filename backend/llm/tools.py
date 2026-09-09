@@ -289,6 +289,41 @@ def propose_pause_campaign(campaign_id: str, rationale: str) -> Dict[str, Any]:
     return {"proposal_id": p["id"], "status": p["status"], "preview": p.get("preview")}
 
 
+def campaign_content(campaign_id: str) -> Dict[str, Any]:
+    """Subject/title/body text preview, CTA, personalisation tokens, schedule/trigger details and segment filters for one campaign (never the HTML)."""
+    c = _client()
+    for r in c.get_campaigns():
+        if str(r.get("id")) == str(campaign_id):
+            return {k: r.get(k) for k in ("id", "name", "channel", "status", "target_segment", "segment_filters", "content_preview", "schedule", "conversion_goals", "tags", "delivery_type", "content_type")}
+    return {"error": f"campaign {campaign_id} not found"}
+
+
+def segment_detail(segment_id: str) -> Dict[str, Any]:
+    """Definition/filters of a saved segment (public Segmentation API; mock returns criteria)."""
+    c = _client()
+    if c.mock_mode:
+        for s in c.get_segments():
+            if s.get("id") == segment_id:
+                return s
+        return {"error": "not found"}
+    r = c.api().segment_get(segment_id)
+    return {"data": r.get("data")}
+
+
+def analytics_query(kind: str, body: Dict[str, Any]) -> Dict[str, Any]:
+    """MoEngage Analytics Query API (funnels | retention | behavior | user-analysis). Experimental; needs Dashboard & Analyze permission on the Campaigns key. Body follows the MoEngage v5 analytics-query spec."""
+    c = _client()
+    if c.mock_mode:
+        return {"note": "mock mode: analytics query not simulated", "kind": kind}
+    return c.api().analytics_query(kind, body)
+
+
+def experiment_readouts(limit: int = 20) -> Dict[str, Any]:
+    """Experiments created from executed campaign proposals, with current readouts (Wilson intervals, pre-period comparison, claim limits)."""
+    from ..experiments import list_experiments
+    return {"experiments": [{k: e.get(k) for k in ("id", "campaign_name", "primary_kpi", "target", "control_group_pct", "window_days", "started_on", "status", "readout")} for e in list_experiments(limit)]}
+
+
 def campaign_taxonomy(by: str = "group_key") -> Dict[str, Any]:
     """Campaigns grouped by naming-convention facets (programme, cohort, propensity, value tier, trader type, product, channel) with volume-weighted rates, plus the within-facet contrasts that carry insight."""
     from ..taxonomy import catalog, group
@@ -383,6 +418,10 @@ TOOL_SCHEMAS: List[Dict[str, Any]] = [
         ["name", "channel", "target_segment", "variants", "rationale", "goal"]),
     _fn("propose_flow", "Propose a DRAFT flow/journey for approval. steps: [{type: wait|split|message|cohort, ...}].",
         {"name": STR, "entry_trigger": STR, "steps": {"type": "array", "items": OBJ}, "exit_rules": {"type": "array", "items": STR}, "rationale": STR}, ["name", "entry_trigger", "steps", "rationale"]),
+    _fn("campaign_content", "Content preview (subject/title/body text, CTA, personalisation tokens), schedule/trigger details and segment filters for one campaign. Use before critiquing copy or process.", {"campaign_id": STR}, ["campaign_id"]),
+    _fn("segment_detail", "Definition and filters of a saved segment.", {"segment_id": STR}, ["segment_id"]),
+    _fn("analytics_query", "MoEngage Analytics Query API (funnels|retention|behavior|user-analysis). Experimental; body per the v5 spec.", {"kind": STR, "body": OBJ}, ["kind", "body"]),
+    _fn("experiment_readouts", "Readouts of experiments created from executed proposals: KPI vs pre-period with 95% intervals and what may or may not be claimed.", {"limit": {"type": "integer"}}),
     _fn("campaign_taxonomy", "Group campaigns by naming-convention facets (programme, cohort, propensity, value, trader, product, channel) with volume-weighted rates and the biggest within-facet contrasts. Use for any segment-level or 'which cohorts respond' question.", {"by": STR}),
     _fn("campaign_deep_dive", "Deep, structured analysis of one campaign from its full dossier (taxonomy, metrics, history, diagnosis, peers, market). Cached until data changes. Use before recommending changes to a specific campaign.", {"campaign_id": STR, "force": {"type": "boolean"}}, ["campaign_id"]),
     _fn("growth_hacks", "Sourced growth tactics working in crypto/fintech CLM, ranked for this workspace today; use when asked what is trending or what to try next.", {"status": STR, "limit": {"type": "integer"}}),
@@ -398,6 +437,7 @@ TOOLS: Dict[str, Callable[..., Dict[str, Any]]] = {
     "campaign_history": _safe(campaign_history), "campaign_diagnosis": _safe(campaign_diagnosis), "market_snapshot": _safe(market_snapshot), "market_news": _safe(market_news),
     "market_campaign_hooks": _safe(market_campaign_hooks), "moengage_guidance": _safe(moengage_guidance), "integration_status": _safe(integration_status),
     "list_proposals": _safe(list_proposals), "propose_segment": _safe(propose_segment), "propose_campaign": _safe(propose_campaign),
-    "record_ideas": _safe(record_ideas), "growth_hacks": _safe(growth_hacks), "campaign_taxonomy": _safe(campaign_taxonomy), "campaign_deep_dive": _safe(campaign_deep_dive), "clm_program_audit": _safe(clm_program_audit), "experiment_plan": _safe(experiment_plan), "campaign_brief_check": _safe(campaign_brief_check),
+    "record_ideas": _safe(record_ideas), "growth_hacks": _safe(growth_hacks), "campaign_content": _safe(campaign_content), "segment_detail": _safe(segment_detail),
+    "analytics_query": _safe(analytics_query), "experiment_readouts": _safe(experiment_readouts), "campaign_taxonomy": _safe(campaign_taxonomy), "campaign_deep_dive": _safe(campaign_deep_dive), "clm_program_audit": _safe(clm_program_audit), "experiment_plan": _safe(experiment_plan), "campaign_brief_check": _safe(campaign_brief_check),
     "propose_flow": _safe(propose_flow), "propose_pause_campaign": _safe(propose_pause_campaign),
 }

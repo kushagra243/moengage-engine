@@ -12,7 +12,8 @@ def _snap(monkeypatch, ours, theirs, prev_theirs=None):
     conn.close()
     monkeypatch.setattr(c, "_inr_usd", lambda: 88.0)
     monkeypatch.setattr(c, "_btc_usd", lambda rows: 80000.0)
-    monkeypatch.setattr(c, "fetch_coindcx", lambda inr: ours)
+    monkeypatch.setattr(c, "fetch_own", lambda inr: ours)
+    monkeypatch.setattr(c, "fetch_cmc_listing", lambda: {"coindcx": {"takerFee": 0.5, "totalVolChgPct24h": 3.0}, "delta-exchange": {"takerFee": 0.05, "totalVolChgPct24h": 55.0}})
     monkeypatch.setattr(c, "fetch_delta_india", lambda: theirs)
     monkeypatch.setattr(c, "enabled_ids", lambda: ["delta"])
     import backend.market.exchanges as ex
@@ -41,7 +42,8 @@ def test_intel_share_surge_gap_edge_and_actions(monkeypatch):
     btc = next(b for b in i["pair_battles"] if b["symbol"] == "BTC" and b["product"] == "perp"); assert btc["our_vol_usd"] == 500_000_000 and btc["our_share_pct"] > 90
     fe = next(f for f in i["funding_edges"] if f["symbol"] == "BTC"); assert fe["cheaper_for_longs"] == "us"
     types = [a["type"] for a in i["actions"]]
-    assert "listing_request" in types and "funding_edge" in types and "press_advantage" in types
+    assert "listing_request" in types and "funding_edge" in types and "press_advantage" in types and "fee_position" in types and "venue_volume_jump" in types
+    assert next(t for t in i["exchanges"] if t["exchange"] == "coindcx")["taker_fee_pct"] == 0.5
     pb = c.pair_battle("btc"); assert pb["we_list_it"] and pb["venues"][0]["exchange"] in ("coindcx", "delta")
 
 

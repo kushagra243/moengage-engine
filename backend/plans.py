@@ -141,6 +141,16 @@ def set_status(pid: int, status: str) -> None:
     conn = get_db(); conn.execute("UPDATE flight_plans SET status=?, updated_at=CURRENT_TIMESTAMP WHERE id=?", (status, pid)); conn.commit(); conn.close()
 
 
+def archive_past(current_month: Optional[str] = None) -> int:
+    """Drafts for months that have ended are archived (kept for readouts, hidden from the active list)."""
+    init_plan_tables()
+    m = current_month or date.today().strftime("%Y-%m")
+    conn = get_db()
+    n = conn.execute("UPDATE flight_plans SET status='archived', updated_at=CURRENT_TIMESTAMP WHERE status='draft' AND month < ?", (m,)).rowcount
+    conn.commit(); conn.close()
+    return n
+
+
 def month_summary(month: Optional[str] = None) -> Dict[str, Any]:
     month = month or date.today().strftime("%Y-%m")
     plans = list_plans(month, limit=100)

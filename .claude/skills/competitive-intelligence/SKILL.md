@@ -6,7 +6,7 @@ description: How CoinDCX reads and acts on competitor data — which venues are 
 # Competitive intelligence (internal)
 
 ## What we track and how (`competitor_intel`, Market tab card)
-- **Venues**: Delta Exchange India (perps + options, `api.india.delta.exchange`), WazirX (INR spot), Bybit (global perps reference), and via CoinGecko exchange pages: Mudrex, ZebPay, Bitbns, Giottus, KoinBX (top tickers + 24h BTC volume). Ours: `api.coindcx.com` ticker (INR markets = own volume; USDT markets = routed liquidity, shown as *reported*), perps from the liquidity venue as *reference*.
+- **Free sources only.** Primary: CoinMarketCap public data-api (`api.coinmarketcap.com/data-api/v3/exchange/...`): per-exchange market pairs with USD volume (CoinDCX, WazirX, ZebPay, Bitbns, Giottus, KoinBX, Unocoin, Delta, Bybit) and the exchange listing (24h spot/derivatives/total volume, 24h/7d change, market share, maker/taker fees, weekly visits, score). Realtime depth: Delta Exchange India, WazirX, Bybit public tickers. Fallback: CoinGecko exchange pages. **CoinDCX's own volume comes from CMC, never from internal data** (`competitor_own_source=cmc`). INR markets = own volume; USDT markets = routed liquidity (*reported*); perps = liquidity-venue *reference*.
 - **Normalisation**: one row per venue × pair × product with 24h USD volume, OI, funding, 24h change; symbol synonyms (XAU→GOLD, 1000PEPE→PEPE …). Every refresh is stored so surges compare against a snapshot ≥ 45 minutes old and listing first-seen dates are known.
 - **Signals**: INR-spot share table · pair battles (our share per pair vs each venue) · surges (≥ `competitor_surge_pct`, ≥ `competitor_surge_min_usd`) · listing gaps (they have it, we don't) · our edges (we lead by 1.5× or more) · funding edges on shared perps.
 - **Honesty**: volumes are self-reported and vary in quality; USDT/perps volumes are not "ours" for share; CoinGecko pages carry only the top 100 tickers. Say which bucket a number comes from.
@@ -19,6 +19,8 @@ description: How CoinDCX reads and acts on competitor data — which venues are 
 | listing_request / listing_gap | pair surging or trading ≥ min USD elsewhere, not listed here | product | `request_data(kind='other', title='List X')` with the volume evidence | — |
 | funding_edge | our funding cheaper for the crowded side | marketing | funding-cost education to habitual perp traders | `sop_funding_crowding_nudge` |
 | press_advantage | we lead a pair by 1.5×+ | marketing | keep the depth story: spotlight to sector watchers, fee-tier nudges | `sop_asset_spotlight` |
+| fee_position | a tracked Indian venue lists a lower taker fee (CMC) | product + marketing | lead with total-cost transparency and tiers; review thresholds | `sop_fee_tier_nudge` |
+| venue_volume_jump | a venue's total volume +40% in 24h (CMC) | marketing | inspect its surging pairs; counter on ours | `sop_asset_spotlight` |
 The `compete` autopilot mission drafts the marketing actions and files product asks daily; the human approves.
 
 ## Real-time playbook (surge on pair X elsewhere)
@@ -29,5 +31,5 @@ The `compete` autopilot mission drafts the marketing actions and files product a
 - Never imply a price move from a competitor surge; the spotlight states verifiable facts (volume record on CoinDCX, availability, 24h change) and a tool.
 - Listing asks are evidence, not decisions: product and compliance decide.
 
-## Better data (when the team provides APIs)
-CoinGecko Pro (historical exchange volumes, higher rate limits) · Kaiko / CCData / Coinalyze (cross-exchange trades, OI, liquidations by venue) · our internal trades API (true volume by pair and segment, market share by user cohort) · app-store rank and Similarweb/Sensor Tower (acquisition share) · social volume (LunarCrush / X API). Keys go into Settings; the module already has hooks for a per-venue direct API when one exists.
+## More free sources worth adding (no keys or free tiers)
+DefiLlama (DEX and chain volumes, free) · Coinalyze free tier (OI/liquidations, key) · Binance/Bybit/OKX public tickers (already partly used) · iTunes lookup API (app rating counts as a growth proxy) · CoinGecko free (already). Paid feeds (Kaiko/CCData, Similarweb) are out of scope for now.

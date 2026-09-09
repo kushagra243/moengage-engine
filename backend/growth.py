@@ -25,7 +25,9 @@ from .database import get_db
 from .security import redact
 
 KINDS = ("trending_campaign", "growth_hack", "market_play", "moengage_activity", "fix")
-STATUSES = ("new", "saved", "dismissed", "proposed")
+STATUSES = ("new", "saved", "dismissed", "proposed", "expired")
+# how long an idea stays relevant unless the data keeps re-surfacing it (refresh extends expiry); saved/proposed never expire
+TTL_HOURS = {"market_play": 6, "fix": 72, "trending_campaign": 24 * 14, "growth_hack": 24 * 21, "moengage_activity": 24 * 60}
 
 
 def init_growth_tables() -> None:
@@ -46,6 +48,29 @@ def init_growth_tables() -> None:
     conn.commit(); conn.close()
 
 
+def _ensure_columns(conn) -> None:
+    try:
+        conn.execute("ALTER TABLE growth_ideas ADD COLUMN expires_at TIMESTAMP")
+        conn.commit()
+    except Exception:
+        pass
+
+
+def _ttl_hours(i: Dict[str, Any]) -> int:
+    kind = i.get("kind") or "growth_hack"
+    data = i.get("data") or {}
+    if data.get("ttl_hours"):
+        return int(data["ttl_hours"])
+    t = (i.get("title") or "").lower()
+    if kind == "market_play" or i.get("market_hook_id") or "trending today" in t or "pre/post brief" in t:
+        return TTL_HOURS["market_play"]
+    if data.get("competitive") or t.startswith("compete") or "surge" in t:
+        return 24
+    if "listing" in t or "newly listed" in t:
+        return 24 * 7
+    return TTL_HOURS.get(kind, 24 * 21)
+
+
 def _key(title: str) -> str:
     return re.sub(r"[^a-z0-9]+", " ", (title or "").lower()).strip()[:120]
 
@@ -53,16 +78,19 @@ def _key(title: str) -> str:
 def upsert_ideas(ideas: List[Dict[str, Any]], source: str) -> Dict[str, int]:
     init_growth_tables()
     conn = get_db()
+    _ensure_columns(conn)
     added = refreshed = 0
     for i in ideas:
         title = (i.get("title") or "").strip()
         if not title:
             continue
         k = _key(title)
+        ttl = _ttl_hours(i)
         row = conn.execute("SELECT id, status FROM growth_ideas WHERE title_key=?", (k,)).fetchone()
         if row:
-            conn.execute("UPDATE growth_ideas SET seen_count=seen_count+1, last_seen=CURRENT_TIMESTAMP, why=COALESCE(?, why), priority=?, updated_at=CURRENT_TIMESTAMP WHERE id=?",
-                         (i.get("why"), int(i.get("priority", 50)), row["id"]))
+            # the data surfaced it again → still relevant: extend expiry and revive if it had expired
+            conn.execute("UPDATE growth_ideas SET seen_count=seen_count+1, last_seen=CURRENT_TIMESTAMP, why=COALESCE(?, why), priority=?, updated_at=CURRENT_TIMESTAMP, expires_at=datetime('now', ?), status=CASE WHEN status='expired' THEN 'new' ELSE status END WHERE id=?",
+                         (i.get("why"), int(i.get("priority", 50)), f"+{ttl} hours", row["id"]))
             refreshed += 1
             continue
         conn.execute("""INSERT INTO growth_ideas (source, kind, title, title_key, why, how, segment, channel, angle, kpi, transition, effort, expected_impact, market_hook_id, priority, data_json)
@@ -71,17 +99,51 @@ def upsert_ideas(ideas: List[Dict[str, Any]], source: str) -> Dict[str, int]:
                       i.get("segment", "")[:300], i.get("channel", "")[:80], i.get("angle", "")[:80], i.get("kpi", "")[:120], i.get("transition", "")[:60],
                       i.get("effort", "medium"), i.get("expected_impact", "")[:300], i.get("market_hook_id"), int(i.get("priority", 50)),
                       json.dumps(i.get("data") or {}, default=str)[:4000]))
+        conn.execute("UPDATE growth_ideas SET expires_at=datetime('now', ?) WHERE title_key=?", (f"+{ttl} hours", k))
         added += 1
     conn.commit(); conn.close()
     return {"added": added, "refreshed": refreshed}
 
 
+def expire_stale(current_hook_ids: Optional[List[str]] = None, active_anomaly_campaigns: Optional[List[str]] = None, purge_after_days: int = 30) -> Dict[str, int]:
+    """Retire ideas that stopped being relevant: past their TTL, tied to a market hook that no longer exists, or a fix for an anomaly that cleared.
+    Saved / proposed ideas are kept. Expired rows older than purge_after_days are deleted so the feed stays honest and small."""
+    init_growth_tables()
+    conn = get_db(); _ensure_columns(conn)
+    n_ttl = conn.execute("UPDATE growth_ideas SET status='expired', updated_at=CURRENT_TIMESTAMP WHERE status IN ('new') AND expires_at IS NOT NULL AND expires_at < datetime('now')").rowcount
+    n_hook = 0
+    if current_hook_ids is not None:
+        rows = conn.execute("SELECT id, market_hook_id FROM growth_ideas WHERE status='new' AND market_hook_id IS NOT NULL AND market_hook_id <> ''").fetchall()
+        live = set(current_hook_ids)
+        for r in rows:
+            if r["market_hook_id"] not in live:
+                conn.execute("UPDATE growth_ideas SET status='expired', updated_at=CURRENT_TIMESTAMP WHERE id=?", (r["id"],)); n_hook += 1
+    n_anom = 0
+    if active_anomaly_campaigns is not None:
+        act = {str(c).lower() for c in active_anomaly_campaigns}
+        rows = conn.execute("SELECT id, title, data_json FROM growth_ideas WHERE status='new' AND kind='fix'").fetchall()
+        for r in rows:
+            try:
+                d = json.loads(r["data_json"] or "{}")
+            except Exception:
+                d = {}
+            camp = str(d.get("campaign_name") or d.get("campaign") or "").lower()
+            if camp and camp not in act:
+                conn.execute("UPDATE growth_ideas SET status='expired', updated_at=CURRENT_TIMESTAMP WHERE id=?", (r["id"],)); n_anom += 1
+    n_purged = conn.execute("DELETE FROM growth_ideas WHERE status IN ('expired', 'dismissed') AND updated_at < datetime('now', ?)", (f"-{int(purge_after_days)} days",)).rowcount
+    conn.commit(); conn.close()
+    return {"expired_ttl": n_ttl, "expired_hook_gone": n_hook, "expired_anomaly_cleared": n_anom, "purged": n_purged}
+
+
 def list_ideas(status: Optional[str] = "new", limit: int = 40, kind: Optional[str] = None) -> List[Dict[str, Any]]:
+    """status=None returns everything except expired."""
     init_growth_tables()
     conn = get_db()
     q = "SELECT * FROM growth_ideas WHERE 1=1"; args: List[Any] = []
     if status:
         q += " AND status=?"; args.append(status)
+    else:
+        q += " AND status <> 'expired'"
     if kind:
         q += " AND kind=?"; args.append(kind)
     q += " ORDER BY priority DESC, last_seen DESC, id DESC LIMIT ?"; args.append(limit)

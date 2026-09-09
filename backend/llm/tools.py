@@ -546,6 +546,12 @@ def competitor_campaigns(hours: int = 48, venue: Optional[str] = None, force: bo
     return campaign_intel.campaigns(hours=hours, venue=venue, force=force)
 
 
+def onchain_vs_cex(force: bool = False) -> Dict[str, Any]:
+    """Hyperliquid (the venue behind our perps) versus centralised exchanges: HL daily volume, OI and users vs Binance/OKX/Bybit/Bitget/Gate/MEXC (CMC), rank and share; on-chain perps OI landscape (DefiLlama, free); per-coin OI share and funding (per hour) across Hyperliquid, Binance, Bybit, OKX with the cheapest venue for longs; Coinglass section if a key is set. Internal."""
+    from ..market import onchain_cex
+    return onchain_cex.compare(force=force)
+
+
 def pair_battle(symbol: str) -> Dict[str, Any]:
     """One pair across every tracked venue: 24h volume, share, OI, funding, 24h change; whether we list it."""
     from ..market import competitors
@@ -781,6 +787,7 @@ TOOL_SCHEMAS: List[Dict[str, Any]] = [
     _fn("competitor_intel", "Internal competitive picture vs tracked Indian/global venues: volume table, pair battles (our share), surges elsewhere, listing gaps, our edges, funding edges, ranked actions with owner + SOP. Internal only.", {"force": {"type": "boolean"}}),
     _fn("competitor_benchmarks", "Category leaderboards (spot / perps / options / commodities_tokenised) across Indian and global venues with our gap multiple and pair-level targets to match. Internal.", {"category": {"type": "string", "enum": ["spot", "perps", "options", "commodities_tokenised"]}, "force": {"type": "boolean"}}),
     _fn("competitor_campaigns", "Competitor campaigns detected in the last N hours from announcements, blogs, news and App Store notes — type, impact, counter SOP; App Store ranks. Internal.", {"hours": {"type": "integer"}, "venue": STR, "force": {"type": "boolean"}}),
+    _fn("onchain_vs_cex", "Hyperliquid vs centralised venues (volume, OI, users, rank, share), on-chain perps OI landscape, per-coin OI share and funding edges. Internal.", {"force": {"type": "boolean"}}),
     _fn("pair_battle", "One pair across all tracked venues: volume share, OI, funding, change; whether we list it.", {"symbol": STR}, ["symbol"]),
     _fn("web3_trending", "Trending on-chain tokens on our Web3 chains (quality-gated, unverified, paid boosts separate). Data for analysis; copy never picks tokens or names the data venue.", {"chain": STR, "force": {"type": "boolean"}}),
     _fn("product_cohorts", "Families grouped by product affinity with reach/performance and the product treatment matrix (pillars, cadence, never-list, cross-sell on intent, SOPs, Tier-0 lens)."),
@@ -819,5 +826,5 @@ TOOLS: Dict[str, Callable[..., Dict[str, Any]]] = {
     "north_star": _safe(north_star), "set_north_star": _safe(set_north_star), "comms_limits": _safe(comms_limits), "set_comms_limits": _safe(set_comms_limits), "peace_index": _safe(peace_index),
     "guardrail_monitor": _safe(guardrail_monitor), "write_flight_plan": _safe(write_flight_plan), "flight_plans": _safe(flight_plans),
     "segment_study": _safe(segment_study), "define_nomenclature": _safe(define_nomenclature), "list_sops": _safe(list_sops), "sop_detail": _safe(sop_detail), "define_sop": _safe(define_sop), "run_sop": _safe(run_sop), "sop_runs": _safe(sop_runs), "channel_matrix": _safe(channel_matrix),
-    "competitor_intel": _safe(competitor_intel), "competitor_benchmarks": _safe(competitor_benchmarks), "competitor_campaigns": _safe(competitor_campaigns), "pair_battle": _safe(pair_battle), "web3_trending": _safe(web3_trending), "product_cohorts": _safe(product_cohorts), "announcement_lenses": _safe(announcement_lenses), "request_data": _safe(request_data), "data_requests": _safe(data_requests),
+    "competitor_intel": _safe(competitor_intel), "competitor_benchmarks": _safe(competitor_benchmarks), "competitor_campaigns": _safe(competitor_campaigns), "onchain_vs_cex": _safe(onchain_vs_cex), "pair_battle": _safe(pair_battle), "web3_trending": _safe(web3_trending), "product_cohorts": _safe(product_cohorts), "announcement_lenses": _safe(announcement_lenses), "request_data": _safe(request_data), "data_requests": _safe(data_requests),
 }

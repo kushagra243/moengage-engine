@@ -136,9 +136,17 @@ def fetch_coindcx(inr: float) -> List[Dict[str, Any]]:
     return out
 
 
+def _cmc_ok(d: Dict[str, Any], what: str) -> Dict[str, Any]:
+    """CMC returns HTTP 200 with status.error_code != 0 ('system busy', bad slug). Raise so the cache never stores an error payload."""
+    st = (d or {}).get("status") or {}
+    if str(st.get("error_code", "0")) not in ("0", "") or not (d or {}).get("data"):
+        raise sources.SourceDown(f"cmc {what}: {st.get('error_message') or 'empty data'}")
+    return d
+
+
 def fetch_cmc_pairs(slug: str, category: str = "spot", limit: int = 300) -> List[Dict[str, Any]]:
     """CoinMarketCap public data-api: market pairs of one exchange with USD volume (spot | perpetual | futures)."""
-    d = sources._json(f"{CMC}/market-pairs/latest", {"slug": slug, "category": category, "start": 1, "limit": limit}, 20.0, headers=CMC_HEADERS) or {}
+    d = _cmc_ok(sources._json(f"{CMC}/market-pairs/latest", {"slug": slug, "category": category, "start": 1, "limit": limit}, 20.0, headers=CMC_HEADERS) or {}, f"pairs {slug}")
     out = []
     for mp in ((d.get("data") or {}).get("marketPairs") or []):
         base = str(mp.get("baseSymbol") or "").upper(); quote = str(mp.get("quoteSymbol") or "").upper()
@@ -152,15 +160,40 @@ def fetch_cmc_pairs(slug: str, category: str = "spot", limit: int = 300) -> List
 def fetch_cmc_listing() -> Dict[str, Dict[str, Any]]:
     """Exchange-level facts from CMC: 24h spot / derivatives / total volume, market share, 24h change, fees, traffic — keyed by slug."""
     out: Dict[str, Dict[str, Any]] = {}
+    ok_any = False
     for cat in ("spot", "derivatives"):
-        d = sources._json(f"{CMC}/listing", {"start": 1, "limit": 500, "sort": "volume_24h", "category": cat}, 25.0, headers=CMC_HEADERS) or {}
+        try:
+            d = _cmc_ok(sources._json(f"{CMC}/listing", {"start": 1, "limit": 500, "sort": "volume_24h", "category": cat}, 25.0, headers=CMC_HEADERS) or {}, f"listing {cat}")
+        except Exception:
+            continue
+        ok_any = True
         for e in ((d.get("data") or {}).get("exchanges") or []):
             slug = e.get("slug")
             if not slug:
                 continue
             row = out.setdefault(slug, {"name": e.get("name")})
-            row.update({k: e.get(k) for k in ("spotVol24h", "derivativesVol24h", "totalVol24h", "totalVolAdjusted24h", "totalVolChgPct24h", "totalVolChgPct7d", "marketSharePct", "makerFee", "takerFee", "visits", "trafficScore", "numMarkets", "numCoins", "countries", "score") if e.get(k) is not None})
+            row.update({k: e.get(k) for k in ("spotVol24h", "derivativesVol24h", "derivativesOpenInterests", "derivativesMarketPairs", "totalVol24h", "totalVolAdjusted24h", "totalVolChgPct24h", "totalVolChgPct7d", "marketSharePct", "makerFee", "takerFee", "visits", "trafficScore", "numMarkets", "numCoins", "countries", "score") if e.get(k) is not None})
+    if not ok_any:
+        raise sources.SourceDown("cmc listing unavailable")
+    # the listing is a 500-row page and occasionally omits a major (seen: binance) — fill key venues from their own market-pairs quotes
+    for slug in ("binance", "okx", "bybit", "bitget", "coinbase-exchange", "kraken", "kucoin", "gate", "mexc", "htx", "deribit", "hyperliquid", "coindcx", "delta-exchange"):
+        row = out.get(slug) or {}
+        if row.get("spotVol24h") is not None or row.get("derivativesVol24h") is not None:
+            continue
+        try:
+            q = fetch_cmc_exchange_quotes(slug)
+        except Exception:
+            continue
+        if q:
+            out[slug] = {**row, "name": row.get("name") or q.get("name"), "spotVol24h": q.get("spotVolume"), "derivativesVol24h": q.get("derivativeVolume"), "totalVol24h": q.get("totalVolume24h"), "numMarkets": q.get("numMarketPairs"), "filled_from": "market-pairs quotes"}
     return out
+
+
+def fetch_cmc_exchange_quotes(slug: str) -> Dict[str, Any]:
+    """Exchange-level 24h volumes from the market-pairs endpoint's quotes block (works per slug even when the listing page omits the venue)."""
+    d = _cmc_ok(sources._json(f"{CMC}/market-pairs/latest", {"slug": slug, "category": "spot", "start": 1, "limit": 1}, 15.0, headers=CMC_HEADERS) or {}, f"quotes {slug}")
+    data = d.get("data") or {}; q = ((data.get("quotes") or [{}])[0]) if data.get("quotes") else {}
+    return {"name": data.get("name"), "numMarketPairs": data.get("numMarketPairs"), "spotVolume": _f(q.get("spotVolume")) or None, "derivativeVolume": _f(q.get("derivativeVolume")) or None, "totalVolume24h": _f(q.get("totalVolume24h")) or None}
 
 
 def fetch_own(inr: float) -> List[Dict[str, Any]]:

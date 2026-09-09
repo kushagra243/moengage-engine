@@ -149,7 +149,7 @@ def status():
 
 
 # ── settings ───────────────────────────────────────────────────────────────────
-ALLOWED_SETTING_PREFIXES = ("moengage_", "llm_", "market_", "schedule_", "refresh_", "analysis_", "taxonomy_", "autopilot_", "devagent_", "web3_", "mock_mode")
+ALLOWED_SETTING_PREFIXES = ("moengage_", "llm_", "market_", "schedule_", "refresh_", "analysis_", "taxonomy_", "autopilot_", "devagent_", "web3_", "competitor", "mock_mode")
 
 
 @app.get("/api/settings")
@@ -907,6 +907,20 @@ def market_web3(force: bool = False, chain: Optional[str] = None):
     if chain:
         t = {**t, "trending": [r for r in t.get("trending", []) if r.get("chain") == chain]}
     return t
+
+
+@app.get("/api/market/competitors")
+def market_competitors(force: bool = False):
+    from .market import competitors
+    from .market.context import _latest
+    ctx = _latest(6 * 3600) or {}
+    return competitors.intel({"crypto_markets": ctx.get("crypto_markets") or []}, force=force)
+
+
+@app.get("/api/market/pair-battle")
+def market_pair_battle(symbol: str):
+    from .market import competitors
+    return competitors.pair_battle(symbol)
 
 
 @app.get("/api/sops/product-matrix")

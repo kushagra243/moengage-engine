@@ -32,6 +32,7 @@ Or type `/setup` in Claude Code. Persistent service: `./cli.py service install`.
 - `campaign-sops` — the SOP framework, library, run procedure and pre/mid/post-flight checks.
 - `flight-plans-and-guardrails` — the Flight Plan (campaign requirement doc) template, north star, hard communication limits, peace index, SOP monitor.
 - `product-cohort-playbook` — product affinity from names, treatment matrix per product, Tier-0 announcements with lenses, web3 lane rules, data requests.
+- `competitive-intelligence` — tracked venues, share/surge/gap/edge signals, action owners, real-time counter playbook, honesty and no-naming rules.
 Load the relevant one before working; the agent does the same via its `skill` tool.
 
 ## Invariants (do not weaken)

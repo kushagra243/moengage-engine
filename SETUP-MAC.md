@@ -114,6 +114,61 @@ With a refresh token pasted the engine renews the short-lived dashboard JWT
 itself. If everything shows `failed` with "auth rejected", the tokens have
 expired: copy fresh headers and save again.
 
+## 4b. One-time keys, and where everything is stored
+
+You enter each credential once; after that the engine renews what it can and
+keeps everything on this Mac.
+
+### Enter keys once
+
+In the console → **Settings → Integration** (or from the terminal):
+
+```bash
+./cli.py set moengage_region dashboard-03.moengage.com   # your dashboard host (03 = India DC)
+./cli.py set moengage_app_id <Workspace ID>              # Settings → Account → API keys on MoEngage
+./cli.py set-key data            # Data API key            (prompted, hidden)
+./cli.py set-key segmentation    # Segmentation key
+./cli.py set-key campaigns       # Campaigns / Reports key
+./cli.py set-key inform          # Inform key (optional)
+./cli.py set-key llm             # OpenRouter key (skip if using claude_cli)
+./cli.py set mock_mode false
+./cli.py probe-keys              # confirms which keys work against api-<dc>
+```
+
+Dashboard session (optional, for dashboard-only actions such as flow creation):
+paste the DevTools *Request Headers* block into *Session cookies* once. The
+engine extracts the bearer and refresh tokens and renews the short-lived JWT
+itself; you re-paste only when the 60-day refresh token expires or you log out.
+
+Keys never appear again in the UI, logs or the agent: Settings shows only
+`set / not set`, and *Clear* removes one.
+
+### Where things live (all under the repo folder unless noted)
+
+| What | Where | Notes |
+|---|---|---|
+| Settings, encrypted secrets, snapshots, anomalies, proposals, growth feed, chat history | `data/agent.db` (SQLite) | Secrets are Fernet-encrypted rows; the file is useless without the key. |
+| Encryption key | macOS **Keychain**, item `moengage-engine` | Created on first run; macOS may ask once. Linux fallback: `data/secret.key` (mode 0600). |
+| Audit trail | `data/logs/audit.jsonl` | Hash-chained; Integration tab shows whether the chain is intact. |
+| Server / service logs | `data/logs/*.log` | Redacted; safe to share. |
+| Market cache | `data/cache/` | Public data only; safe to delete anytime. |
+| Learned / discovered / verified dashboard endpoints | `data/endpoints.*.json` | Paths and header *names* only, never values. |
+| Python environment | `.venv/` | Rebuilt by `./setup.sh`. |
+
+Nothing under `data/` is committed to git (see `.gitignore`).
+
+### Backup, move, rotate, wipe
+
+- **Backup**: copy `data/agent.db` and export the Keychain item (or `data/secret.key` on Linux) together, to encrypted storage. One without the other restores nothing.
+- **Move to another Mac**: copy `data/agent.db`, then run
+  `security add-generic-password -U -s moengage-engine -a master-key -w '<key>'` with the exported key, then `./setup.sh`. Or simply re-enter the keys on the new Mac; it takes a minute.
+- **Rotate a key**: regenerate on MoEngage, `./cli.py set-key <kind>` again. The audit log records the change (never the value).
+- **Wipe**: stop the service, delete `data/`, and delete the Keychain item. The repo folder holds nothing else about you.
+
+### What is never stored or sent
+
+Raw keys in logs, chat history sent to the model, or the UI; MoEngage data to any third party; anything to the model provider except the redacted tool output the agent needs for the question you asked.
+
 ## 5. First run
 
 In the console:

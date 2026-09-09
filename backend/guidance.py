@@ -112,6 +112,11 @@ ENGINE_SETTINGS: Dict[str, Dict[str, Any]] = {
     "llm_max_tokens":         {"type": "int", "min": 256, "max": 32000, "help": "agent max output tokens"},
     "llm_model_bulk":         {"type": "str", "max_len": 120, "help": "bulk-tier model id or auto-free"},
     "devagent_enabled":       {"type": "bool", "help": "allow code-change proposals to be drafted/merged"},
+    "llm_tool_output_chars":  {"type": "int", "min": 1500, "max": 16000, "help": "default per-tool output budget (chars) sent back to the model"},
+    "llm_history_messages":   {"type": "int", "min": 0, "max": 20, "help": "chat turns carried into each request"},
+    "llm_max_rounds":         {"type": "int", "min": 1, "max": 12, "help": "max tool rounds per chat"},
+    "llm_max_rounds_autopilot": {"type": "int", "min": 1, "max": 10, "help": "max tool rounds per autopilot mission"},
+    "llm_brief_tier":         {"type": "enum", "values": ["bulk", "main"], "help": "which tier writes the daily brief"},
 }
 
 

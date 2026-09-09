@@ -128,7 +128,7 @@ def _listing_hooks(listings: Dict[str, Any], regime: str) -> List[Dict[str, Any]
         out.append({"id": f"listing_{n['venue']}_{n['symbol']}", "trigger": f"{n['symbol']} newly listed on {n['venue']} as {n['product']}", "asset_class": n.get("asset_class"), "regime": regime,
                     "segments": ([f"Watchers of {n['symbol']} or its sector", "Tokenised-market explorers"] if rwa else [f"Watchers of {n['symbol']}", "Habitual traders (8+ fills / 4 weeks)"]),
                     "clm_stages": ["Habitual", "Core"], "channel": "In-app card (push only to watchers)", "angle": "product_education" if rwa else "new_listing",
-                    "copy_direction": f"State that {n['symbol']} is now tradable ({n['product']} on {n['venue']}); offer watchlist add. No launch-pump framing, no 'early' language, no price target.",
+                    "copy_direction": f"State that {n['symbol']} is now tradable on CoinDCX ({n['product']}); offer watchlist add. Never name the liquidity venue. No launch-pump framing, no 'early' language, no price target.",
                     "timing": "Listing day, 10:00–20:00 IST; TTL 24h", "guardrails": ["blocked in stress regimes", "exclude liquidated-14d and loss-dormant", "1 listing message per user per week"],
                     "kpi": "watchlist adds per 1k delivered; first-week traders of the pair (holdout 20%)"})
     return out[:4]

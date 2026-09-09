@@ -47,6 +47,9 @@ pkill -f start.py            # the server's cmdline is start.py, not uvicorn
 - **Scheduled job**: extend `scheduler.py` run sequence; keep model-free steps before model steps.
 - **Tests**: mirror `tests/test_agent_loop.py` (fake OpenAI server) and `tests/test_security.py`; run the suite before finishing.
 
+## Token economy
+`backend/llm/usage.py` ledger (purpose × tier × model, cached tokens, cost); `TOOL_BUDGETS` + `_compact()` + per-conversation de-duplication in `backend/llm/agent.py`; budgets are settings the agent may tune (`llm_tool_output_chars`, `llm_history_messages`, `llm_max_rounds*`, `llm_brief_tier`); Claude models via OpenRouter get `cache_control` on the system prompt. New tools: small outputs, a budget entry, no raw payloads.
+
 ## Self-repair
 `backend/selfheal.py`: `_safe` records every tool exception with a signature; `health_report()` groups them with failed scheduler steps, failed proposals and server-log tracebacks into `fix_requests`; the agent's `self_diagnose` tool and the `self_heal` autopilot mission turn them into `propose_code_change` calls. Before a merge, `devagent.execute` import-checks the drafted tree; after a merge, `data/last_merge.json` records pre/post commits and `start.py` reverts the merge if `import backend.main` fails at startup. CLI: `./cli.py selfheal [report|rollback] [--tests]`.
 

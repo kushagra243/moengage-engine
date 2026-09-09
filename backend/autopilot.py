@@ -65,10 +65,10 @@ def _agent(tier_note: str):
         try:
             client = LLMClient({**cfg, "model": cand})
             client.chat([{"role": "user", "content": "Reply with the single word: ready"}], tools=None, max_tokens=5)
-            return MarketerAgent(client)
+            return MarketerAgent(client, purpose="autopilot")
         except Exception:
             continue
-    return MarketerAgent()
+    return MarketerAgent(purpose="autopilot")
 
 
 def _run_mission(agent, mission: str, target: str, prompt: str) -> Dict[str, Any]:

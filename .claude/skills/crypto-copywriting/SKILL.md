@@ -6,6 +6,7 @@ description: Copy system for a crypto spot/perps trading app across push, in-app
 # Copy for a trading app
 
 ## Rules that never bend
+0. **We are CoinDCX.** Never name a liquidity venue (Binance, Hyperliquid) or a competitor in any message; say "on CoinDCX" or "here". Venue data is for our intelligence only. "SIP" is our name for recurring buy.
 1. **Fact → relevance → tool.** Every market message states a verifiable fact, why it matters to *this* user, and one thing they can do in-app. No fourth sentence.
 2. **No direction, no forecast, no urgency tied to price.** Banned words list in `crypto-compliance-copy`.
 3. **Numbers are rounded, time-stamped, and true at send** (TTL ≤ 4h). Prefer the user's own numbers (their P&L, their alert) over the market's.
@@ -30,7 +31,7 @@ description: Copy system for a crypto spot/perps trading app across push, in-app
 - Never: "get in early", "listing pump".
 
 **Tokenised perp, market closed** (product_education)
-- `NVDA moved 4.1% after US close` / `On Hyperliquid, NVDA trades 24/7 as a perp. See how it's pricing before Wall Street opens.` CTA: *View NVDA perp*
+- `NVDA moved 4.1% after US close` / `On CoinDCX, NVDA trades 24/7 as a perp. See how it's pricing before Wall Street opens.` CTA: *View NVDA perp*
 
 **Liquidation recovery, T+24h email**
 - Subject: `What happened to your ETH position` — Preheader: `The numbers, plainly, and what margin mode changes.`

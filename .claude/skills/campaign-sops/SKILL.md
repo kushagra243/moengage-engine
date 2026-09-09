@@ -5,6 +5,8 @@ description: The SOP framework for running lifecycle campaigns — what a standa
 
 # Campaign SOPs
 
+Brand rule for every step's copy: we are CoinDCX; no liquidity venue or competitor is ever named; "SIP" is our recurring-buy product.
+
 An SOP turns a campaign type into a repeatable procedure that anyone on the team, or the agent, can run on a cohort with the same guardrails every time. SOPs live in the engine (`backend/sops.py`, editable via the SOPs tab or `define_sop`); the framework check is code, so an SOP that violates it cannot be saved or run.
 
 ## What every SOP specifies

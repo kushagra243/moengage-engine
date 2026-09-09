@@ -195,8 +195,12 @@ class LLMClient:
         if not self.cfg["api_key"] and "openrouter.ai" in self.cfg["base_url"]:
             raise LLMError("No LLM API key configured. Add your OpenRouter key in Settings → LLM.")
         safe_messages = [_redact_message(m) for m in messages]
+        use_model = model or self.cfg["model"]
+        if "claude" in use_model.lower() and safe_messages and safe_messages[0].get("role") == "system" and isinstance(safe_messages[0].get("content"), str):
+            # Anthropic prompt caching (OpenRouter passes cache_control through): the cached prefix covers tools + system prompt
+            safe_messages = [{"role": "system", "content": [{"type": "text", "text": safe_messages[0]["content"], "cache_control": {"type": "ephemeral"}}]}] + safe_messages[1:]
         payload: Dict[str, Any] = {
-            "model": model or self.cfg["model"],
+            "model": use_model,
             "messages": safe_messages,
             "temperature": self.cfg["temperature"] if temperature is None else temperature,
             "max_tokens": max_tokens or self.cfg["max_tokens"],
@@ -206,6 +210,8 @@ class LLMClient:
             payload["tool_choice"] = tool_choice or "auto"
         if response_format:
             payload["response_format"] = response_format
+        if "openrouter.ai" in self.cfg["base_url"]:
+            payload["usage"] = {"include": True}          # provider-reported cost in the usage block
         url = self.cfg["base_url"] + "/chat/completions"
         last_err = None
         for attempt in range(3):
@@ -236,11 +242,17 @@ class LLMClient:
                 except Exception:
                     args = {"_raw": fn.get("arguments")}
                 tool_calls.append({"id": tc.get("id") or f"call_{len(tool_calls)}", "name": fn.get("name"), "arguments": args})
+            usage = data.get("usage") or {}
+            try:
+                from .usage import record as _record
+                _record(getattr(self, "purpose", "chat"), "bulk" if (model and model != self.cfg["model"]) else "main", data.get("model") or use_model, usage, usage.get("cost"))
+            except Exception:
+                pass
             return {
                 "content": msg.get("content"),
                 "tool_calls": tool_calls,
                 "finish_reason": choice.get("finish_reason"),
-                "usage": data.get("usage") or {},
+                "usage": usage,
                 "model": data.get("model") or self.cfg["model"],
                 "raw_message": msg,
             }
@@ -295,6 +307,13 @@ class LLMClient:
                 text = ""
             except Exception:
                 pass
+        try:
+            from .usage import record as _record
+            u = data.get("usage") or {}
+            _record(getattr(self, "purpose", "chat"), "main", "claude_cli:" + str(model or self.cfg["model"]),
+                    {"prompt_tokens": u.get("input_tokens", 0), "completion_tokens": u.get("output_tokens", 0), "cache_read_input_tokens": u.get("cache_read_input_tokens", 0)}, data.get("total_cost_usd"))
+        except Exception:
+            pass
         return {"content": text or None, "tool_calls": tool_calls, "finish_reason": "tool_calls" if tool_calls else "stop",
                 "usage": data.get("usage") or {}, "model": self.cfg["model"], "raw_message": {"role": "assistant", "content": text, "tool_calls": tool_calls}}
 

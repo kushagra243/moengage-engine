@@ -33,7 +33,7 @@ LIBRARY: List[Dict[str, Any]] = [
          steps=[dict(day=0, channel="in-app", purpose="UPI deposit in 20 seconds; show the exact steps", copy_brief="Fact: account is ready. Relevance: first deposit unlocks trading. Tool: UPI deposit screen. No bonus.", send_time_ist="11:00"),
                 dict(day=1, channel="push", purpose="Remove the fear: withdrawals are instant, no lock-in", copy_brief="Address the objection (money stuck). Tool: how withdrawals work screen.", send_time_ist="19:00"),
                 dict(day=3, channel="whatsapp", purpose="Deposit failed / abandoned? help path", copy_brief="Utility template: if a deposit failed, retry or IMPS; support link.", condition="deposit_initiated without deposit_completed", send_time_ist="12:00"),
-                dict(day=6, channel="email", purpose="What ₹500 lets you do: spot, alerts, recurring buy", copy_brief="Education, fee transparency, TDS one-liner; ASCI disclaimer in footer.", send_time_ist="09:00")],
+                dict(day=6, channel="email", purpose="What ₹500 lets you do: spot, alerts, SIP / recurring buy", copy_brief="Education, fee transparency, TDS one-liner; ASCI disclaimer in footer.", send_time_ist="09:00")],
          duration_days=7, frequency=dict(cadence="event_triggered", max_messages_per_user_per_week=4), holdout_pct=10,
          primary_kpi="first_deposit_rate_7d", target="+3 pp vs holdout", guardrail_metric="unsubscribe_rate", measurement_window_days=14,
          kill_criteria=["delivery_rate < 85% on any push step", "unsubscribe_rate > 0.5% on email step", "support_ticket_rate of cohort > 2× baseline"],
@@ -42,7 +42,7 @@ LIBRARY: List[Dict[str, Any]] = [
     dict(id="sop_funded_to_first_trade", name="Funded → first trade (72h)", campaign_type="activation", transition="funded_activated",
          objective="First spot trade within 72h of first deposit; small size, no leverage.",
          audience=dict(segment_family="FTD_NOTRADE", description="first deposit completed, no order_filled", exclusions=STANDARD_EXCLUSIONS, min_reach=300, jurisdictions_excluded=[]),
-         steps=[dict(day=0, channel="in-app", purpose="Your ₹ is in: three ways to start (recurring buy, watchlist, ₹100 trade)", copy_brief="Fact: deposit landed. Tool: guided first trade. No asset recommendation — user picks from watchlist/top by volume.", send_time_ist="+1h"),
+         steps=[dict(day=0, channel="in-app", purpose="Your ₹ is in: three ways to start (SIP / recurring buy, watchlist, ₹100 trade)", copy_brief="Fact: deposit landed. Tool: guided first trade. No asset recommendation — user picks from watchlist/top by volume.", send_time_ist="+1h"),
                 dict(day=1, channel="push", purpose="Watchlist first: follow before you trade", copy_brief="Habit tool; alerts adoption.", send_time_ist="18:30"),
                 dict(day=2, channel="email", purpose="How fees and TDS work on your first trade", copy_brief="Transparency; disclaimer footer; link to fee page.", send_time_ist="09:00")],
          duration_days=3, frequency=dict(cadence="event_triggered", max_messages_per_user_per_week=3), holdout_pct=10, primary_kpi="first_trade_rate_7d", target="+4 pp vs holdout",
@@ -131,6 +131,225 @@ LIBRARY: List[Dict[str, Any]] = [
 ]
 
 
+def _sop(id, name, campaign_type, transition, objective, user, family, steps, duration_days, cadence, per_week, holdout, kpi, target, guardrail, window, kill, ideas,
+         exclusions=None, jurisdictions=None, disclaimer=("email", "whatsapp", "in-app"), banned=(), min_reach=200, extra_checks=()):
+    return dict(id=id, name=name, campaign_type=campaign_type, transition=transition, objective=objective, user=user,
+                audience=dict(segment_family=family, description=user, exclusions=list(exclusions if exclusions is not None else STANDARD_EXCLUSIONS), min_reach=min_reach, jurisdictions_excluded=list(jurisdictions or [])),
+                steps=steps, duration_days=duration_days, frequency=dict(cadence=cadence, max_messages_per_user_per_week=per_week), holdout_pct=holdout,
+                primary_kpi=kpi, target=target, guardrail_metric=guardrail, measurement_window_days=window, kill_criteria=list(kill), ideas=list(ideas),
+                checks=dict(preflight=["framework", "segment_exists", "exclusions_present", "brief_per_step", "compliance", "limits"] + list(extra_checks), midflight=["kill_criteria_daily", "peace_index"], postflight=["readout_with_ci", "lesson_to_feed"]),
+                compliance=dict(disclaimer_channels=list(disclaimer), banned_angles=list(banned)), source="library", version=1)
+
+
+def _st(day, channel, purpose, brief, t="11:00", condition=None, ttl=None):
+    d = dict(day=day, channel=channel, purpose=purpose, copy_brief=brief, send_time_ist=t)
+    if condition: d["condition"] = condition
+    if ttl: d["ttl_hours"] = ttl
+    return d
+
+
+DERIV_EXCL = STANDARD_EXCLUSIONS
+LIBRARY += [
+    _sop("sop_kyc_completion", "KYC completion (72h, help at the failure point)", "onboarding", "acquired_verified", "Get signed-up users through KYC within 72h by helping at the exact step they failed.",
+         "Signed up, KYC not approved, 0–3 days since signup (families: KYC_PENDING / SIGNUP_NOKYC)", "KYC_PENDING",
+         [_st(0, "in-app", "Progress framing: what is done, what is left", "2 of 3 done; 2 minutes; documents accepted.", "+1h"), _st(1, "push", "Step-specific help", "Blurry PAN? retry tips; deep link to the failed step.", "12:00", "kyc_rejected or kyc_started without submit"),
+          _st(2, "whatsapp", "Human hand-off after second failure", "Utility template; support chat link; no promo.", "12:30", "kyc_rejected >= 2")],
+         3, "event_triggered", 3, 10, "kyc_completion_rate_72h", "+5 pp vs holdout", "support_ticket_rate", 7, ["support_ticket_rate > 2× baseline", "notification_disable_rate > 0.3%"],
+         ["A/B: progress bar vs plain text", "Regional language for step help (Hindi/Telugu)", "Video 20s explainer on in-app card"], exclusions=["unsubscribed / DND", "KYC approved"], disclaimer=("in-app",), min_reach=100),
+    _sop("sop_deposit_failure_recovery", "Deposit failure recovery (minutes, not days)", "activation", "verified_funded", "Recover failed/abandoned UPI deposits while intent is hot; the highest-ROI message in Indian fintech.",
+         "deposit_initiated without deposit_completed in the last 60 minutes (family: DEP_FAILED)", "DEP_FAILED",
+         [_st(0, "push", "Nothing was debited — retry in 20 seconds", "Bank-side timeout explanation; retry deep link; IMPS alternative.", "+15m"), _st(0, "whatsapp", "Still stuck? here is how", "Utility template with the two alternatives and support.", "+3h", "still no deposit_completed")],
+         1, "event_triggered", 2, 10, "deposit_recovery_rate_24h", "≥ 25% of failures recovered", "support_ticket_rate", 3, ["delivery_rate < 85%", "complaints about duplicate debits > 0"],
+         ["Show the exact bank error class in copy", "Pre-fill the retry amount", "Route NEFT failures to a different explainer"], exclusions=["unsubscribed / DND", "deposit completed"], disclaimer=("whatsapp",), min_reach=50),
+    _sop("sop_first_week_habit", "First-week habit loop (watchlist → alert → recap)", "activation", "activated_habitual", "Turn a first trade into a weekly habit with tools, not promos.",
+         "First trade in the last 7 days, < 2 trades total (family: FTT_WEEK1)", "FTT_WEEK1",
+         [_st(0, "in-app", "Add your first watchlist item", "Habit tool; one tap from the asset just traded.", "+2h"), _st(2, "push", "Set one 5% alert", "Fact + tool; no market talk.", "19:00", "price_alert_set = 0"),
+          _st(6, "email", "Your first week: trades, fees, what to try next", "Own numbers; one feature; disclaimer footer.", "09:00")],
+         7, "event_triggered", 3, 20, "second_trade_within_7d", "+4 pp vs holdout", "notification_disable_rate", 14, ["notification_disable_rate > 0.3%", "unsubscribe_rate > 0.5%"],
+         ["Cards recap instead of email for users who ignore email", "Alert threshold personalised to asset volatility", "Hinglish variant for app_language=hi"]),
+    _sop("sop_second_trade_72h", "Second trade within 72h (guided, no asset recommendation)", "activation", "activated_habitual", "Move first-time traders to a second trade quickly without naming an asset.",
+         "Exactly one fill, 1–3 days ago, still has balance (family: FTT_NOSECOND)", "FTT_NOSECOND",
+         [_st(1, "push", "SIP (SIP / recurring buy) or a second asset from your watchlist", "Two tool paths; no asset named by us.", "18:30"), _st(3, "in-app", "Fees and TDS on small trades", "Transparency card; disclaimer.", "on_open")],
+         3, "event_triggered", 2, 20, "second_trade_within_7d", "+3 pp vs holdout", "unsubscribe_rate", 10, ["delivery_rate < 85%"], ["Test 'SIP / recurring buy' vs 'watchlist' as the lead", "Send at the hour of the first trade"]),
+    _sop("sop_perp_intent_education", "Perp intent without a trade → education path (opt-in, exit offered)", "education", "habitual_core", "Intent-triggered derivatives education with an explicit 'spot is fine' exit; never a promo.",
+         "Viewed a perp market ≥2× in 14 days, 0 perp fills ever, country not UK/US (family: PERP_INTENT_NOTRADE)", "PERP_INTENT_NOTRADE",
+         [_st(0, "in-app", "What a perp is, in one screen", "Funding in one line; isolated margin default; derivatives disclaimer block; exit: keep to spot.", "13:00"), _st(2, "email", "Funding, margin, liquidation — plainly", "Education; calculator link; disclaimer.", "10:00", "opened step 0"),
+          _st(4, "in-app", "If you ever start: 1–2x, isolated, stop-loss", "Hygiene checklist; no CTA to trade.", "13:00", "opened step 1")],
+         5, "event_triggered", 3, 20, "first_perp_trade_rate_30d", "opt-in cohort only; liquidation_rate_30d ≤ baseline", "liquidation_rate_30d", 30, ["liquidation_rate_30d of treated > holdout", "any UK/US recipient → stop"],
+         ["Add a 'paper first' demo path", "Quiz gate before the third message", "Measure hedgers separately"], exclusions=DERIV_EXCL, jurisdictions=["UK", "US"], banned=("leverage_upsell", "first_futures_trade_promo", "size_up"), min_reach=100, extra_checks=["jurisdiction"]),
+    _sop("sop_first_perp_hygiene", "First perp → position hygiene (72h)", "risk", "habitual_core", "After the first perp fill, teach SL/TP and isolated margin before the second.",
+         "Exactly one perp fill in the last 3 days (family: FIRST_PERP)", "FIRST_PERP",
+         [_st(0, "in-app", "How funding was charged on your position", "Their numbers; funding per day; disclaimer block.", "+2h"), _st(1, "push", "Set a stop-loss on your open position", "Tool only; no direction.", "12:00", "stop_loss_set = 0 and position open")],
+         3, "event_triggered", 2, 20, "second_perp_within_14d", "liquidation_rate_30d −30% vs holdout", "liquidation_rate_30d", 30, ["liquidation_rate_30d treated > holdout"],
+         ["Isolated-margin default prompt", "Distance-to-liquidation widget card"], exclusions=["unsubscribed / DND", "open support ticket"], jurisdictions=["UK", "US"], disclaimer=("in-app", "push_landing"), banned=("size_up", "leverage_upsell"), min_reach=50),
+    _sop("sop_leverage_climber_risk", "Leverage climber risk brief (weekly)", "risk", "slipping", "Users whose leverage keeps rising get risk education, never encouragement.",
+         "Median leverage up ≥2 steps in 30 days, no liquidation yet (family: LEV_CLIMBER)", "LEV_CLIMBER",
+         [_st(0, "email", "What your current leverage means at a 5% move", "Personal scenario table; disclaimer.", "09:00"), _st(3, "in-app", "Isolated vs cross, in 30 seconds", "Education; no CTA to trade.", "13:00")],
+         7, "weekly", 2, 20, "liquidation_rate_30d", "−25% vs holdout", "unsubscribe_rate", 30, ["unsubscribe_rate > 0.4%", "complaints about tone > 0"],
+         ["Personal 'max loss at your size' calculator", "Peer-free framing (no leaderboards)"], exclusions=DERIV_EXCL, jurisdictions=["UK", "US"], banned=("size_up", "leverage_upsell", "win_framing"), min_reach=100),
+    _sop("sop_funding_crowding_nudge", "Funding crowding nudge (event-triggered, TTL 3h)", "market", "habitual_core", "Tell holders of crowded positions what funding costs per day; offer the position screen.",
+         "Open position on a perp whose funding APR is beyond ±20% (family: CROWDED_POSITION)", "CROWDED_POSITION",
+         [_st(0, "in-app", "Funding on your position: X%/h ≈ Y%/day", "Their side pays; time-stamped; link to position; no direction.", "12:45", ttl=3), _st(0, "push", "Same, push only for leverage ≥5x", "Fact + tool.", "12:45", "leverage >= 5", ttl=3)],
+         1, "event_triggered", 3, 10, "risk_tool_open_rate", "≥ 8% of delivered", "notification_disable_rate", 3, ["notification_disable_rate > 0.3%", "regime capitulation → suppressed by policy"],
+         ["Per-day cost in INR", "Send 45 min before the 13:30 funding window", "Cards digest instead of push for < 5x"], exclusions=DERIV_EXCL + ["received a market push today"], jurisdictions=["UK", "US"], disclaimer=("in-app", "push_landing"), banned=("forecast", "direction"), min_reach=50, extra_checks=["angle_policy", "ttl"]),
+    _sop("sop_oi_crowding_note", "Open-interest crowding note", "market", "habitual_core", "When OI builds ≥30% with flat price, tell holders/watchers positioning is crowded; offer margin review.",
+         "Open position or watchlist on a symbol in oi_movers.surge (family: OI_SURGE_WATCHERS)", "OI_SURGE_WATCHERS",
+         [_st(0, "in-app", "OI +X% in 24h, price flat — crowded book", "Quote OI and price together; margin buffer tool.", "within 2h", ttl=4)],
+         1, "event_triggered", 2, 10, "risk_tool_open_rate", "≥ 6% of delivered", "notification_disable_rate", 3, ["notification_disable_rate > 0.3%", "within 2h of a macro print → hold"],
+         ["Pair with funding note when both fire", "Watchers get alert CTA, holders get margin CTA"], exclusions=DERIV_EXCL, jurisdictions=["UK", "US"], disclaimer=("in-app",), banned=("forecast", "direction"), min_reach=50, extra_checks=["angle_policy", "ttl"]),
+    _sop("sop_macro_print_brief", "Macro print T−24h risk brief + send freeze", "risk", "habitual_core", "Before CPI/NFP/FOMC: brief leverage users, freeze promotional market sends T−2h→T+2h.",
+         "Open leveraged position or leverage ≥3x in 30 days (family: LEV_USERS)", "LEV_USERS",
+         [_st(0, "in-app", "CPI at 18:00 IST tomorrow: what usually happens to volatility", "Fact from calendar; review margin; no direction.", "18:00"), _st(1, "push", "Print in 2 hours — check your margin buffer", "Tool only; last message before the freeze.", "16:00")],
+         2, "event_triggered", 2, 10, "sl_tp_set_rate_24h", "+5 pp vs holdout", "liquidation_rate_print_night", 3, ["regime capitulation → service only"],
+         ["Post-print factual recap only if the move is > 2σ", "Calendar-driven business event"], exclusions=DERIV_EXCL, jurisdictions=["UK", "US"], disclaimer=("in-app", "push_landing"), banned=("forecast", "direction"), min_reach=100, extra_checks=["calendar"]),
+    _sop("sop_tokenised_after_hours", "Markets that never close (tokenised perps after US hours)", "education", "habitual_core", "Educate watchers that NVDA/SPX/gold trade 24/7 here when an after-hours move makes it self-evident.",
+         "Watchlist contains a tokenised name or traded a builder dex; equity/index/commodity mover ≥3% while US closed (family: TOKENISED_WATCHERS)", "TOKENISED_WATCHERS",
+         [_st(0, "push", "NVDA moved 4.1% after US close — it trades 24/7 here", "Fact; 'on CoinDCX' wording (never name the liquidity venue); product education CTA.", "08:00", ttl=4), _st(0, "in-app", "How 24/7 pricing works before Wall Street opens", "Education; disclaimer block.", "on_open")],
+         1, "event_triggered", 3, 20, "tokenised_first_fill_rate_14d", "+2 pp vs holdout", "notification_disable_rate", 14, ["regime capitulation/high_volatility_down → hold"],
+         ["Weekend edition Saturday 11:00", "Earnings-week variant once a calendar source exists"], exclusions=DERIV_EXCL, jurisdictions=["UK", "US"], banned=("trade_earnings", "forecast"), extra_checks=["angle_policy"]),
+    _sop("sop_new_listing_watchers", "New listing → watchers (factual, TTL 24h)", "market", "activated_habitual", "Announce a new spot/perp listing to the people who follow the sector; watchlist add is the CTA.",
+         "Watchlist or holdings in the listed asset's sector; habitual traders (family: LISTING_WATCHERS)", "LISTING_WATCHERS",
+         [_st(0, "in-app", "X is now tradable as spot / as a perp", "Fact; watchlist CTA; no 'early' language.", "11:00", ttl=24), _st(0, "push", "Push only to explicit watchers of X", "Same fact.", "11:00", "watchlist contains X", ttl=24)],
+         1, "event_triggered", 3, 20, "watchlist_add_rate", "≥ 3% of delivered", "notification_disable_rate", 7, ["regime stress → blocked by policy", "1 listing message per user per week exceeded → stop"],
+         ["Sector-based audience from held symbols", "Delisting notice variant (compliance tone)"], exclusions=DERIV_EXCL, banned=("listing_pump", "early", "fomo"), extra_checks=["angle_policy"]),
+    _sop("sop_fee_tier_nudge", "Fee-tier distance nudge", "retention", "habitual_core", "Users within 15% of the next tier learn the exact distance and the saving; nothing else.",
+         "30-day volume within 15% of the next fee tier (family: FEE_TIER_NEAR)", "FEE_TIER_NEAR",
+         [_st(0, "email", "You are ₹X of volume from tier Y — here is the saving", "Own numbers; fee table; disclaimer footer.", "09:00"), _st(5, "in-app", "Tier progress card", "Progress only; no urgency.", "on_open", "still below tier")],
+         10, "monthly", 1, 20, "fee_tier_upgrade_rate", "+3 pp vs holdout", "post_month_volume_drop_pct", 30, ["complaints about pressure > 0", "regime stress → hold"],
+         ["Tier progress as a persistent card", "Combine with monthly statement"], banned=("win_framing", "size_up")),
+    _sop("sop_hedger_education", "Hedging education for concentrated spot holders", "education", "habitual_core", "Spot holders with >40% in one asset during volatile regimes learn how a small hedge works; education only.",
+         "Spot concentration >40% in one asset; regime high_volatility_* (family: CONCENTRATED_SPOT)", "CONCENTRATED_SPOT",
+         [_st(0, "email", "Your portfolio is 62% BTC — what a small hedge does", "Personal numbers; hedge calculator; disclaimer.", "09:00"), _st(3, "in-app", "Hedge calculator walkthrough", "Tool; no direction.", "13:00", "opened step 0")],
+         7, "monthly", 2, 20, "hedge_calculator_use_rate", "≥ 5% of delivered", "unsubscribe_rate", 14, ["unsubscribe_rate > 0.4%"], ["Only in high-volatility regimes", "Show basis/funding view"],
+         exclusions=DERIV_EXCL, jurisdictions=["UK", "US"], banned=("direction", "forecast", "size_up")),
+    _sop("sop_slipping_checkin", "Slipping check-in (decline vs own baseline)", "retention", "slipping", "Users whose trade frequency fell vs their own baseline get a light, cause-aware check-in; cadence goes down, not up.",
+         "Trade frequency −50% vs own 8-week baseline, no liquidation, still active in app (family: SLIPPING)", "SLIPPING",
+         [_st(0, "email", "Portfolio review: your numbers this month", "Own numbers; one insight; no promo.", "09:00"), _st(7, "in-app", "One tool you have not used (alerts/SIP / recurring buy)", "Feature discovery; dismissible.", "on_open")],
+         14, "monthly", 1, 20, "trade_frequency_recovery_14d", "+3 pp vs holdout", "unsubscribe_rate", 21, ["unsubscribe_rate > 0.4%"], ["Split by cause: market vs friction vs loss", "Cards instead of email for email-ignorers"]),
+    _sop("sop_loss_dormant_service", "Loss-dormant service track (no promos, ever)", "retention", "dormant_activated", "Users dormant after a large realised loss get service and education only; the KPI is measured, not pushed.",
+         "Realised loss >20% of deposits and no trade in 21+ days (family: LOSS_DORMANT)", "LOSS_DORMANT",
+         [_st(0, "email", "Your account, your statement, our support", "Service tone; statement; support link; education library; disclaimer.", "10:00"), _st(30, "email", "Risk tools we added since", "Education; no CTA to trade.", "10:00")],
+         30, "monthly", 1, 20, "reactivation_rate_60d", "measure only; support_contact_rate as guardrail", "support_contact_rate", 60, ["any promotional content detected → stop", "complaints > 0"],
+         ["Human outreach for very high prior value", "Tax-loss explainer in March"], exclusions=["unsubscribed / DND"], banned=("promo", "market", "fomo", "win_framing"), min_reach=50),
+    _sop("sop_friction_dormant_fixed", "Friction-dormant: the thing that broke is fixed", "winback", "dormant_activated", "Users who left after a deposit/KYC/withdrawal failure hear that it is fixed, with a direct link.",
+         "Dormant 14–60 days whose last session ended in a failure event (family: FRICTION_DORMANT)", "FRICTION_DORMANT",
+         [_st(0, "whatsapp", "The deposit issue you hit is fixed — 20-second retry", "Utility template; direct link; support.", "12:00"), _st(4, "push", "Habit tool re-entry: one alert", "Fact + tool.", "19:00", "app_opened since step 0")],
+         7, "monthly", 2, 20, "reactivation_rate_14d", "+4 pp vs holdout", "unsubscribe_rate", 21, ["unsubscribe_rate > 0.6%"], ["Per-failure-class copy", "Test push vs WhatsApp first touch"], disclaimer=("whatsapp",)),
+    _sop("sop_market_dormant_return", "Market-dormant return (regime-gated facts)", "winback", "dormant_activated", "Users who left in a drawdown get facts about what changed, only when the regime is trending_up or chop.",
+         "Dormant 30–90 days, no loss event, left during trending_down/capitulation (family: MARKET_DORMANT)", "MARKET_DORMANT",
+         [_st(0, "email", "What changed since you last logged in (facts, no outlook)", "Regime facts; features shipped; disclaimer.", "09:00"), _st(3, "push", "Re-enter with a watchlist, not a trade", "Habit tool.", "19:00")],
+         7, "monthly", 2, 20, "reactivation_rate_14d", "+2 pp vs holdout (market steals credit — holdout mandatory)", "unsubscribe_rate", 21, ["regime flips to stress → pause", "unsubscribe_rate > 0.6%"],
+         ["Sunday evening send", "Own-portfolio change as the lead number"], banned=("fomo", "win_framing", "forecast"), extra_checks=["regime_allows"]),
+    _sop("sop_full_withdrawal_service", "Full-balance withdrawal → service check-in", "retention", "slipping", "A full withdrawal is a churn signal; respond with service, a feedback ask and nothing promotional.",
+         "withdrawal_completed with is_full_balance in the last 3 days (family: FULL_WITHDRAWAL)", "FULL_WITHDRAWAL",
+         [_st(1, "email", "Your withdrawal is complete — anything we should fix?", "Confirmation; 1-question feedback; support; disclaimer.", "10:00")],
+         1, "event_triggered", 1, 20, "feedback_response_rate", "≥ 8%", "complaint_rate", 14, ["complaints > 0"], ["Route 'fees' answers to the fee-tier SOP next month", "Route 'bug' answers to support with the ticket pre-filled"],
+         exclusions=["unsubscribed / DND"], disclaimer=("email",), banned=("promo", "retention_offer"), min_reach=20),
+    _sop("sop_reactivation_90d_plus", "90-day+ reactivation (quarterly, email only)", "winback", "dormant_activated", "Long-dormant users get one quarterly email with own numbers and what changed; nothing else.",
+         "No session in 90+ days, email opt-in, not loss-dormant (family: DORMANT_D90)", "DORMANT_D90",
+         [_st(0, "email", "It has been a while: your account, what changed, how to come back", "Own numbers; features; one CTA; disclaimer.", "10:00")],
+         1, "quarterly", 1, 20, "reactivation_rate_30d", "+1 pp vs holdout", "unsubscribe_rate", 30, ["unsubscribe_rate > 0.8%"], ["Sunset after two ignored quarters", "Regional language variant"], disclaimer=("email",), min_reach=1000),
+    _sop("sop_referral_program", "Referral (two-sided, terms first, not UK)", "competition", "habitual_core", "Invite habitual users to refer; rewards are in-product and compliant; never to UK users.",
+         "Habitual traders with NPS-positive signal or 3+ months tenure (family: HABITUAL_REFERRERS)", "HABITUAL_REFERRERS",
+         [_st(0, "in-app", "Refer a friend: how it works and the terms", "Complete terms; no 'earn money' framing; disclaimer.", "13:00"), _st(7, "email", "Your referrals so far", "Own numbers; terms link.", "09:00", "referral_sent >= 1")],
+         14, "quarterly", 1, 20, "referral_conversion_rate", "≥ 2% of invited refer a converted user", "fraud_flag_rate", 30, ["fraud_flag_rate > 1%", "UK/US recipient → stop"],
+         ["Reward = fee credits, not cash", "Cap rewards per referrer per month"], jurisdictions=["UK", "US"], banned=("incentive_to_uk", "earn_money", "guaranteed"), extra_checks=["jurisdiction", "terms_approved"]),
+    _sop("sop_feature_launch_adoption", "Feature launch → adoption (beta, announce, adopt, habit)", "education", "activated_habitual", "Launch a feature through lifecycle channels with an adoption KPI and an intent-only nudge.",
+         "Target trader states for the feature; beta cohort 1–5% opt-in first (family: FEATURE_TARGET)", "FEATURE_TARGET",
+         [_st(-7, "in-app", "Beta invite (opt-in)", "Invite; instrument feature_used / feature_abandoned.", "13:00"), _st(0, "in-app", "Announce: one job, one screen", "Card to target states; disclaimer if relevant.", "11:00"),
+          _st(0, "email", "How-to for the feature", "Screens + one CTA.", "09:00"), _st(3, "push", "Intent nudge (viewed, not used)", "One most valuable use.", "19:00", "feature screen viewed and feature_used = 0")],
+         14, "once_per_cohort_version", 3, 20, "feature_used_7d_rate", "≥ 15% of exposed", "support_ticket_rate", 30, ["feature_abandoned at one step > 40% → pause and fix"],
+         ["Adopters vs matched non-adopters retention (say 'associated')", "Recap includes the feature's own number at day 14"], min_reach=500),
+    _sop("sop_incident_service_comms", "Incident / status communications", "compliance", "activated_habitual", "Tell affected users before they ask; factual status, ETA, what is unaffected; no marketing for 24h after.",
+         "Users active in the last 24h or with open orders during an incident (family: ACTIVE_24H)", "ACTIVE_24H",
+         [_st(0, "in-app", "Status: what is affected, what is not", "Factual; ETA; support.", "+10m"), _st(0, "push", "Push only if funds/orders affected", "Same facts.", "+15m", "orders or withdrawals affected"), _st(1, "email", "Post-incident summary", "What happened, what changed.", "10:00")],
+         2, "event_triggered", 3, 5, "support_contacts_avoided", "support_ticket_rate ≤ 1.5× baseline", "complaint_rate", 3, ["misleading status → correct within 30 min"],
+         ["Status page link everywhere", "Freeze all promos 24h (autopilot protect)"], exclusions=[], disclaimer=(), banned=("promo",), min_reach=1),
+    _sop("sop_tax_season_explainer", "Tax season explainer (India, 1–15 July)", "education", "activated_habitual", "Explain 30% tax, TDS statements and where to download reports; never tax advice.",
+         "All KYC-approved users with any 2025–26 activity (family: ACTIVE_FY)", "ACTIVE_FY",
+         [_st(0, "email", "Your FY statement and TDS certificate are ready", "Facts; download link; 'consult a tax professional'; disclaimer.", "09:00"), _st(10, "in-app", "Reminder: ITR deadline 31 July", "Factual reminder; link to statement.", "on_open")],
+         15, "monthly", 1, 5, "statement_download_rate", "≥ 30%", "support_ticket_rate", 30, ["misleading tax wording → correct immediately"], ["Budget-day variant (1 Feb) prepared in advance", "March tax-loss education (no advice)"], min_reach=1000),
+    _sop("sop_regime_stress_mode", "Regime stress mode (protect)", "compliance", "slipping", "On capitulation / high-volatility-down: pause acquisition and upsell, tighten caps, one calm service message.",
+         "Everyone; promotional suppression is the action (family: *)", "*",
+         [_st(0, "in-app", "Markets are volatile; trading and withdrawals are normal; risk tools here", "Service tone; no market commentary.", "+30m")],
+         1, "event_triggered", 1, 5, "notification_disable_rate", "≤ baseline", "support_ticket_rate", 3, ["regime back to normal → lift suppression"], ["Business event market_regime_changed", "Support macro in-app"],
+         exclusions=[], disclaimer=("in-app",), banned=("promo", "market", "fomo"), min_reach=0),
+    _sop("sop_vip_concierge_quarterly", "VIP concierge quarterly (human + one email)", "retention", "habitual_core", "Top-value users get a quarterly human check-in and one statement; no campaigns otherwise.",
+         "VHVT / top 100 by 90-day volume (family: VHVT)", "VHVT",
+         [_st(0, "email", "Quarterly statement and a named contact", "Own numbers; direct line; disclaimer.", "09:00")],
+         1, "quarterly", 1, 20, "weekly_active_weeks_12w", "≥ +0.5 vs holdout", "unsubscribe_rate", 90, ["unsubscribe > 0", "complaints > 0"], ["Fee review conversation", "Early access to features (beta SOP)"], disclaimer=("email",), min_reach=20),
+    _sop("sop_weekend_tokenised", "Weekend: markets that stay open (Saturday education)", "education", "habitual_core", "Weekend traders learn that equities/indices/commodities perps trade through the weekend here.",
+         "≥2 weekend fills in 4 weeks, no builder-dex fill yet (family: WEEKEND_TRADERS)", "WEEKEND_TRADERS",
+         [_st(0, "push", "Saturday: gold and SPX are trading here right now", "Fact; 'on CoinDCX'; education CTA.", "11:00", ttl=6)],
+         1, "weekly", 1, 20, "tokenised_first_fill_rate_14d", "+2 pp vs holdout", "notification_disable_rate", 14, ["regime stress → hold"], ["Rotate the featured market by the user's watchlist"],
+         exclusions=DERIV_EXCL, jurisdictions=["UK", "US"], disclaimer=("push_landing",), banned=("forecast", "trade_earnings")),
+    _sop("sop_channel_recovery_push_off", "Channel recovery: push disabled → email/cards", "retention", "activated_habitual", "Users who disabled push move to Cards and a lighter email cadence; win back the channel only with value.",
+         "notification_disabled{push} in the last 30 days, still active (family: PUSH_OFF_ACTIVE)", "PUSH_OFF_ACTIVE",
+         [_st(0, "cards", "Your watchlist today (persistent card)", "Own numbers; no interruption.", "08:00"), _st(7, "email", "Alerts without noise: how to turn on only what matters", "Granular settings explainer; disclaimer.", "09:00")],
+         14, "monthly", 2, 20, "push_reenable_rate_30d", "+3 pp vs holdout", "unsubscribe_rate", 30, ["unsubscribe_rate > 0.4%"], ["Granular notification categories", "Cards-only recap as the default for this cohort"]),
+    _sop("sop_pm_pillar_message_test", "Product marketing: pillar message-market-fit test", "education", "activated_habitual", "Find the lead message per pillar (transparency / control / access / service) per trader state; the winner becomes canonical.",
+         "One trader state at a time (spot-only, first-perp, habitual, tokenised explorer); 20% holdout (family: PM_TEST_STATE)", "PM_TEST_STATE",
+         [_st(0, "in-app", "Pillar lead message (bottom sheet, one job, one CTA)", "Variant per pillar; measure click → feature_used 7d; disclaimer if derivatives.", "13:00"), _st(7, "email", "Winner recap: the feature, the proof point", "Own numbers where possible.", "09:00", "clicked step 0")],
+         14, "monthly", 2, 20, "feature_used_7d_rate", "winner ≥ +3 pp vs next variant", "notification_disable_rate", 21, ["any variant makes a return/leverage claim → stop"],
+         ["Rotate pillar per month", "Record losers in the growth feed so nobody re-tests them", "Regional language variants for hi/te/ta"], min_reach=1000),
+    _sop("sop_asset_spotlight", "Asset spotlight (factual asset push to watchers and sector)", "market", "activated_habitual", "Put one asset in front of the people who follow it or its sector with verifiable facts and a tool — never a recommendation.",
+         "Watchlist/holders of the asset or its sector; active 30d; regime trending_up or chop (family: ASSET_WATCHERS)", "ASSET_WATCHERS",
+         [_st(0, "push", "The fact: listing / volume record / 24h move / product availability", "Time-stamped number; watchlist or alert CTA; TTL 4h.", "11:00", ttl=4), _st(0, "in-app", "Asset page card: what it is, fees, risk", "Education; disclaimer block.", "on_open"),
+          _st(2, "email", "Deep-dive explainer (what it is, how it trades here)", "Education, no outlook; disclaimer footer.", "09:00", "clicked step 0 or 1")],
+         3, "event_triggered", 3, 20, "watchlist_add_rate", "≥ 3% of delivered; first-trade rate read vs holdout", "notification_disable_rate", 14, ["regime stress → blocked", "any 'buy' or forecast wording → stop", "1 spotlight per user per week exceeded → stop"],
+         ["Sector rotation by held symbols", "Tokenised equity spotlight around US after-hours moves", "Commodity spotlight (gold/silver) in high-volatility regimes as education"],
+         exclusions=DERIV_EXCL + ["received a market push today"], banned=("buy", "forecast", "fomo", "listing_pump"), extra_checks=["angle_policy", "ttl"]),
+    _sop("sop_cross_sell_spot_to_perps", "Cross-sell spot → perps (intent-gated, education-first)", "education", "habitual_core", "Habitual spot traders who show perp intent get the education path; no perps promotion to anyone else.",
+         "≥8 spot fills / 4 weeks AND perp screen viewed ≥2× in 14d, 0 perp fills, not UK/US (family: SPOT_HABITUAL_PERP_INTENT)", "SPOT_HABITUAL_PERP_INTENT",
+         [_st(0, "in-app", "Bottom sheet: what a perp is, isolated margin default, 'keep to spot' exit", "Education; disclaimer block.", "13:00"), _st(3, "email", "Funding and liquidation, plainly, with the calculator", "Education; disclaimer.", "10:00", "opened step 0"),
+          _st(7, "in-app", "Hygiene checklist if you start: 1–2x, SL, isolated", "No CTA to trade.", "13:00", "opened step 1")],
+         7, "monthly", 3, 20, "first_perp_trade_rate_30d", "opt-in cohort; liquidation_rate_30d ≤ baseline", "liquidation_rate_30d", 30, ["liquidation_rate_30d treated > holdout", "UK/US recipient → stop"],
+         ["Quiz gate", "Paper-trade demo first"], exclusions=DERIV_EXCL, jurisdictions=["UK", "US"], banned=("leverage_upsell", "size_up", "first_futures_trade_promo"), min_reach=100, extra_checks=["jurisdiction"]),
+    _sop("sop_cross_sell_crypto_to_tokenised", "Cross-sell crypto perps → tokenised equities/indices", "education", "habitual_core", "Habitual crypto-perp traders who trade in US hours or hold equity watchlists learn about 24/7 tokenised markets.",
+         "≥8 perp fills / 4 weeks, ≥30% of fills 19:00–01:30 IST or equity watchlist, 0 builder-dex fills (family: PERP_HABITUAL_US_HOURS)", "PERP_HABITUAL_US_HOURS",
+         [_st(0, "push", "NVDA / SPX / gold trade 24/7 here — same account", "Fact; 'on CoinDCX'; product education CTA.", "18:00", ttl=6), _st(2, "in-app", "How tokenised perps price after hours", "Education; disclaimer block.", "on_open"), _st(5, "email", "Markets list, hours, fees, risks", "Education; disclaimer footer.", "09:00")],
+         7, "monthly", 3, 20, "tokenised_first_fill_rate_14d", "+3 pp vs holdout", "notification_disable_rate", 21, ["regime stress → hold"], ["Earnings-week variant once a calendar source exists", "Commodities variant for high-vol regimes"],
+         exclusions=DERIV_EXCL, jurisdictions=["UK", "US"], banned=("trade_earnings", "forecast", "direction")),
+    _sop("sop_cross_sell_to_commodities", "Cross-sell → commodities perps (gold/silver as education in volatile regimes)", "education", "habitual_core", "During high-volatility regimes, explain how gold/silver/oil perps work to habitual traders; education only.",
+         "Habitual traders (any product) with no commodity fill; regime high_volatility_* (family: HABITUAL_NO_COMMODITY)", "HABITUAL_NO_COMMODITY",
+         [_st(0, "in-app", "Gold and silver perps: how they trade here", "Education; 'on CoinDCX'; disclaimer block.", "13:00"), _st(3, "email", "Commodities primer: hours, funding, risks", "Education; disclaimer footer.", "09:00", "opened step 0")],
+         7, "monthly", 2, 20, "commodity_first_fill_rate_14d", "+2 pp vs holdout", "unsubscribe_rate", 21, ["unsubscribe_rate > 0.4%"], ["Only when commodity movers ≥3%", "Silver/platinum variant"],
+         exclusions=DERIV_EXCL, jurisdictions=["UK", "US"], banned=("safe_haven_claim", "forecast", "direction")),
+    _sop("sop_cross_sell_earn", "Cross-sell → earn / stablecoin products (idle balance, variable APR)", "retention", "habitual_core", "Users with idle balances learn about earn products; APR is variable and never framed as income.",
+         "Idle balance > ₹10k for 14+ days, no earn subscription (family: IDLE_BALANCE)", "IDLE_BALANCE",
+         [_st(0, "email", "Your idle balance and how earn works (variable APR, risks)", "Own numbers; 'variable, not guaranteed'; disclaimer footer.", "09:00"), _st(4, "in-app", "Earn explainer bottom sheet", "One product; risks; disclaimer.", "on_open", "opened step 0")],
+         7, "monthly", 2, 20, "earn_subscription_rate_14d", "+2 pp vs holdout", "unsubscribe_rate", 21, ["any 'guaranteed'/'passive income' wording → stop"], ["Trending_down regime timing", "Stablecoin vs token earn split"],
+         banned=("guaranteed", "passive_income", "yield_as_income")),
+    _sop("sop_cross_sell_recurring_buy", "Cross-sell spot → SIP / recurring buy (habit product)", "activation", "activated_habitual", "Spot traders with irregular buys learn SIP / recurring buy as a habit tool; no asset named by us.",
+         "2–6 spot buys in 60 days, no recurring plan (family: SPOT_IRREGULAR)", "SPOT_IRREGULAR",
+         [_st(0, "in-app", "SIP: set once, from ₹100, pause anytime", "Tool; user picks the asset; disclaimer block.", "13:00"), _st(3, "push", "Salary week: set it up in 20 seconds", "Only 1–7 of the month.", "10:30", "no recurring plan")],
+         7, "monthly", 2, 20, "recurring_plan_rate_14d", "+3 pp vs holdout", "notification_disable_rate", 21, ["notification_disable_rate > 0.3%"], ["DCA education (no advice)", "Amount presets by deposit history"], banned=("asset_recommendation", "forecast")),
+    _sop("sop_bottom_sheet_onboarding_tour", "Bottom-sheet onboarding tour (in-app only, first 3 sessions)", "onboarding", "funded_activated", "New users get one bottom sheet per session for three sessions: deposit, watchlist, first trade — dismissible, never blocking.",
+         "Signed up < 7 days, ≤ 3 sessions (family: NEW_SESSIONS)", "NEW_SESSIONS",
+         [_st(0, "in-app", "Session 1: deposit in 20 seconds (bottom sheet)", "One job; dismiss; disclaimer.", "on_open"), _st(1, "in-app", "Session 2: build a watchlist", "One job.", "on_open", "session_count = 2"), _st(2, "in-app", "Session 3: your first ₹100 trade", "One job; no asset named.", "on_open", "session_count = 3")],
+         7, "event_triggered", 3, 20, "first_trade_rate_7d", "+3 pp vs holdout", "session_abandon_rate", 14, ["session_abandon_rate up > 20% → stop"], ["Skip a step already completed", "Regional language sheets"],
+         exclusions=["KYC pending"], disclaimer=("in-app",), min_reach=300),
+    _sop("sop_whatsapp_utility_journey", "WhatsApp utility journey (opted-in users, templates only)", "onboarding", "verified_funded", "For WhatsApp-opted-in users, run the deposit and KYC help journey on approved utility templates; no marketing templates.",
+         "WhatsApp opt-in, KYC approved, no deposit (family: WA_OPTIN_NODEP)", "WA_OPTIN_NODEP",
+         [_st(0, "whatsapp", "Account ready: deposit steps (utility template)", "Approved template; steps; support.", "12:00"), _st(3, "whatsapp", "Deposit help / failure recovery", "Utility; alternatives.", "12:30", "deposit_initiated without completed"), _st(6, "whatsapp", "Withdrawals are instant — the common worry", "Utility tone; facts.", "12:00", "still no deposit")],
+         8, "event_triggered", 2, 10, "first_deposit_rate_7d", "+2 pp vs email-only holdout", "opt_out_rate", 14, ["opt_out_rate > 1%", "template rejected → stop"], ["Hindi templates", "Voice-note style short copy"],
+         disclaimer=("whatsapp",), banned=("promo_template",), extra_checks=["channel_templates_approved"]),
+    _sop("sop_email_education_series", "Email education series (5 parts, weekly)", "education", "activated_habitual", "A five-part weekly series: fees & TDS, alerts, watchlists, risk basics, reading a statement. Opt-in, unsubscribe any time.",
+         "Email opt-in, active 30d, not in another series (family: EMAIL_LEARNERS)", "EMAIL_LEARNERS",
+         [_st(0, "email", "Part 1: fees and TDS", "Transparency; disclaimer.", "09:00"), _st(7, "email", "Part 2: alerts", "Tool.", "09:00"), _st(14, "email", "Part 3: watchlists", "Tool.", "09:00"), _st(21, "email", "Part 4: risk basics", "Education; derivatives disclaimer block.", "09:00"), _st(28, "email", "Part 5: reading your statement", "Own numbers.", "09:00")],
+         35, "once_per_cohort_version", 1, 20, "sessions_per_week", "+0.2 vs holdout", "unsubscribe_rate", 42, ["unsubscribe_rate > 0.4% on any part → pause series"], ["Cards mirror of each part", "Regional language series"], disclaimer=("email",), min_reach=2000),
+    _sop("sop_push_alert_digest", "Push alert digest (own assets, once a day max)", "retention", "activated_habitual", "One daily push at most that bundles the user's own alerts and watchlist moves; replaces multiple pings.",
+         "Alert-setters and watchlist users with ≥3 tracked assets (family: WATCHLIST_HEAVY)", "WATCHLIST_HEAVY",
+         [_st(0, "push", "Your day: 3 assets moved >5%, 1 alert hit", "Own numbers; one screen; TTL 4h.", "19:00", ttl=4)],
+         1, "weekly", 5, 20, "session_rate_after_digest", "+5 pp vs individual pushes", "notification_disable_rate", 14, ["notification_disable_rate > 0.2%"], ["Cards version for push-off users", "Threshold personalised to volatility"],
+         exclusions=DERIV_EXCL + ["received a market push today"], disclaimer=("push_landing",), banned=("forecast", "direction"), extra_checks=["ttl"]),
+    _sop("sop_category_explorer", "Category explorer (viewed a category, no trade) → guided first step", "activation", "activated_habitual", "Users who browse a category (spot / perps / tokenised / earn) without acting get one guided, compliant first step for that category.",
+         "≥3 views of one category screen in 7 days, 0 actions in it (family: CATEGORY_INTENT)", "CATEGORY_INTENT",
+         [_st(0, "in-app", "Bottom sheet for the category: what it is, first step, risks", "Category-specific; derivatives → education path only; disclaimer.", "on_open"), _st(3, "push", "The one tool for that category (watchlist / calculator / plan)", "Fact + tool.", "19:00", "still no action")],
+         5, "event_triggered", 2, 20, "category_first_action_rate_7d", "+3 pp vs holdout", "notification_disable_rate", 14, ["derivatives category to UK/US → stop"], ["Per-category copy bank", "Intent decay: stop after 7 days"],
+         exclusions=DERIV_EXCL, banned=("leverage_upsell", "asset_recommendation"), extra_checks=["jurisdiction"]),
+]
+
 def init_sop_tables() -> None:
     conn = get_db()
     conn.execute("""CREATE TABLE IF NOT EXISTS sops (id TEXT PRIMARY KEY, name TEXT, campaign_type TEXT, spec_json TEXT, source TEXT, version INTEGER DEFAULT 1, active INTEGER DEFAULT 1,
@@ -138,12 +357,11 @@ def init_sop_tables() -> None:
     conn.execute("""CREATE TABLE IF NOT EXISTS sop_runs (id INTEGER PRIMARY KEY AUTOINCREMENT, sop_id TEXT, segment_name TEXT, segment_id TEXT, start_date TEXT, status TEXT DEFAULT 'proposed',
                     proposal_ids TEXT, checks_json TEXT, notes TEXT, created_by TEXT, created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP, updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP)""")
     conn.commit()
-    n = conn.execute("SELECT COUNT(*) FROM sops").fetchone()[0]
-    if n == 0:
-        for s in LIBRARY:
-            conn.execute("INSERT OR IGNORE INTO sops (id, name, campaign_type, spec_json, source, version) VALUES (?,?,?,?,?,?)", (s["id"], s["name"], s["campaign_type"], json.dumps(s), "library", 1))
-        conn.commit()
-    conn.close()
+    have = {r["id"] for r in conn.execute("SELECT id FROM sops").fetchall()}
+    for spec in LIBRARY:
+        if spec["id"] not in have:
+            conn.execute("INSERT OR IGNORE INTO sops (id, name, campaign_type, spec_json, source, version) VALUES (?,?,?,?,?,?)", (spec["id"], spec["name"], spec["campaign_type"], json.dumps(spec), "library", 1))
+    conn.commit(); conn.close()
 
 
 def list_sops(include_inactive: bool = False) -> List[Dict[str, Any]]:
@@ -413,3 +631,48 @@ def midflight_checks() -> Dict[str, Any]:
         out.append({"run": r["id"], "status": status, "flags": flags})
     conn.commit(); conn.close()
     return {"runs": out}
+
+
+TRADER_STATES = ["Spot-only", "First-perp", "Leverage climber", "Habitual perp", "Hedger", "Liquidated (14d)", "Loss-dormant", "Tokenised explorer", "New (no deposit)", "Dormant 30–90d", "Core / VIP"]
+CHANNEL_INFO = {
+    "push": {"formats": ["standard", "rich (image)", "carousel"], "limits": "1/day, 4/week; quiet hours 22:00–08:00 IST; market-linked TTL ≤ 4h", "compliance": "cannot carry the ASCI disclaimer → landing screen must; no promo push to India users without it"},
+    "email": {"formats": ["statement", "explainer", "digest", "series"], "limits": "1/day, 3/week; unsubscribe link mandatory", "compliance": "disclaimer footer; UK risk warning if any UK user"},
+    "whatsapp": {"formats": ["utility template", "marketing template (opt-in only)"], "limits": "1/day, 2/week; 10:00–21:00 IST; approved templates only", "compliance": "opt-in; template body carries disclaimer for marketing"},
+    "sms": {"formats": ["DLT template"], "limits": "1/week; 10:00–21:00 IST", "compliance": "DLT registration; transactional vs promotional headers"},
+    "in-app": {"formats": ["bottom sheet", "card", "full-screen", "nudge/tooltip", "survey"], "limits": "2/day, 6/week; never blocks trading; dismissible", "compliance": "disclaimer block on derivatives content; no bottom sheets during order flow"},
+    "cards": {"formats": ["inbox card (persistent)", "digest"], "limits": "1/day, 7/week", "compliance": "same as in-app"},
+}
+STATE_RULES = {
+    "Spot-only": {"purpose": ["alerts", "watchlist", "SIP / recurring buy", "fees/TDS", "education (spot)", "perp education only on intent"], "avoid": ["perps promotion", "leverage", "asset recommendation"], "sops": ["sop_first_week_habit", "sop_cross_sell_recurring_buy", "sop_push_alert_digest", "sop_category_explorer"]},
+    "First-perp": {"purpose": ["position hygiene", "funding explainer", "SL/TP tools", "isolated margin"], "avoid": ["size-up", "leverage upsell", "competitions"], "sops": ["sop_first_perp_hygiene", "sop_funding_crowding_nudge"]},
+    "Leverage climber": {"purpose": ["risk education", "personal max-loss scenarios"], "avoid": ["any encouragement", "market pushes"], "sops": ["sop_leverage_climber_risk", "sop_macro_print_brief"]},
+    "Habitual perp": {"purpose": ["fee tiers", "funding digest", "OI/funding notes", "tokenised cross-sell", "macro briefs"], "avoid": ["P&L leaderboards", "promos in stress regimes"], "sops": ["sop_fee_tier_nudge", "sop_cross_sell_crypto_to_tokenised", "sop_oi_crowding_note", "sop_macro_print_brief"]},
+    "Hedger": {"purpose": ["portfolio views", "basis/funding tools", "hedge education"], "avoid": ["direction talk"], "sops": ["sop_hedger_education"]},
+    "Liquidated (14d)": {"purpose": ["service card", "plain explainer", "tools", "support"], "avoid": ["every promo", "market pushes", "competitions", "referral"], "sops": ["sop_liquidation_recovery"]},
+    "Loss-dormant": {"purpose": ["service", "statement", "education"], "avoid": ["promos", "market content", "offers"], "sops": ["sop_loss_dormant_service"]},
+    "Tokenised explorer": {"purpose": ["after-hours facts", "24/7 education", "earnings-week risk notes (once a calendar exists)"], "avoid": ["'trade earnings'", "forecasts"], "sops": ["sop_tokenised_after_hours", "sop_weekend_tokenised", "sop_asset_spotlight"]},
+    "New (no deposit)": {"purpose": ["deposit path", "objection removal", "failure recovery", "KYC help"], "avoid": ["bonuses by default", "market content"], "sops": ["sop_verified_to_funded", "sop_deposit_failure_recovery", "sop_kyc_completion", "sop_bottom_sheet_onboarding_tour", "sop_whatsapp_utility_journey"]},
+    "Dormant 30–90d": {"purpose": ["cause-matched win-back", "habit tool re-entry"], "avoid": ["blasts in stress regimes", "offers to lossy users"], "sops": ["sop_dormant_by_cause", "sop_friction_dormant_fixed", "sop_market_dormant_return"]},
+    "Core / VIP": {"purpose": ["monthly statement", "concierge", "early access", "fee review"], "avoid": ["more than 4 touches/week", "generic promos"], "sops": ["sop_hvt_retention", "sop_vip_concierge_quarterly", "sop_feature_launch_adoption"]},
+}
+
+
+def channel_matrix() -> Dict[str, Any]:
+    """What can be done for each user state on each channel: purposes, formats, caps, compliance and the SOPs that implement it."""
+    from .guardrails import limits
+    L = limits()
+    rows = []
+    for st in TRADER_STATES:
+        r = STATE_RULES.get(st, {})
+        cells = {}
+        for ch, info in CHANNEL_INFO.items():
+            cap = (L.get("per_user") or {}).get(ch, {})
+            allowed = True
+            note = ""
+            if st in ("Liquidated (14d)", "Loss-dormant") and ch in ("push", "sms", "whatsapp"):
+                allowed = ch == "push" and st == "Liquidated (14d)"; note = "service only" if allowed else "not used for this state"
+            if st == "Core / VIP":
+                note = "fewest messages of any state"
+            cells[ch] = {"allowed": allowed, "cap": f"{cap.get('per_day', '—')}/day · {cap.get('per_week', '—')}/week", "formats": info["formats"], "note": note}
+        rows.append({"state": st, "purposes": r.get("purpose", []), "avoid": r.get("avoid", []), "sops": r.get("sops", []), "channels": cells})
+    return {"states": rows, "channels": CHANNEL_INFO, "limits_source": "comms_limits (stage overrides and regime multipliers apply on top)"}

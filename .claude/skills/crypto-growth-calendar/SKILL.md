@@ -14,7 +14,7 @@ Timing is a lever as large as copy. Every entry below is a scheduling rule the a
 - **Best Time to Send** in MoEngage for non-urgent sends; **never** for market-linked (they carry a TTL).
 
 ## Weekly rhythm
-- Weekend crypto volume drops 20–40%; weekend movers are often thin — hooks require ≥ $1M volume. Tokenised equities/indices on Hyperliquid **trade through the weekend** — a genuine weekend feature to educate on (Saturday 11:00 IST).
+- Weekend crypto volume drops 20–40%; weekend movers are often thin — hooks require ≥ $1M volume. Tokenised equities/indices on CoinDCX **trade through the weekend** — a genuine weekend feature to educate on (Saturday 11:00 IST).
 - **Friday 13:30 IST (08:00 UTC)**: Deribit weekly/monthly options expiry — volatility pocket; risk-education timing. Last Friday of the month is the big one; quarterly (Mar/Jun/Sep/Dec last Friday) larger still, plus CME futures expiry.
 - Monday 09:00 IST: weekly review; Sunday 19:00 IST: user weekly recap.
 
@@ -33,9 +33,9 @@ Timing is a lever as large as copy. Every entry below is a scheduling rule the a
 - **1 Feb** Budget · **31 Jul** ITR deadline (crypto tax explainer campaign 1–15 Jul; TDS statements) · **Mar** tax-loss/harvesting season (education, no advice) · **Diwali / Muhurat** (equities tradition; a "markets that never close" tokenised-perp educational moment, festival greetings without offers to loss-dormant users) · **Salary week (1–7)**: deposit propensity peaks — deposit-friction and recurring-buy campaigns land best 2–6 of the month · **Exam/holiday seasons**: lower engagement, do not read as churn.
 
 ## US equity calendar for tokenised perps
-- Regular hours 19:00–01:30 IST (18:30–01:00 in US DST); pre/post market moves show up on Hyperliquid first — the core educational hook for builder-dex assets.
+- Regular hours 19:00–01:30 IST (18:30–01:00 in US DST); pre/post market moves show up in our 24/7 markets first — the core educational hook for builder-dex assets.
 - **Earnings season** (mid-Jan, mid-Apr, mid-Jul, mid-Oct, ~4 weeks each): for users holding/watching a name, T−1d alert ("NVDA reports after US close; expect a larger move") with risk tools; never a trade suggestion. Requires an earnings source (Finnhub key optional in Settings) — until configured, the agent should say so rather than guess dates.
-- **US market holidays** (NYSE closed): tokenised perps keep trading — a factual education send in the morning IST.
+- **US market holidays** (NYSE closed): tokenised perps keep trading on CoinDCX — a factual education send in the morning IST.
 
 ## How the agent uses this
 - `autopilot` mission timing: ride_the_market only inside 08:00–21:00 IST unless the hook is a service message; protect runs immediately on regime flips.

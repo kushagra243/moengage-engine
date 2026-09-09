@@ -57,6 +57,8 @@ from .plans import init_plan_tables
 init_plan_tables()
 from .selfheal import init_selfheal_tables
 init_selfheal_tables()
+from .llm.usage import init_usage_tables
+init_usage_tables()
 _migrated = migrate_plaintext_secrets()
 if _migrated:
     logging.getLogger("moengage").info("encrypted %d legacy plaintext secret(s)", _migrated)
@@ -694,7 +696,8 @@ def agent_context():
             "llm_configured": bool(cfg["api_key"]) or cfg["provider"] == "claude_cli",
             "by_urgency": rep.get("by_urgency", {}), "top_issues": [{"headline": e.get("headline"), "urgency": e.get("urgency")} for e in top],
             "pending_approvals": len(approvals.list_proposals(status="pending")), "new_ideas": growth.counts().get("new", 0),
-            "last_run": (latest or {}).get("created_at"), "last_summary": ((latest or {}).get("summary") or "")[:220], "days_of_history": snapshot_count(moe.mode)}
+            "last_run": (latest or {}).get("created_at"), "last_summary": ((latest or {}).get("summary") or "")[:220], "days_of_history": snapshot_count(moe.mode),
+            "tokens_today": (lambda u: {"prompt": u["today"]["prompt_tokens"], "completion": u["today"]["completion_tokens"], "cost_usd": u["today"]["cost_usd"], "calls": u["today"]["calls"]})(__import__("backend.llm.usage", fromlist=["summary"]).summary(1))}
 
 
 @app.get("/api/agent/history")
@@ -833,6 +836,12 @@ def sops_list():
     return {"sops": sops.list_sops(include_inactive=True), "runs": sops.list_runs(20), "types": list(sops.CAMPAIGN_TYPES)}
 
 
+@app.get("/api/sops/matrix")
+def sops_matrix():
+    from . import sops
+    return sops.channel_matrix()
+
+
 @app.post("/api/sops/define")
 def sops_define(payload: SopSpec, request: Request):
     from . import sops
@@ -941,6 +950,12 @@ def plans_create(payload: PlanSpec, request: Request):
     if not r.get("ok"):
         raise HTTPException(400, r.get("error", "invalid plan"))
     return r
+
+
+@app.get("/api/llm/usage")
+def llm_usage(days: int = 7):
+    from .llm.usage import summary
+    return summary(days)
 
 
 @app.get("/api/selfheal")

@@ -78,6 +78,21 @@ latency. The top strip shows `llm claude-sonnet-5`.
 If you would rather use an API key: Settings → LLM → provider `openrouter`,
 paste the key, pick a model, *Test LLM*. Nothing else changes.
 
+### No Claude CLI? Use an OpenRouter key instead
+
+Everything works identically with a key and no Claude Code install:
+
+```bash
+./setup.sh --openrouter        # or, on an existing install: ./cli.py set llm_provider openrouter
+```
+
+then in the console **Settings → LLM**: provider `openrouter`, paste the key
+into *API key*, *Load models* to pick one (default `anthropic/claude-sonnet-4.5`),
+*Test LLM*. Any OpenAI-compatible endpoint works the same way with provider
+`openai_compatible` and its base URL (OpenAI, Groq, Together, or a local
+Ollama / LM Studio server with an empty key). The provider can be switched
+at any time; tools, approvals and redaction are unchanged.
+
 ## 4. Connect MoEngage (paste once)
 
 1. Log in to your MoEngage dashboard in Chrome.

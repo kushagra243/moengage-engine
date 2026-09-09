@@ -48,12 +48,20 @@ def cmd_set_key(a):
     v = a.value or getpass.getpass(f"{a.kind} key (hidden): ")
     set_setting(k, v)
     print(f"saved {k} (encrypted)")
+    if a.kind == "llm":
+        from backend.llm.provider import reconcile_llm_settings
+        for kk, vv in reconcile_llm_settings({"llm_api_key"}).items():
+            print(f"  adjusted {kk} → {vv}")
 
 
 def cmd_set(a):
     if not a.key.startswith(("moengage_", "llm_", "market_", "schedule_", "refresh_", "mock_mode")):
         sys.exit("refusing unknown setting")
     set_setting(a.key, a.value)
+    if a.key in ("llm_provider", "llm_model", "llm_base_url"):
+        from backend.llm.provider import reconcile_llm_settings
+        for k, v in reconcile_llm_settings({a.key}).items():
+            print(f"  adjusted {k} → {v}")
     print(f"{a.key} = {a.value if 'key' not in a.key and 'cookie' not in a.key else '<hidden>'}")
 
 

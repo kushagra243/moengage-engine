@@ -509,3 +509,17 @@ tr.urg-act_today td:first-child { box-shadow: inset 3px 0 0 var(--bad); } tr.urg
 .fstage.better { border-color: rgba(52,211,153,.45); } .fstage.better .d { color: var(--ok); }
 .rec.first { border-color: var(--accent); }
 tr.secondary td { opacity: .6; }
+
+/* ── width discipline: nothing stretches past a readable line length ─────── */
+.content > .tab { max-width: 1560px; margin: 0 auto; }
+#tab-agent .chat-layout { max-width: 1040px; margin: 0 auto; }
+.chat-log { min-height: 200px; }
+.ctx-strip { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 6px; margin: 8px 0; }
+.ctx-strip .m { background: var(--panel); border: 1px solid var(--line); border-radius: var(--r); padding: 6px 9px; min-width: 0; }
+.ctx-strip .m .k { font-size: 10px; text-transform: uppercase; letter-spacing: .06em; color: var(--dim); }
+.ctx-strip .m .v { font-family: var(--mono); font-size: 13px; margin-top: 2px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.ctx-issues { display: flex; flex-direction: column; gap: 4px; margin-bottom: 8px; }
+.ctx-issues .row-i { font-size: 12px; display: flex; gap: 8px; align-items: center; }
+.quick.compact { margin: 6px 0 10px; }
+.msg .bubble { max-width: 100%; }
+@media (min-width: 1700px) { .grid-5 { grid-template-columns: repeat(5, minmax(0, 1fr)); } }

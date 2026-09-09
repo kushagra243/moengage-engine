@@ -1352,6 +1352,15 @@ def _index_html(name: str = os.path.join("terminal", "index.html")) -> str:
     return html.replace("<head>", "<head>" + tag, 1) if "<head>" in html else tag + html
 
 
+@app.middleware("http")
+async def _no_cache_static(request: Request, call_next):
+    """Static assets and the shell are revalidated on every load, so a restart never leaves a browser on an old terminal.js."""
+    resp = await call_next(request)
+    if request.url.path.startswith("/static/") or request.url.path in ("/", "/terminal"):
+        resp.headers["Cache-Control"] = "no-cache, must-revalidate"
+    return resp
+
+
 if os.path.exists(FRONTEND_DIR):
     app.mount("/static", StaticFiles(directory=FRONTEND_DIR), name="static")
 

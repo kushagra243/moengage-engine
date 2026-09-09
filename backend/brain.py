@@ -148,7 +148,7 @@ def _stats(mode, pend, exps, running, read, days, an, ctx, ci, ideas_new) -> Dic
                   {"k": "SURGES / 24H", "v": str(len(surges)), "sub": f"{sum(1 for s in surges if s.get('we_list_it'))} on pairs we list", "c": "#ffb84d"},
                   {"k": "ACTIONS", "v": str(len(acts)), "sub": f"{sum(1 for a in acts if a.get('priority', 0) >= 80)} priority", "c": "#ff5c9e" if any(a.get('priority', 0) >= 80 for a in acts) else "#6fe3ff"},
                   {"k": "INR-SPOT SHARE", "v": f"{ours.get('share_of_tracked_inr_spot_pct', '—')}%" if ours.get('share_of_tracked_inr_spot_pct') is not None else "—", "sub": "own INR markets vs tracked", "c": "#4dffa8"},
-                  {"k": "LISTING GAPS", "v": str(len(ci.get("listing_gaps") or [])), "sub": "pairs they have, we don't", "c": "#eaf7fc"}],
+                  {"k": "LISTING GAPS", "v": str(len(ci.get("listing_gaps") or [])), "sub": "pairs they have, we don't · benchmarks below", "c": "#eaf7fc"}],
         "ideas": [{"k": "IDEAS", "v": str(ideas_new), "sub": "new in feed", "c": "#eaf7fc"}, {"k": "HACKS", "v": str(len(hacks_mod.LIBRARY)), "sub": "sourced tactics", "c": "#6fe3ff"},
                   {"k": "PROPOSED", "v": str(growth.counts().get("proposed", 0)), "sub": "turned into proposals", "c": "#4dffa8"}, {"k": "SAVED", "v": str(growth.counts().get("saved", 0)), "sub": "kept by the team", "c": "#eaf7fc"},
                   {"k": "DATA ASKS", "v": str(len(datarequests.list_requests("open"))), "sub": "open requests", "c": "#ffb84d"}],

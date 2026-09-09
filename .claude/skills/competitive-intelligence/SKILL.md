@@ -11,6 +11,14 @@ description: How CoinDCX reads and acts on competitor data — which venues are 
 - **Signals**: INR-spot share table · pair battles (our share per pair vs each venue) · surges (≥ `competitor_surge_pct`, ≥ `competitor_surge_min_usd`) · listing gaps (they have it, we don't) · our edges (we lead by 1.5× or more) · funding edges on shared perps.
 - **Honesty**: volumes are self-reported and vary in quality; USDT/perps volumes are not "ours" for share; CoinGecko pages carry only the top 100 tickers. Say which bucket a number comes from.
 
+## Category benchmarks (`competitor_benchmarks`, Intel → Best in industry)
+Four categories, each with India and international leaders and our gap multiple:
+- **Spot**: Binance, OKX, Bybit, Coinbase, Kraken, KuCoin, Gate, MEXC, HTX, Bitget (intl); CoinDCX, WazirX, ZebPay, Giottus, KoinBX, Unocoin (India). Source: CMC listing (24h volume, markets, fees, traffic).
+- **Perps**: Binance, OKX, Bybit, Bitget, Gate, MEXC, KuCoin, Kraken, HTX, Hyperliquid (intl); Delta Exchange India (direct tickers). Pair-level from Binance futures, OKX swaps, Bitget futures, Bybit linear. Ours = liquidity-venue reference, labelled.
+- **Options**: Deribit, Binance, Bybit, OKX (intl); Delta India (direct). Ours unknown until the team names a source.
+- **Commodities / tokenised**: Bybit, Bitget, OKX, Gate RWA symbols (gold, silver, oil, indices, tokenised stocks) vs our builder-dex markets (reference).
+`targets` translate the gap into numbers: daily volume needed to match the India leader and the global leader, a first step to 25 % of the leader, and the leader's top pairs where we are furthest behind (with the SOP to run or "not listed here" for product). Trends: a daily row per venue/category is kept 120 days.
+
 ## Actions and owners
 | type | trigger | owner | what happens | SOP |
 |---|---|---|---|---|

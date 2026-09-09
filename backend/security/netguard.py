@@ -110,6 +110,7 @@ MARKET_HOSTS = [
     "api.dexscreener.com", "api.geckoterminal.com",          # web3: trending pools / token profiles (public, keyless)
     "api.india.delta.exchange", "api.delta.exchange", "api.wazirx.com", "api.bybit.com",   # competitive intelligence: public tickers (keyless)
     "api.coinmarketcap.com",                                                                 # CMC public data-api: exchange market pairs / listings (keyless)
+    "eapi.binance.com", "api.bitget.com", "www.deribit.com",                                 # category benchmarks: Binance options, Bitget futures, Deribit options (keyless)
 ]
 
 _sessions: Dict[str, GuardedSession] = {}

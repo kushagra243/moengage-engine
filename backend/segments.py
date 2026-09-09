@@ -120,7 +120,21 @@ def resolve(name_or_family: str) -> Optional[Dict[str, Any]]:
     fam = decode(name_or_family)["family"]
     cands = [r for r in rows if r["family"] == fam]
     if not cands:
-        return None
+        # closest family: same leading code and at least half of the codes in common (e.g. DORMANT_D30_D90 → DORMANT_D60_LOWPROP)
+        want = fam.split("_")
+        scored = []
+        for r in rows:
+            have = (r["family"] or "").split("_")
+            if not have or have[0] != want[0]:
+                continue
+            common = len(set(want) & set(have))
+            if common >= max(1, len(want) // 2):
+                scored.append((common, r))
+        if not scored:
+            return None
+        scored.sort(key=lambda t: (t[0], t[1].get("version") or "", t[1].get("first_seen") or ""), reverse=True)
+        best = dict(scored[0][1]); best["closest_match_for"] = fam
+        return best
     cands.sort(key=lambda r: (r.get("version") or "", r.get("first_seen") or ""), reverse=True)
     return cands[0]
 

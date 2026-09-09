@@ -98,6 +98,21 @@ def run(max_actions: int = 3, force: bool = False) -> Dict[str, Any]:
         return {"enabled": True, "actions": [], "note": "no model configured; autopilot needs a model (free bulk tier is enough)"}
     budget = max_actions
 
+    # 0. self-heal: engine errors become code-change proposals
+    try:
+        if budget > 0 and get_setting("devagent_enabled", "true").lower() == "true":
+            from .selfheal import health_report
+            hr = health_report(run_tests=False)
+            fixes = [f for f in hr.get("fix_requests", []) if f.get("signature") != "tests"]
+            if fixes:
+                target = "errors:" + ",".join(sorted(f["signature"] for f in fixes[:4]))
+                if not _done_today("self_heal", target) and not _pending_for("Fix "):
+                    prompt = (f"MISSION self_heal. The engine reports status '{hr['status']}' with {len(fixes)} fix request(s). Call self_diagnose, then for the top 2 requests call propose_code_change with the exact fix_request text "
+                              f"(scope backend, draft_now true). Do not change behaviour beyond the fix; each change must add a regression test. Summarise what was filed and what the operator should approve.")
+                    results.append(_run_mission(agent, "self_heal", target, prompt)); budget -= 1
+    except Exception as ex:
+        results.append({"mission": "self_heal", "outcome": "error", "detail": redact(str(ex))[:200]})
+
     # 1. stop the bleed
     try:
         rep = anomaly_report()

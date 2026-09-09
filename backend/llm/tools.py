@@ -28,7 +28,13 @@ def _safe(fn: Callable[..., Any]) -> Callable[..., Dict[str, Any]]:
             out = fn(**kw)
             return out if isinstance(out, dict) else {"result": out}
         except Exception as e:
-            return {"error": redact(str(e)), "error_type": type(e).__name__}
+            sig = ""
+            try:
+                from ..selfheal import record_error
+                sig = record_error("tool", fn.__name__, e, kw)
+            except Exception:
+                pass
+            return {"error": redact(str(e)), "error_type": type(e).__name__, "error_signature": sig, "self_repair": "call self_diagnose, then propose_code_change with the fix_request for this signature"}
     return wrapper
 
 
@@ -558,6 +564,22 @@ def flight_plans(month: Optional[str] = None, plan_id: Optional[int] = None) -> 
     return {"plans": plans.list_plans(month), "summary": plans.month_summary(month)}
 
 
+def self_diagnose(run_tests: bool = False) -> Dict[str, Any]:
+    """Health report of the engine itself: grouped tool errors (48h), failed scheduler steps, failed proposals, server-log tracebacks, optional test run, and ready-to-file fix requests for propose_code_change."""
+    from ..selfheal import health_report
+    return health_report(run_tests=run_tests)
+
+
+def rollback_last_change(reason: str = "requested by operator") -> Dict[str, Any]:
+    """Revert the last merged code change (git revert of the merge commit) and restart. Use only when the operator asks or a merged change is clearly broken."""
+    from ..selfheal import rollback_last_merge
+    from .. import devagent
+    r = rollback_last_merge(reason)
+    if r.get("ok") and devagent.RESTART:
+        r["restart_scheduled"] = devagent.schedule_restart()
+    return r
+
+
 def _capture_proposal_idea(kind: str, title: str, payload: Dict[str, Any], rationale: str, proposal_id: int) -> None:
     try:
         from .. import growth
@@ -623,6 +645,8 @@ TOOL_SCHEMAS: List[Dict[str, Any]] = [
     _fn("record_ideas", "Capture every recommendation you make (campaign, segment, experiment, growth hack, fix) into the persistent growth feed so nothing is lost. ideas: [{title, kind: trending_campaign|growth_hack|market_play|moengage_activity|fix, why (cite data), how (MoEngage steps), segment, channel, angle, kpi, transition, effort, expected_impact, priority}].",
         {"ideas": {"type": "array", "items": OBJ}}, ["ideas"]),
     _fn("propose_pause_campaign", "Propose pausing a campaign (e.g. deliverability collapse or market suppression rule).", {"campaign_id": STR, "rationale": STR}, ["campaign_id", "rationale"]),
+    _fn("self_diagnose", "Diagnose the engine itself: grouped tool errors, failed jobs/proposals, log tracebacks, optional test run, with ready-to-file fix requests. Call whenever a tool returned an error or a job failed; then propose_code_change with the fix_request.", {"run_tests": {"type": "boolean"}}),
+    _fn("rollback_last_change", "Revert the last merged code change and restart (only when asked, or when the change is clearly broken).", {"reason": STR}),
     _fn("north_star", "The north star sentence, current communication limits and this month's flight-plan coverage. Read before planning."),
     _fn("set_north_star", "Replace the north star sentence (only when the team asks).", {"text": STR}, ["text"]),
     _fn("comms_limits", "Global hard per-user communication limits (channel × per day/week, stage overrides, regime multipliers) and effective caps for a regime/stage.", {"regime": STR, "stage": STR}),
@@ -664,6 +688,7 @@ TOOLS: Dict[str, Callable[..., Dict[str, Any]]] = {
     "propose_flow": _safe(propose_flow), "propose_pause_campaign": _safe(propose_pause_campaign),
     "moengage_api_reference": _safe(moengage_api_reference), "moengage_api_read": _safe(moengage_api_read), "skill": _safe(skill),
     "remember_guidance": _safe(remember_guidance), "set_engine_setting": _safe(set_engine_setting), "propose_code_change": _safe(propose_code_change),
+    "self_diagnose": _safe(self_diagnose), "rollback_last_change": _safe(rollback_last_change),
     "north_star": _safe(north_star), "set_north_star": _safe(set_north_star), "comms_limits": _safe(comms_limits), "set_comms_limits": _safe(set_comms_limits), "peace_index": _safe(peace_index),
     "guardrail_monitor": _safe(guardrail_monitor), "write_flight_plan": _safe(write_flight_plan), "flight_plans": _safe(flight_plans),
     "segment_study": _safe(segment_study), "define_nomenclature": _safe(define_nomenclature), "list_sops": _safe(list_sops), "sop_detail": _safe(sop_detail), "define_sop": _safe(define_sop), "run_sop": _safe(run_sop), "sop_runs": _safe(sop_runs),

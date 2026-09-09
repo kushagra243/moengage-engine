@@ -42,6 +42,29 @@ def main():
         import fastapi, uvicorn, cryptography, feedparser  # noqa
     except ImportError:
         subprocess.check_call([VPY, "-m", "pip", "install", "-q", "-r", REQ])
+    # self-repair: if the code no longer imports (e.g. a merged agent change broke it), revert that merge and try again
+    chk = subprocess.run([VPY, "-c", "import sys; sys.path.insert(0, %r); import backend.main" % ROOT], cwd=ROOT, capture_output=True, text=True, env={**os.environ, "MOE_IMPORT_CHECK": "1"})
+    if chk.returncode != 0:
+        print("[!] backend failed to import:\n" + chk.stderr[-1200:])
+        lm_path = os.path.join(ROOT, "data", "last_merge.json")
+        if os.path.exists(lm_path):
+            try:
+                import json as _json
+                lm = _json.load(open(lm_path))
+                if not lm.get("rolled_back"):
+                    print("[*] rolling back the last agent code change %s" % lm.get("post_commit"))
+                    r = subprocess.run(["git", "revert", "--no-edit", "-m", "1", lm["post_commit"]], cwd=ROOT, capture_output=True, text=True)
+                    if r.returncode == 0:
+                        lm["rolled_back"] = True; lm["rollback_reason"] = "import failure at startup"; _json.dump(lm, open(lm_path, "w"))
+                        chk = subprocess.run([VPY, "-c", "import sys; sys.path.insert(0, %r); import backend.main" % ROOT], cwd=ROOT, capture_output=True, text=True, env={**os.environ, "MOE_IMPORT_CHECK": "1"})
+                        print("[*] rollback " + ("succeeded; starting the previous version" if chk.returncode == 0 else "did not fix the import; see the error above"))
+                    else:
+                        subprocess.run(["git", "revert", "--abort"], cwd=ROOT, capture_output=True)
+                        print("[!] automatic rollback failed: " + r.stderr[-400:])
+            except Exception as e:
+                print("[!] rollback error: %s" % e)
+        if chk.returncode != 0:
+            sys.exit(1)
     import uvicorn
     port = int(os.environ.get("PORT", "8080"))
     while not port_free(port):

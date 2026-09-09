@@ -55,6 +55,8 @@ from .sops import init_sop_tables
 init_segment_tables(); init_sop_tables()
 from .plans import init_plan_tables
 init_plan_tables()
+from .selfheal import init_selfheal_tables
+init_selfheal_tables()
 _migrated = migrate_plaintext_secrets()
 if _migrated:
     logging.getLogger("moengage").info("encrypted %d legacy plaintext secret(s)", _migrated)
@@ -938,6 +940,22 @@ def plans_create(payload: PlanSpec, request: Request):
     r = plans.create_plan(payload.spec, author=request_actor(request))
     if not r.get("ok"):
         raise HTTPException(400, r.get("error", "invalid plan"))
+    return r
+
+
+@app.get("/api/selfheal")
+def selfheal_view(run_tests: bool = False):
+    from .selfheal import health_report
+    return health_report(run_tests=run_tests)
+
+
+@app.post("/api/selfheal/rollback")
+def selfheal_rollback(request: Request):
+    from .selfheal import rollback_last_merge
+    r = rollback_last_merge(f"requested by {request_actor(request)}")
+    if not r.get("ok"):
+        raise HTTPException(400, r.get("error", "cannot roll back"))
+    r["restart_scheduled"] = _devagent.schedule_restart()
     return r
 
 

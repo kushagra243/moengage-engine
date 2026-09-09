@@ -294,12 +294,25 @@ def execute(p: Dict[str, Any]) -> Dict[str, Any]:
     if not _repo_clean():
         raise RuntimeError("the running checkout has uncommitted changes; commit or stash them, then approve again")
     br = pv["branch"]; target = _current_branch()
+    pre = _git(["rev-parse", "--short", "HEAD"]).stdout.strip()
+    # the drafted tree must at least import cleanly before it can replace the running code
+    wt = worktree_path(int(pid))
+    if os.path.exists(os.path.join(wt, "backend", "main.py")):
+        py = os.path.join(ROOT, ".venv", "bin", "python") if os.path.exists(os.path.join(ROOT, ".venv", "bin", "python")) else sys.executable
+        chk = subprocess.run([py, "-c", "import backend.main"], cwd=wt, capture_output=True, text=True, timeout=180, env={**_scrubbed_env(), "PYTHONPATH": wt, "MOE_IMPORT_CHECK": "1"})
+        if chk.returncode != 0:
+            raise RuntimeError("drafted code does not import: " + redact((chk.stderr or chk.stdout)[-500:]))
     try:
         _git(["merge", "--no-ff", "--no-edit", "-m", f"Merge agent change #{pid}: {prop['title'][:70]}", br])
     except subprocess.CalledProcessError as e:
         _git(["merge", "--abort"], check=False)
         raise RuntimeError("merge conflict with the current branch: " + redact((e.stderr or e.stdout)[-600:]))
     head = _git(["rev-parse", "--short", "HEAD"]).stdout.strip()
+    try:
+        from .selfheal import note_merge
+        note_merge(int(pid), pre, head)
+    except Exception:
+        pass
     cleanup(int(pid), keep_branch=True)
     audit("devagent.merged", {"id": pid, "into": target, "commit": head, "files": pv.get("files", [])[:20]}, actor="user")
     deps_changed = any(f.strip() == "requirements.txt" for f in pv.get("files", []))

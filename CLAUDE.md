@@ -42,6 +42,7 @@ Loopback bind · per-process `X-Local-Token` · Host check · outbound only thro
 ## How the team steers the agent
 - **Teach**: Agent tab → "Teach the agent" (or say "from now on…" in chat → `remember_guidance`). Stored in `agent_guidance`, injected into the system prompt, toggle/delete in the UI.
 - **Knobs**: agent may call `set_engine_setting` on the allowlist in `backend/guidance.py`.
+- **Self-repair**: tool and job failures are recorded (`tool_errors`); `self_diagnose` groups them into fix requests; the `self_heal` autopilot mission files them as code changes; `start.py` reverts the last agent merge automatically if the backend no longer imports (`./cli.py selfheal rollback` does it by hand).
 - **Code**: "Change request" in the Agent tab or `propose_code_change` → `backend/devagent.py` drafts on branch `agent/change-<id>` (Claude Code headless, fallback: model diff), runs tests, shows the diff in Approvals → approve merges and restarts the server.
 
 ## Current state (2026-09-09)

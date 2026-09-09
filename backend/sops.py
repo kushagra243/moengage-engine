@@ -277,7 +277,7 @@ def preflight(sop: Dict[str, Any], segment: Optional[Dict[str, Any]], regime: Op
     fw = sop_check(sop); checks.append({"check": "framework", "ok": fw["ok"], "detail": "; ".join(fw["problems"] + fw["warnings"])[:400]})
     fam = (sop.get("audience") or {}).get("segment_family")
     if fam and fam != "*":
-        checks.append({"check": "segment_exists", "ok": segment is not None, "detail": (f"resolved to {segment['name']} (version {segment.get('version')})" if segment else f"no segment in the registry for family {fam}; upload it or pass an explicit segment name")})
+        checks.append({"check": "segment_exists", "ok": segment is not None, "detail": (f"resolved to {segment['name']} (version {segment.get('version')})" + (f" — closest match for family {segment['closest_match_for']}; confirm it is the intended cohort" if segment.get("closest_match_for") else "") if segment else f"no segment in the registry for family {fam}; upload it or pass an explicit segment name")})
     mr = (sop.get("audience") or {}).get("min_reach") or 0
     if mr:
         checks.append({"check": "min_reach", "ok": reach is None or reach >= mr, "detail": (f"reach {reach:,} vs min {mr:,}" if reach is not None else f"reach unknown (no size API); min {mr:,} — verify in the dashboard")})

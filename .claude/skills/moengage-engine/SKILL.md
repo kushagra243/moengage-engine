@@ -47,5 +47,8 @@ pkill -f start.py            # the server's cmdline is start.py, not uvicorn
 - **Scheduled job**: extend `scheduler.py` run sequence; keep model-free steps before model steps.
 - **Tests**: mirror `tests/test_agent_loop.py` (fake OpenAI server) and `tests/test_security.py`; run the suite before finishing.
 
+## Self-repair
+`backend/selfheal.py`: `_safe` records every tool exception with a signature; `health_report()` groups them with failed scheduler steps, failed proposals and server-log tracebacks into `fix_requests`; the agent's `self_diagnose` tool and the `self_heal` autopilot mission turn them into `propose_code_change` calls. Before a merge, `devagent.execute` import-checks the drafted tree; after a merge, `data/last_merge.json` records pre/post commits and `start.py` reverts the merge if `import backend.main` fails at startup. CLI: `./cli.py selfheal [report|rollback] [--tests]`.
+
 ## Code-change proposals (agent self-modification)
 `propose_code_change` → `backend/devagent.py` drafts on branch `agent/change-<id>` in `data/worktrees/change-<id>` using Claude Code headless (`claude -p … --permission-mode acceptEdits --allowedTools …`) or a model-produced unified diff; runs tests; stores the diff on the proposal. Approve → merge into the checked-out branch → `start.py` re-exec. Reject → branch removed. The checkout must be clean to merge.

@@ -100,6 +100,11 @@ class DailyAutomationScheduler:
                     report["steps"].append("segments+sops")
                 except Exception as e:
                     report["segments_error"] = redact(str(e))
+                    try:
+                        from .selfheal import record_error
+                        record_error("scheduler", "segments+sops", e)
+                    except Exception:
+                        pass
                 report["steps"].append("experiments")
             except Exception as e:
                 report["experiments_error"] = redact(str(e))

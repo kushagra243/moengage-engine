@@ -332,6 +332,12 @@ def run(persist: bool = True, apply_improvements: bool = True) -> Dict[str, Any]
                 improvements.append({"what": f"retired {ex['expired']} stale ideas", "where": "growth_ideas"})
         except Exception:
             pass
+    try:
+        from . import sop_india
+        ir = sop_india.review(); rework = [x["id"] for x in ir["sops"] if x["status"] == "rework"]; needs = ir["counts"].get("needs edits", 0)
+        _chk(checks, "sops_india_fit", "completeness", not rework, "every SOP is India-ready or only needs light edits (ASCI, TDS, DLT, Hinglish, derivatives posture)", f"rework: {', '.join(rework) or 'none'}; needs edits: {needs}; avg {ir['avg_score']}", "SOP Library → India fit → apply fixes; define the missing India SOPs", warn=bool(needs))
+    except Exception:
+        pass
     stale_props = [p["id"] for p in pend if (_age_min(p.get("created_at")) or 0) > 14 * 24 * 60]
     _chk(checks, "proposals_not_stale", "freshness", not stale_props, "no pending proposal older than 14 days", f"{stale_props[:6]}" if stale_props else "none", "approve, revise or reject them; market-linked ones are already meaningless", warn=True)
 

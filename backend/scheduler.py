@@ -149,6 +149,13 @@ class DailyAutomationScheduler:
                 q = _qa.run()
                 report["qa"] = {"score": q["score"], **q["counts"], "improvements": len(q["improvements"])}
                 report["steps"].append("qa")
+                try:
+                    from . import workspace_analysis as _wa
+                    _r = _wa.report(force=True)
+                    report["workspace_analysis"] = {"tier": _r["narrative_meta"].get("tier"), "model": _r["narrative_meta"].get("model"), "actions": len(_r["narrative"].get("top_actions") or [])}
+                    report["steps"].append("workspace_analysis")
+                except Exception as e:
+                    report["workspace_analysis_error"] = redact(str(e))
             except Exception as e:
                 report["qa_error"] = redact(str(e))
             if not report.get("executive_summary"):

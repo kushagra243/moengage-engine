@@ -161,3 +161,9 @@ body.text-lg .xcard .tt, body.text-lg .sub { font-size:14.5px; } body.text-lg .c
 @media (max-width:1500px) { .kanban.board { grid-template-columns:minmax(320px,1.6fr) repeat(2,minmax(200px,1fr)); } }
 @media (max-width:1000px) { .kanban.board { grid-template-columns:1fr; } }
 .kanban .col.wide .xcard { padding:12px 14px; }
+
+.setgrid { display:grid; grid-template-columns:repeat(auto-fill,minmax(280px,1fr)); gap:10px 16px; } .setf { display:flex; flex-direction:column; gap:4px; min-width:0; }
+.setf input, .setf select, #teach-text, #teach-scope, #chg-title, #chg-scope, #chg-text, .chatin textarea { background:#070d14; border:1px solid var(--line); color:var(--text); font:400 12px/1.4 var(--mono); padding:7px 9px; width:100%; box-sizing:border-box; }
+.setf input:focus, .chatin textarea:focus { outline:none; border-color:var(--cyan); }
+.chatp { display:flex; flex-direction:column; min-height:60vh; } .chatlog { flex:1 1 auto; overflow:auto; max-height:62vh; padding:10px 14px; } .chatin { display:flex; gap:8px; padding:10px 14px; border-top:1px solid var(--line-soft); } .chatin textarea { flex:1 1 auto; resize:vertical; }
+.msg { padding:8px 0; border-bottom:1px solid var(--line-soft); font-size:13px; } .msg .who { font:600 10px/1 var(--display); letter-spacing:.18em; color:var(--text-mute); margin-bottom:4px; } .msg.user .who { color:var(--cyan-dim); } .msg.assistant .who { color:var(--green); }

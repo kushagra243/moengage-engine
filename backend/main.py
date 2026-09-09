@@ -12,7 +12,7 @@ from typing import Any, Dict, List, Optional
 
 from fastapi import FastAPI, HTTPException, Request, UploadFile, File, Form
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import FileResponse, HTMLResponse, JSONResponse
+from fastapi.responses import RedirectResponse, FileResponse, HTMLResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
@@ -149,7 +149,7 @@ def status():
 
 
 # ── settings ───────────────────────────────────────────────────────────────────
-ALLOWED_SETTING_PREFIXES = ("moengage_", "llm_", "market_", "schedule_", "refresh_", "analysis_", "taxonomy_", "autopilot_", "devagent_", "web3_", "competitor", "console", "mock_mode")
+ALLOWED_SETTING_PREFIXES = ("moengage_", "llm_", "market_", "schedule_", "refresh_", "analysis_", "taxonomy_", "autopilot_", "devagent_", "web3_", "competitor", "mock_mode")
 
 
 @app.get("/api/settings")
@@ -796,6 +796,18 @@ def skills_list():
     return {"skills": list_skills()}
 
 
+@app.get("/api/agent/tools")
+def agent_tools():
+    from .llm.tools import TOOL_SCHEMAS
+    from .llm.agent import TOOL_BUDGETS
+    out = []
+    for t in TOOL_SCHEMAS:
+        fn = t.get("function") or t
+        name = fn.get("name"); params = list(((fn.get("parameters") or {}).get("properties") or {}).keys())
+        out.append({"name": name, "description": fn.get("description", ""), "params": params, "required": (fn.get("parameters") or {}).get("required") or [], "writes": bool(name and (name.startswith("propose_") or name in ("run_sop", "define_sop", "campaign_from_alert", "record_ideas", "request_data", "set_engine_setting", "set_comms_limits", "remember_guidance", "define_nomenclature", "write_flight_plan", "sop_india_fix"))), "budget_chars": TOOL_BUDGETS.get(name)})
+    return {"tools": out, "count": len(out)}
+
+
 @app.get("/api/skills/{name}")
 def skills_get(name: str):
     from .skills import read_skill
@@ -986,6 +998,27 @@ def market_pair_battle(symbol: str):
 def sops_product_matrix():
     from . import sops
     return sops.product_cohort_matrix()
+
+
+@app.get("/api/sops/india-fit")
+def sops_india_fit(sop_id: Optional[str] = None):
+    from . import sop_india
+    return sop_india.review(sop_id)
+
+
+@app.post("/api/sops/india-fix-all")
+def sops_india_fix_all(request: Request):
+    from . import sop_india
+    return sop_india.apply_all(actor=request_actor(request))
+
+
+@app.post("/api/sops/{sop_id}/india-fix")
+def sops_india_fix(sop_id: str, request: Request):
+    from . import sop_india
+    r = sop_india.apply_fixes(sop_id, actor=request_actor(request))
+    if not r.get("ok") and r.get("error"):
+        raise HTTPException(404, r["error"])
+    return r
 
 
 @app.get("/api/sops/matrix")
@@ -1215,6 +1248,19 @@ def brain_recommendation_queue(payload: RecQueuePayload, request: Request):
     return brain.queue_recommendation(payload.id, actor=request_actor(request))
 
 
+@app.get("/api/brain/analysis")
+def brain_analysis(force: bool = False):
+    from . import workspace_analysis
+    return workspace_analysis.report(force=force)
+
+
+@app.post("/api/brain/analysis/run")
+def brain_analysis_run(request: Request):
+    from . import workspace_analysis
+    audit("workspace_analysis.manual", {}, actor=request_actor(request))
+    return workspace_analysis.report(force=True)
+
+
 @app.get("/api/brain/qa")
 def brain_qa(force: bool = False):
     from . import qa
@@ -1299,18 +1345,11 @@ def automation_history():
 
 
 # ── static frontend with token injection ───────────────────────────────────────
-def _index_html(name: str = "index.html") -> str:
+def _index_html(name: str = os.path.join("terminal", "index.html")) -> str:
     with open(os.path.join(FRONTEND_DIR, name), encoding="utf-8") as f:
         html = f.read()
     tag = f'<meta name="local-token" content="{local_token}">'
     return html.replace("<head>", "<head>" + tag, 1) if "<head>" in html else tag + html
-
-
-def _console_choice() -> str:
-    """Default console: the terminal (design handoff). MOE_CONSOLE=classic or the setting console=classic restores the old one at /."""
-    if os.environ.get("MOE_CONSOLE", "").lower() == "classic" or get_setting("console", "terminal") == "classic":
-        return "index.html"
-    return os.path.join("terminal", "index.html")
 
 
 if os.path.exists(FRONTEND_DIR):
@@ -1318,7 +1357,7 @@ if os.path.exists(FRONTEND_DIR):
 
     @app.get("/", response_class=HTMLResponse)
     def index():
-        return HTMLResponse(_index_html(_console_choice()), headers={"Content-Security-Policy": CSP})
+        return HTMLResponse(_index_html(os.path.join("terminal", "index.html")), headers={"Content-Security-Policy": CSP})
 
     @app.get("/terminal", response_class=HTMLResponse)
     def terminal_page():
@@ -1326,7 +1365,7 @@ if os.path.exists(FRONTEND_DIR):
 
     @app.get("/classic", response_class=HTMLResponse)
     def classic_page():
-        return HTMLResponse(_index_html("index.html"), headers={"Content-Security-Policy": CSP})
+        return RedirectResponse("/", status_code=307)
 
     @app.get("/{path:path}")
     def static_fallback(path: str):

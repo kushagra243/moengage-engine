@@ -6,7 +6,7 @@ def test_brain_state_and_views_have_the_contract_shape():
     assert [b["k"] for b in st["bus"]] == ["MODE", "BRAIN", "MEMORY", "GUARDRAILS", "SCHEDULER", "HISTORY"]
     assert [l["name"] for l in st["load"]] == ["INGEST", "REASONING", "MEMORY", "ACTUATION"] and all(0 <= l["pct"] <= 100 for l in st["load"])
     assert [p["stage"] for p in st["pipeline"]] == ["IDEATED", "PLANNED", "APPROVAL", "LIVE", "LEARNED"]
-    assert set(st["stats"]) == {"brain", "intel", "ideas", "exp", "sops", "anom", "market", "lab", "atlas"} and all(len(v) == 5 for v in st["stats"].values())
+    assert set(st["stats"]) == {"brain", "intel", "ideas", "exp", "sops", "anom", "market", "lab", "atlas", "analysis"} and all(len(v) == 5 for v in st["stats"].values())
     assert st["brief"] and all(b["sev"] in ("act_now", "high_ev", "counter", "cleanup", "watch", "good", "info") for b in st["brief"])
     ds = brain.directives()
     assert all(d["severity"] in brain.SEV_COLOR and d["sev_label"] and d["actions"] for d in ds)

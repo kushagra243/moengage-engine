@@ -123,6 +123,16 @@ def _stats(mode, pend, exps, running, read, days, an, ctx, ci, ideas_new) -> Dic
     except Exception:
         pass
     n_sops = len(sops_mod.list_sops()); runs = sops_mod.list_runs(50); runs_today = [r for r in runs if str(r.get("created_at", ""))[:10] == date.today().isoformat()]
+    camps_all, cov_pct, n_crit, pa_gaps, pa_bs, wa_last = [], 0, 0, [], 0, None
+    try:
+        from .llm.tools import clm_program_audit, campaign_diagnosis
+        from . import workspace_analysis as _wa
+        camps_all = _client().get_campaigns(); cov_pct = round(100 * sum(1 for x in camps_all if not x.get("stats_missing")) / max(1, len(camps_all)))
+        _pa = clm_program_audit(); pa_gaps = _pa.get("uncovered_transitions") or []; pa_bs = _pa.get("broadcast_share_pct") or 0
+        n_crit = sum(1 for d in (campaign_diagnosis().get("campaigns") or []) if d.get("severity") == "critical")
+        _h = _wa.history(1); wa_last = _h[0] if _h else None
+    except Exception:
+        pass
     fam_cov = "—"; fams = []; n_segs = 0; peace_counts = {}; peace_v = "—"; ra_v, ra_sub, ra_c = "—", "money flow composite", "#eaf7fc"
     try:
         from .market import moneyflow
@@ -173,6 +183,9 @@ def _stats(mode, pend, exps, running, read, days, an, ctx, ci, ideas_new) -> Dic
                  {"k": "TEAM EDITS", "v": str(sum(1 for s in sops_mod.list_sops(include_inactive=True) if s.get('source') not in ('library',))), "sub": "versioned SOPs", "c": "#6fe3ff"}],
         "anom": [{"k": "TRACKED", "v": str(tracked), "sub": "campaigns", "c": "#eaf7fc"}, {"k": "ACT TODAY", "v": str(bu.get("act_today", 0)), "sub": "severity high", "c": "#ff5c9e"},
                  {"k": "WATCH", "v": str(bu.get("watch", 0)), "sub": "drifting", "c": "#ffb84d"}, {"k": "GOOD SURPRISE", "v": str(bu.get("good_surprise", 0)), "sub": "above baseline", "c": "#4dffa8"}, {"k": "HISTORY", "v": f"{days}d", "sub": "snapshot depth", "c": "#eaf7fc"}],
+        "analysis": [{"k": "CAMPAIGNS", "v": str(len(camps_all)), "sub": f"{cov_pct}% with stats · {mode}", "c": "#eaf7fc"}, {"k": "CRITICAL", "v": str(n_crit), "sub": "diagnosis severity", "c": "#ff5c9e" if n_crit else "#4dffa8"},
+                     {"k": "UNCOVERED", "v": str(len(pa_gaps)), "sub": "lifecycle transitions", "c": "#ffb84d" if pa_gaps else "#4dffa8"}, {"k": "BROADCAST", "v": f"{pa_bs}%", "sub": "share of campaigns · cap 30%", "c": "#ff5c9e" if (pa_bs or 0) > 30 else "#4dffa8"},
+                     {"k": "LAST REPORT", "v": _ago(wa_last.get("at")) if wa_last else "never", "sub": ((wa_last or {}).get("tier") or "") + (" · " + wa_last["model"] if wa_last and wa_last.get("model") else ""), "c": "#eaf7fc"}],
         "lab": [{"k": "RISK APPETITE", "v": ra_v, "sub": ra_sub, "c": ra_c},
                 {"k": "REGIME", "v": regime.replace("_", " ").upper(), "sub": f"{len(hooks.get('hooks') or [])} hooks allowed", "c": reg_c},
                 {"k": "TIER-0", "v": "ARMED" if ctx.get("tier0") else "none", "sub": (ctx.get("tier0") or {}).get("kind", "no major event").replace("_", " "), "c": "#ff5c9e" if ctx.get("tier0") else "#4dffa8"},

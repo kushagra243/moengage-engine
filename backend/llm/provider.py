@@ -201,6 +201,18 @@ def probe() -> Dict[str, Any]:
         return {"ok": False, "provider": cfg["provider"], "model": cfg["model"], "base_url": cfg["base_url"], "error": redact(str(e))}
 
 
+def fallback_cfg(cfg: Dict[str, Any]) -> Optional[Dict[str, Any]]:
+    """When the primary is the Claude Code CLI (team login on this host) and an OpenRouter key exists, the key is the fallback:
+    llm_fallback_provider (default openrouter when a key is saved; 'none' disables), llm_fallback_model (default anthropic/claude-sonnet-4.5)."""
+    if cfg.get("provider") != "claude_cli":
+        return None
+    prov = get_setting("llm_fallback_provider", "openrouter" if cfg.get("api_key") else "none")
+    if prov in ("", "none") or not cfg.get("api_key"):
+        return None
+    base = get_setting("llm_base_url", "https://openrouter.ai/api/v1") if prov == "openai_compatible" else "https://openrouter.ai/api/v1"
+    return {**cfg, "provider": prov, "base_url": base, "model": get_setting("llm_fallback_model", "anthropic/claude-sonnet-4.5"), "model_bulk": get_setting("llm_model_bulk", "auto-free")}
+
+
 class LLMClient:
     def __init__(self, cfg: Optional[Dict[str, Any]] = None):
         self.cfg = cfg or llm_settings()
@@ -238,7 +250,17 @@ class LLMClient:
                     continue
             raise last or LLMError("no bulk model available")
         if self.cfg["provider"] == "claude_cli":
-            return self._chat_claude_cli(messages, tools, model=model)
+            try:
+                return self._chat_claude_cli(messages, tools, model=model)
+            except LLMError as e:
+                fb = fallback_cfg(self.cfg)
+                if not fb:
+                    raise
+                log.warning("claude cli failed (%s); falling back to %s/%s", redact(str(e))[:100], fb["provider"], fb["model"])
+                client = LLMClient(fb); client.purpose = purpose
+                out = client.chat(messages, tools, tool_choice, max_tokens, temperature, response_format, model=None, tier="main")
+                out["fallback_from"] = "claude_cli"
+                return out
         if not self.cfg["api_key"] and "openrouter.ai" in self.cfg["base_url"]:
             raise LLMError("No LLM API key configured. Add your OpenRouter key in Settings → LLM.")
         safe_messages = [_redact_message(m) for m in messages]

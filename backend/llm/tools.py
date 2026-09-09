@@ -555,6 +555,30 @@ def onchain_vs_cex(force: bool = False) -> Dict[str, Any]:
     return onchain_cex.compare(force=force)
 
 
+def sop_india_review(sop_id: Optional[str] = None) -> Dict[str, Any]:
+    """India-fit review of SOPs against our own skills (ASCI VDA disclaimer and forbidden words, TDS/tax framing, derivatives education-only posture, DLT/WhatsApp windows, DND, Hinglish for mass cohorts, salary-week timing, no onboarding bonuses): score, flags with fixes, missing India SOPs."""
+    from .. import sop_india
+    r = sop_india.review(sop_id)
+    if not sop_id:
+        r["sops"] = [{k: x[k] for k in ("id", "score", "status", "auto_fixable")} | {"flags": [f["rule"] for f in x["flags"]]} for x in r["sops"] if x["status"] != "india-ready"][:30]
+    return r
+
+
+def sop_india_fix(sop_id: str) -> Dict[str, Any]:
+    """Apply the deterministic India fixes to one SOP (new framework-checked version): disclaimer channels, banned angles, exclusions, TDS line, UPI rails, send windows, WhatsApp utility, Hinglish note, salary-week timing."""
+    from .. import sop_india
+    return sop_india.apply_fixes(sop_id, actor="agent")
+
+
+def workspace_analysis(force: bool = False) -> Dict[str, Any]:
+    """The complete MoEngage programme analysis: programme totals and coverage, lifecycle coverage per transition, channel health vs benchmarks, campaign league table (health, diagnosis, cause, do-first, deep-dive verdict), facets that respond, cohorts, experiments, guardrails, and the analyst narrative (what works, what is broken, structural gaps, ICE-ranked actions, risks, data gaps). Start here for any 'how is the programme doing' question."""
+    from .. import workspace_analysis as wa
+    r = wa.report(force=force)
+    r["campaigns"]["league"] = r["campaigns"]["league"][:25]
+    r.pop("history", None)
+    return r
+
+
 def qa_report(force: bool = False) -> Dict[str, Any]:
     """Fact-check report over everything the boards show: freshness, cross-source agreement, sanity bounds, references (SOPs/segments/KPIs), copy claims in pending drafts, source health, information completeness; safe improvements are applied and listed. Fails first; each carries a fix."""
     from .. import qa
@@ -843,6 +867,9 @@ TOOL_SCHEMAS: List[Dict[str, Any]] = [
     _fn("competitor_benchmarks", "Category leaderboards (spot / perps / options / commodities_tokenised) across Indian and global venues with our gap multiple and pair-level targets to match. Internal.", {"category": {"type": "string", "enum": ["spot", "perps", "options", "commodities_tokenised"]}, "force": {"type": "boolean"}}),
     _fn("competitor_campaigns", "Competitor campaigns detected in the last N hours from announcements, blogs, news and App Store notes — type, impact, counter SOP; App Store ranks. Internal.", {"hours": {"type": "integer"}, "venue": STR, "force": {"type": "boolean"}}),
     _fn("onchain_vs_cex", "Hyperliquid vs centralised venues (volume, OI, users, rank, share), on-chain perps OI landscape, per-coin OI share and funding edges. Internal.", {"force": {"type": "boolean"}}),
+    _fn("sop_india_review", "India-fit review of SOPs by our compliance/copy/calendar skills: scores, flags, fixes, missing India SOPs.", {"sop_id": STR}),
+    _fn("sop_india_fix", "Apply the deterministic India fixes to one SOP as a new version.", {"sop_id": STR}, ["sop_id"]),
+    _fn("workspace_analysis", "Complete MoEngage programme analysis with the analyst narrative and ICE-ranked actions. Start here for programme-level questions.", {"force": {"type": "boolean"}}),
     _fn("qa_report", "Fact-check report over the boards (freshness, cross-source agreement, bounds, references, copy claims, sources, completeness) with fixes; safe improvements auto-applied.", {"force": {"type": "boolean"}}),
     _fn("verify_claims", "Verify numeric claims against live data before asserting them.", {"claims": {"type": "array", "items": OBJ}}, ["claims"]),
     _fn("structural_audit", "Structural misses in the CRM / funnel journey vs the CLM playbooks, ICE-ranked with tagline, segment, SOP, KPI, benchmark. These are P0; propose them first (run_sop or propose_campaign with ice + tagline).", {}),
@@ -888,5 +915,5 @@ TOOLS: Dict[str, Callable[..., Dict[str, Any]]] = {
     "north_star": _safe(north_star), "set_north_star": _safe(set_north_star), "comms_limits": _safe(comms_limits), "set_comms_limits": _safe(set_comms_limits), "peace_index": _safe(peace_index),
     "guardrail_monitor": _safe(guardrail_monitor), "write_flight_plan": _safe(write_flight_plan), "flight_plans": _safe(flight_plans),
     "segment_study": _safe(segment_study), "define_nomenclature": _safe(define_nomenclature), "list_sops": _safe(list_sops), "sop_detail": _safe(sop_detail), "define_sop": _safe(define_sop), "run_sop": _safe(run_sop), "sop_runs": _safe(sop_runs), "channel_matrix": _safe(channel_matrix),
-    "competitor_intel": _safe(competitor_intel), "competitor_benchmarks": _safe(competitor_benchmarks), "competitor_campaigns": _safe(competitor_campaigns), "onchain_vs_cex": _safe(onchain_vs_cex), "qa_report": _safe(qa_report), "verify_claims": _safe(verify_claims), "structural_audit": _safe(structural_audit), "money_flow": _safe(money_flow), "market_flash": _safe(market_flash), "campaign_from_alert": _safe(campaign_from_alert), "competitor_dossier": _safe(competitor_dossier), "pair_battle": _safe(pair_battle), "web3_trending": _safe(web3_trending), "product_cohorts": _safe(product_cohorts), "announcement_lenses": _safe(announcement_lenses), "request_data": _safe(request_data), "data_requests": _safe(data_requests),
+    "competitor_intel": _safe(competitor_intel), "competitor_benchmarks": _safe(competitor_benchmarks), "competitor_campaigns": _safe(competitor_campaigns), "onchain_vs_cex": _safe(onchain_vs_cex), "sop_india_review": _safe(sop_india_review), "sop_india_fix": _safe(sop_india_fix), "workspace_analysis": _safe(workspace_analysis), "qa_report": _safe(qa_report), "verify_claims": _safe(verify_claims), "structural_audit": _safe(structural_audit), "money_flow": _safe(money_flow), "market_flash": _safe(market_flash), "campaign_from_alert": _safe(campaign_from_alert), "competitor_dossier": _safe(competitor_dossier), "pair_battle": _safe(pair_battle), "web3_trending": _safe(web3_trending), "product_cohorts": _safe(product_cohorts), "announcement_lenses": _safe(announcement_lenses), "request_data": _safe(request_data), "data_requests": _safe(data_requests),
 }

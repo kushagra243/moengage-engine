@@ -137,6 +137,8 @@ def test_autopilot_drafts_proposals_and_experiment_ledger(fake_server):
     set_setting("mock_mode", "true"); set_setting("llm_provider", "openai_compatible"); set_setting("llm_base_url", fake_server)
     set_setting("llm_model", "fake/model-1"); set_setting("llm_model_bulk", "fake/model-1"); set_setting("llm_api_key", "sk-test-FAKEKEY-1234567890abcdef")
     mock.seed_history(30, inject=True)                    # creates Act-today anomalies for stop_the_bleed
+    for p in approvals.list_proposals(status="pending", limit=300):   # earlier tests leave identical pending drafts; the de-dupe guard would swallow them
+        approvals.reject(p["id"], note="test reset", decided_by="test")
     before = len(approvals.list_proposals(limit=300))
     out = autopilot.run(max_actions=3, force=True)
     assert out["enabled"] and out["actions"], out

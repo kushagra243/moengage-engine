@@ -6,7 +6,7 @@ material. Each play is detected against what MoEngage actually runs (campaign
 inventory, channels, flows, SOP runs, cohort families) and, when missing,
 becomes a P0 recommendation with an ICE score, a tagline, the segment, the SOP,
 the KPI and a benchmark. Nothing here sends anything: it feeds Brain Lab,
-Spark Bench and the agent, which still propose → approve.
+Campaign Ideas and the agent, which still propose → approve.
 """
 from __future__ import annotations
 import re
@@ -67,7 +67,7 @@ PLAYS: List[Dict[str, Any]] = [
          why="One tone-deaf send on a crash day costs years of trust; a regime flag that suppresses promotions and switches to service copy is the cheapest insurance a CRM can buy.", what="Regime detector (built in) → MoEngage Business Event → pause promo campaigns, send Tier-0 announcement with product lenses.", who="All actives (holders vs cash split)", channel="in-app + email", sop="sop_regime_stress_mode", kpi="uninstall_rate", benchmark="zero regret sends; disable rate ≤ baseline", impact=9, confidence=8, ease=6,
          detect=[("words", r"stress|market mode|regime|crash|volatil")]),
     dict(id="global_control_group", transition="programme", title="Global control group + per-campaign holdouts", tagline="For the whole programme · 5% global holdout and ≥10% per campaign · measured by incremental lift, not CTR",
-         why="Without holdouts a third of 'winning' campaigns are noise or market; the experiment ledger only means something when every send has a control.", what="MoEngage global control 5%; every campaign brief carries control_group_pct ≥ 10; readouts in Proving Ground.", who="All", channel="—", sop=None, kpi="incremental_lift", benchmark="kills ~30% of false winners", impact=8, confidence=9, ease=8,
+         why="Without holdouts a third of 'winning' campaigns are noise or market; the experiment ledger only means something when every send has a control.", what="MoEngage global control 5%; every campaign brief carries control_group_pct ≥ 10; readouts in Experiments.", who="All", channel="—", sop=None, kpi="incremental_lift", benchmark="kills ~30% of false winners", impact=8, confidence=9, ease=8,
          detect=[("fn", "no_holdouts")]),
     dict(id="broadcast_share_cap", transition="programme", title="Cut broadcast share below 30% of sends", tagline="For the send mix · triggered and lifecycle sends replace generic blasts · measured by broadcast share and notification-disable rate",
          why="Broadcast-heavy programmes train users to disable notifications; every point of broadcast share moved to triggered sends raises CTR and lowers uninstalls.", what="Retire or re-target promotional blasts; move recaps to Cards; enforce frequency caps by stage.", who="All", channel="push", sop="sop_push_alert_digest", kpi="broadcast_share_pct", benchmark="broadcast ≤30%; disable rate < 0.1%/push", impact=7, confidence=8, ease=6,

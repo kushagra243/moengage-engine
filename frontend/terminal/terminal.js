@@ -9,13 +9,13 @@ const pct = (n, d = 1) => (n === null || n === undefined || isNaN(Number(n))) ? 
 const cls = (n) => Number(n) > 0 ? 'up' : Number(n) < 0 ? 'down' : 'flat';
 const C = {cy: '#6fe3ff', dim: '#7fd8ec', gr: '#4dffa8', am: '#ffb84d', mg: '#ff5c9e', txt: '#d3e7ef'};
 const NAV = [
-  {id: 'brain', code: '01', label: 'CORTEX', title: 'Cortex', crumb: 'ENGINE / CORTEX', sub: 'Where the brain decides: live cognition state, ranked directives and everything it did in the last cycle.'},
-  {id: 'lab', code: '02', label: 'BRAIN LAB', title: 'Brain Lab', crumb: 'ENGINE / INTELLIGENCE', sub: 'Money flow, trader behaviour, rivals that matter, markets and world events distilled into recommendations. Internal only: no venue is ever named in copy.'},
-  {id: 'ideas', code: '03', label: 'SPARK BENCH', title: 'Spark Bench', crumb: 'ENGINE / IDEATION', sub: 'Hypotheses scored with ICE (impact × confidence × ease), structural gaps first. Stale sparks expire on their own.'},
-  {id: 'exp', code: '04', label: 'PROVING GROUND', title: 'Proving Ground', crumb: 'ENGINE / EXPERIMENTS', sub: 'Idea → simulation → approval → live → learning, ranked by ICE. Every proposal is an experiment; nothing sends without a human.'},
-  {id: 'sops', code: '05', label: 'PLAYBOOK VAULT', title: 'Playbook Vault', crumb: 'ENGINE / SOPS', sub: 'Versioned operating procedures per campaign family: sequence, caps, holdout, kill rules.'},
-  {id: 'anom', code: '06', label: 'PULSE WATCH', title: 'Pulse Watch', crumb: 'ENGINE / TELEMETRY', sub: 'Daily snapshots diffed against each campaign’s own baseline, ranked by urgency, with the cause and the option that comes first.'},
-  {id: 'atlas', code: '07', label: 'COHORT ATLAS', title: 'Cohort Atlas', crumb: 'ENGINE / COHORTS', sub: 'Every uploaded segment decoded by its nomenclature, mapped to products, stages, touch budgets and the peace index.'},
+  {id: 'brain', code: '01', label: 'BRAIN', title: 'Brain', crumb: 'ENGINE / CORE', sub: 'Live cognition state, ranked directives and everything the brain decided in the last cycle.'},
+  {id: 'lab', code: '02', label: 'BRAIN LAB', title: 'Brain Lab', crumb: 'ENGINE / INTEL', sub: 'Money flow, trader behaviour, rivals that matter, markets and world events distilled into recommendations. Internal only: no venue is ever named in copy.'},
+  {id: 'ideas', code: '03', label: 'CAMPAIGN IDEAS', title: 'Campaign Ideas', crumb: 'ENGINE / IDEATION', sub: 'Hypotheses scored with ICE (impact × confidence × ease), structural gaps first. Stale ideas expire on their own.'},
+  {id: 'exp', code: '04', label: 'EXPERIMENTS', title: 'Experiments', crumb: 'ENGINE / EXPERIMENTS', sub: 'Idea → simulation → approval → live → learning, ranked by ICE. Every proposal is an experiment; nothing sends without a human.'},
+  {id: 'sops', code: '05', label: 'SOP LIBRARY', title: 'Campaign SOPs', crumb: 'ENGINE / SOPS', sub: 'Versioned operating procedures per campaign family: sequence, caps, holdout, kill rules.'},
+  {id: 'anom', code: '06', label: 'ANOMALIES', title: 'Anomalies', crumb: 'ENGINE / TELEMETRY', sub: 'Daily snapshots diffed against each campaign’s own baseline, ranked by urgency, with the cause and the option that comes first.'},
+  {id: 'atlas', code: '07', label: 'COHORTS', title: 'Cohorts', crumb: 'ENGINE / COHORTS', sub: 'Every uploaded segment decoded by its nomenclature, mapped to products, stages, touch budgets and the peace index.'},
 ];
 const ALIAS = {intel: 'lab', market: 'lab', competitors: 'lab', cohorts: 'atlas'};
 const S = {screen: 'brain', state: null, sop: null, sops: [], filter: 'all', trace: [], focus: 0, directives: [], busy: false, seenTrace: new Set()};

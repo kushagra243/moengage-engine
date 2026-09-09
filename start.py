@@ -50,7 +50,8 @@ def main():
     print("  moengage-engine (local)   http://127.0.0.1:%d" % port)
     print("  bound to loopback only; secrets encrypted; outbound allowlisted")
     print("=" * 64)
-    uvicorn.run("backend.main:app", host="127.0.0.1", port=port, reload=False, log_level="info")
+    # Always loopback. An identity-aware proxy on the same host (tailscale serve, cloudflared) fronts it.
+    uvicorn.run("backend.main:app", host="127.0.0.1", port=port, reload=False, log_level="info", proxy_headers=True, forwarded_allow_ips="127.0.0.1")
 
 
 if __name__ == "__main__":

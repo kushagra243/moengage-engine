@@ -71,3 +71,20 @@ def test_local_token_required():
     assert c.get("/api/status", headers={"X-Local-Token": local_token, "Host": "evil.com"}).status_code == 403
     html = c.get("/").text if c.get("/").status_code == 200 else ""
     assert (local_token in html) or html == ""
+
+
+def test_proxy_identity_only_from_loopback(monkeypatch):
+    from fastapi.testclient import TestClient
+    from backend.main import app, local_token
+    c = TestClient(app, base_url="http://127.0.0.1")
+    # TestClient's peer is 'testclient' (not loopback) → identity header must be ignored
+    r = c.post("/api/approvals/propose", headers={"X-Local-Token": local_token, "Tailscale-User-Login": "mallory@evil"},
+               json={"kind": "create_segment", "title": "t", "payload": {"name": "n", "criteria": {"a": 1}}, "rationale": "r"})
+    assert r.status_code == 200 and r.json()["created_by"] == "user"
+    import backend.security.localauth as la
+    class Req:  # loopback peer with proxy identity
+        client = type("C", (), {"host": "127.0.0.1"})(); headers = {"tailscale-user-login": "kushagra@company.com"}
+    assert la.request_actor(Req()) == "kushagra@company.com"
+    class Req2:
+        client = type("C", (), {"host": "10.0.0.5"})(); headers = {"tailscale-user-login": "x@y"}
+    assert la.request_actor(Req2()) == "user"

@@ -121,6 +121,34 @@ def _funding_hooks(md: Dict[str, Any], regime: str) -> List[Dict[str, Any]]:
     return out
 
 
+def _listing_hooks(listings: Dict[str, Any], regime: str) -> List[Dict[str, Any]]:
+    out = []
+    for n in (listings or {}).get("new") or []:
+        rwa = n.get("asset_class") in ("equity", "index", "commodity", "fx")
+        out.append({"id": f"listing_{n['venue']}_{n['symbol']}", "trigger": f"{n['symbol']} newly listed on {n['venue']} as {n['product']}", "asset_class": n.get("asset_class"), "regime": regime,
+                    "segments": ([f"Watchers of {n['symbol']} or its sector", "Tokenised-market explorers"] if rwa else [f"Watchers of {n['symbol']}", "Habitual traders (8+ fills / 4 weeks)"]),
+                    "clm_stages": ["Habitual", "Core"], "channel": "In-app card (push only to watchers)", "angle": "product_education" if rwa else "new_listing",
+                    "copy_direction": f"State that {n['symbol']} is now tradable ({n['product']} on {n['venue']}); offer watchlist add. No launch-pump framing, no 'early' language, no price target.",
+                    "timing": "Listing day, 10:00–20:00 IST; TTL 24h", "guardrails": ["blocked in stress regimes", "exclude liquidated-14d and loss-dormant", "1 listing message per user per week"],
+                    "kpi": "watchlist adds per 1k delivered; first-week traders of the pair (holdout 20%)"})
+    return out[:4]
+
+
+def _oi_hooks(oi: Dict[str, Any], regime: str) -> List[Dict[str, Any]]:
+    out = []
+    for o in (oi or {}).get("surge") or []:
+        out.append({"id": f"oi_surge_{o['symbol']}", "trigger": f"{o['symbol']} open interest {o['oi_chg_pct']:+.0f}% in ~24h with price {o['price_chg_pct']:+.1f}% — {o['reading']}", "asset_class": "crypto", "regime": regime,
+                    "segments": [f"Users with an open {o['symbol']} perp", f"{o['symbol']} watchers with leverage history"], "clm_stages": ["Habitual", "Core"], "channel": "In-app (push to position holders)",
+                    "angle": "risk_education", "copy_direction": "Quote OI and price change together, time-stamped; say crowded books move sharply; offer margin-buffer review / alert. No direction.",
+                    "timing": "Within 2h; TTL 4h; not within 2h of a macro print", "guardrails": ["exclude liquidated-14d", "1/day cap", "no leverage encouragement"], "kpi": "risk-tool opens; positions reduced within 24h vs holdout"})
+    for o in (oi or {}).get("drop") or []:
+        out.append({"id": f"oi_drop_{o['symbol']}", "trigger": f"{o['symbol']} open interest {o['oi_chg_pct']:+.0f}% in ~24h (price {o['price_chg_pct']:+.1f}%) — leverage flushed", "asset_class": "crypto", "regime": regime,
+                    "segments": [f"Traders of {o['symbol']} in the last 7d", "Liquidated in last 48h (service tone only)"], "clm_stages": ["Habitual", "Slipping"], "channel": "In-app",
+                    "angle": "risk_education", "copy_direction": "Explain what an OI flush is in one line; link to the position history / risk tools. Service tone; no 're-enter' language.",
+                    "timing": "Same day; TTL 6h", "guardrails": ["no promos to liquidated users", "no direction"], "kpi": "support contacts avoided; risk-tool opens"})
+    return out[:4]
+
+
 def build_hooks(ctx: Dict[str, Any]) -> Dict[str, Any]:
     regime = ((ctx.get("crypto") or {}).get("regime") or {}).get("label", "unknown")
     policy = ANGLE_POLICY.get(regime, ANGLE_POLICY["unknown"])
@@ -132,6 +160,8 @@ def build_hooks(ctx: Dict[str, Any]) -> Dict[str, Any]:
     hooks += _mover_hooks(ctx.get("equity_movers") or [], "equities (HL perps)", regime)
     hooks += _mover_hooks(ctx.get("index_movers") or [], "indices (HL perps)", regime)
     hooks += _mover_hooks(ctx.get("commodity_movers") or [], "commodities (HL perps)", regime)
+    hooks += _listing_hooks(ctx.get("listings") or {}, regime)
+    hooks += _oi_hooks(ctx.get("oi_movers") or {}, regime)
     hooks += _calendar_hooks(ctx.get("calendar") or [])
     allowed = [h for h in hooks if h.get("angle") not in policy["block"]]
     blocked = [h["id"] for h in hooks if h.get("angle") in policy["block"]]

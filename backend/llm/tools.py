@@ -130,15 +130,17 @@ def moengage_guidance(topic: str) -> Dict[str, Any]:
     """Keyword search over the local knowledge base (channel playbooks, CLM stages, segmentation, measurement, market intelligence)."""
     words = [w for w in re.findall(r"[a-z0-9]+", topic.lower()) if len(w) > 2]
     hits = []
-    for path in sorted(glob.glob(os.path.join(KNOWLEDGE_DIR, "*.md"))):
-        text = open(path).read()
+    skills_dir = os.path.join(os.path.dirname(os.path.dirname(KNOWLEDGE_DIR)), ".claude", "skills")
+    for path in sorted(glob.glob(os.path.join(KNOWLEDGE_DIR, "*.md"))) + sorted(glob.glob(os.path.join(skills_dir, "*", "SKILL.md"))):
+        text = open(path, encoding="utf-8").read()
         low = text.lower()
         score = sum(low.count(w) for w in words)
         if score:
             # return the best-matching sections
             sections = re.split(r"\n(?=#{1,3} )", text)
             ranked = sorted(sections, key=lambda s: -sum(s.lower().count(w) for w in words))
-            hits.append({"doc": os.path.basename(path), "score": score, "excerpt": "\n\n".join(ranked[:2])[:2500]})
+            label = os.path.basename(path) if os.path.basename(path) != "SKILL.md" else "skill:" + os.path.basename(os.path.dirname(path))
+            hits.append({"doc": label, "score": score, "excerpt": "\n\n".join(ranked[:2])[:2500]})
     hits.sort(key=lambda h: -h["score"])
     return {"topic": topic, "docs_available": [os.path.basename(p) for p in glob.glob(os.path.join(KNOWLEDGE_DIR, "*.md"))], "matches": hits[:3]}
 
@@ -162,8 +164,8 @@ TRANSITIONS = [
     ("verified_funded", "Verified → Funded", [r"deposit", r"\bfund", r"add money", r"\bbank\b", r"\bupi\b"]),
     ("funded_activated", "Funded → Activated", [r"first trade", r"\bactivat", r"start trading", r"first order", r"getting started", r"guide"]),
     ("activated_habitual", "Activated → Habitual", [r"second", r"habit", r"streak", r"daily", r"watchlist", r"\balert", r"price drop", r"wishlist"]),
-    ("habitual_core", "Habitual → Core", [r"\bvip\b", r"loyalty", r"\btier", r"points", r"\bfee", r"premium", r"graduat", r"futures", r"cross-?sell"]),
-    ("slipping", "Slipping → recovered", [r"slipping", r"declin", r"portfolio review", r"check-?in"]),
+    ("habitual_core", "Habitual → Core", [r"\bvip\b", r"loyalty", r"\btier", r"points", r"\bfee", r"premium", r"graduat", r"futures", r"\bperps?\b", r"leverage", r"tokeni[sz]ed", r"hedg", r"cross-?sell"]),
+    ("slipping", "Slipping → recovered", [r"slipping", r"declin", r"portfolio review", r"check-?in", r"liquidat", r"margin call", r"recovery"]),
     ("promotional", "Promotional / broadcast", [r"\bsale\b", r"flash", r"offer", r"discount", r"% off", r"festival", r"weekend", r"blast"]),
 ]
 REQUIRED_GOAL = ["transition", "hypothesis", "primary_kpi", "target", "guardrail_metric", "control_group_pct", "measurement_window_days", "kill_criteria"]

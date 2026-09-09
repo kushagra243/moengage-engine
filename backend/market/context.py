@@ -105,6 +105,14 @@ def market_context(force: bool = False, include_news: bool = True) -> Dict[str, 
     ctx["equity_movers"] = _movers(ctx.get("equities") or [])
     ctx["index_movers"] = _movers(ctx.get("indices") or [])
     ctx["commodity_movers"] = _movers(ctx.get("commodities") or [])
+    # derivatives-grade signals: new listings (persisted) and open-interest movers vs ~24h ago
+    try:
+        from . import derivs
+        ctx["listings"] = derivs.track_listings(uni)
+        ctx["oi_movers"] = derivs.oi_changes(ctx, derivs.previous_snapshot())
+    except Exception as e:
+        ctx["errors"].append("derivs: " + redact(str(e)))
+        ctx["listings"] = {"new": []}; ctx["oi_movers"] = {"surge": [], "drop": []}
     # trending only if tradable on our venues
     ctx["crypto_trending"] = [t for t in (ctx.get("crypto_trending") or []) if t.get("symbol") in listed]
     ctx["inr_marks"] = {k: v for k, v in (ctx.get("inr_marks") or {}).items() if k in listed}
@@ -157,6 +165,12 @@ def narrative(ctx: Dict[str, Any]) -> str:
         lines.append("Angles that fit: " + ", ".join(pol["prefer"]) + ".")
     if pol.get("block"):
         lines.append("Angles REFUSED: " + ", ".join(pol["block"]) + ".")
+    nl = (ctx.get("listings") or {}).get("new") or []
+    if nl:
+        lines.append("New listings: " + ", ".join(f"{n['symbol']} ({n['venue']} {n['product']})" for n in nl[:6]) + ".")
+    oi = ctx.get("oi_movers") or {}
+    if oi.get("surge") or oi.get("drop"):
+        lines.append("Open interest: " + "; ".join(f"{o['symbol']} OI {o['oi_chg_pct']:+.0f}% / px {o['price_chg_pct']:+.1f}%" for o in (oi.get("surge") or [])[:3] + (oi.get("drop") or [])[:2]) + ".")
     if ctx.get("errors"):
         lines.append("Data gaps: " + "; ".join(ctx["errors"][:4]) + ".")
     return "\n".join(lines)

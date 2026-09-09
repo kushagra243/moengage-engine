@@ -176,6 +176,10 @@ def update_settings(payload: SettingsPayload):
             v = json.dumps(cred["cookies"])      # normalise to JSON object
         set_setting(k, v)
         saved.append(k)
+    if any(k in ("llm_provider", "llm_model", "llm_api_key", "llm_base_url") for k in saved):
+        from .llm.provider import reconcile_llm_settings
+        for k, v in reconcile_llm_settings(set(saved)).items():
+            saved.append(f"{k} → {v}")
     if any(k in ("moengage_cookies", "moengage_access_token", "moengage_refresh_token") for k in saved) and get_setting("mock_mode", "true").lower() != "true":
         _background_verify()
     return {"success": True, "saved": saved, "rejected": rejected, "auto_verify": any(k in ("moengage_cookies", "moengage_access_token", "moengage_refresh_token") for k in saved)}
@@ -538,6 +542,21 @@ def agent_chat(payload: ChatPayload):
         return MarketerAgent().chat(msg)
     except LLMError as e:
         raise HTTPException(502, str(e))
+
+
+@app.get("/api/agent/context")
+def agent_context():
+    """Compact situational strip for the Agent tab: mode, model, what needs attention, pending approvals, ideas."""
+    moe = MoEngageClient(); cfg = llm_settings()
+    from .llm.provider import cli_model
+    rep = detect_anomalies(source=moe.mode, persist=False)
+    latest = get_latest_daily_run()
+    top = [e for e in rep.get("anomalies", []) if not e.get("secondary")][:3]
+    return {"mode": moe.mode, "provider": cfg["provider"], "model": cli_model(cfg["model"]) if cfg["provider"] == "claude_cli" else cfg["model"],
+            "llm_configured": bool(cfg["api_key"]) or cfg["provider"] == "claude_cli",
+            "by_urgency": rep.get("by_urgency", {}), "top_issues": [{"headline": e.get("headline"), "urgency": e.get("urgency")} for e in top],
+            "pending_approvals": len(approvals.list_proposals(status="pending")), "new_ideas": growth.counts().get("new", 0),
+            "last_run": (latest or {}).get("created_at"), "last_summary": ((latest or {}).get("summary") or "")[:220], "days_of_history": snapshot_count(moe.mode)}
 
 
 @app.get("/api/agent/history")

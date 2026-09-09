@@ -99,3 +99,31 @@ def test_growth_feed_rules_dedupe_and_status():
         growth.set_status(first["id"], "bogus")
     digest = growth.digest_for_agent()
     assert "existing_titles" in digest and first["title"] in digest["existing_titles"]
+
+
+def test_cli_model_normalisation():
+    from backend.llm.provider import cli_model, normalise_model_for_provider
+    assert cli_model("anthropic/claude-3.7-sonnet") == "claude-3.7-sonnet"
+    assert cli_model("openai/gpt-4o-mini") == "sonnet" and cli_model("google/gemini-2.5-flash") == "sonnet"
+    assert cli_model("anthropic/claude-opus-4.1") == "claude-opus-4.1" and cli_model("meta/llama-opus") == "opus"
+    assert cli_model("sonnet") == "sonnet" and cli_model("claude-sonnet-5") == "claude-sonnet-5" and cli_model("") == "sonnet"
+    assert normalise_model_for_provider("openrouter", "sonnet") == "anthropic/claude-sonnet-4.5"
+    assert normalise_model_for_provider("openai_compatible", "sim/marketer-v1") == "sim/marketer-v1"
+
+
+def test_reconcile_switches_to_openrouter_when_key_or_vendor_model_saved():
+    from backend.database import set_setting, get_setting
+    from backend.llm.provider import reconcile_llm_settings
+    set_setting("llm_provider", "claude_cli"); set_setting("llm_base_url", "https://openrouter.ai/api/v1"); set_setting("llm_model", "sonnet"); set_setting("llm_api_key", "")
+    # user pastes an OpenRouter key while provider is still claude_cli
+    set_setting("llm_api_key", "sk-or-v1-abcdefghijklmnopqrstuvwxyz0123456789")
+    ch = reconcile_llm_settings({"llm_api_key"})
+    assert ch.get("llm_provider") == "openrouter" and get_setting("llm_model") == "anthropic/claude-sonnet-4.5"
+    # user picks a vendor/model id while on claude_cli
+    set_setting("llm_provider", "claude_cli"); set_setting("llm_model", "anthropic/claude-3.7-sonnet")
+    ch = reconcile_llm_settings({"llm_model"})
+    assert ch.get("llm_provider") == "openrouter" and get_setting("llm_model") == "anthropic/claude-3.7-sonnet"
+    # genuine claude_cli user with a bare alias stays put
+    set_setting("llm_provider", "claude_cli"); set_setting("llm_model", "sonnet")
+    assert reconcile_llm_settings({"llm_provider"}) == {}
+    set_setting("llm_api_key", "")

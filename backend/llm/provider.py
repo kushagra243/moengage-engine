@@ -33,6 +33,54 @@ class LLMError(RuntimeError):
     pass
 
 
+CLI_ALIASES = ("sonnet", "opus", "haiku")
+
+
+def cli_model(model: str) -> str:
+    """Claude Code CLI accepts aliases (sonnet/opus/haiku) or full claude-* ids, never provider-prefixed ids."""
+    m = (model or "").strip()
+    if not m:
+        return "sonnet"
+    if "/" in m:                      # e.g. anthropic/claude-3.7-sonnet (OpenRouter style)
+        m = m.split("/", 1)[1]
+    low = m.lower()
+    if low in CLI_ALIASES or low.startswith("claude-"):
+        return m
+    return "opus" if "opus" in low else "haiku" if "haiku" in low else "sonnet"
+
+
+def normalise_model_for_provider(provider: str, model: str) -> str:
+    if provider == "claude_cli":
+        return cli_model(model)
+    if provider == "openrouter" and model and "/" not in model:
+        return DEFAULT_MODEL
+    return model or DEFAULT_MODEL
+
+
+def reconcile_llm_settings(saved_keys) -> Dict[str, str]:
+    """
+    Infer intent after a settings save so provider/model/key never contradict:
+      * an API key was saved while provider is claude_cli → the user wants a hosted API → openrouter
+      * a provider-prefixed model id (vendor/model) while provider is claude_cli → openrouter
+      * provider claude_cli with an alias-less model → normalise to a CLI model
+      * provider openrouter with a bare model → default OpenRouter model
+    Returns the changes applied.
+    """
+    from ..database import get_setting, set_setting
+    prov = get_setting("llm_provider", "openrouter"); model = get_setting("llm_model", ""); key = get_setting("llm_api_key", "")
+    base = get_setting("llm_base_url", DEFAULT_BASE_URL)
+    changes: Dict[str, str] = {}
+    if prov == "claude_cli" and (("llm_api_key" in saved_keys and key) or ("/" in (model or "") and "llm_model" in saved_keys)):
+        prov = "openrouter" if ("openrouter" in base or not base) else "openai_compatible"
+        set_setting("llm_provider", prov); changes["llm_provider"] = prov
+        if prov == "openrouter" and "openrouter" not in base:
+            set_setting("llm_base_url", DEFAULT_BASE_URL); changes["llm_base_url"] = DEFAULT_BASE_URL
+    fixed = normalise_model_for_provider(prov, model)
+    if fixed != model:
+        set_setting("llm_model", fixed); changes["llm_model"] = fixed
+    return changes
+
+
 def llm_settings() -> Dict[str, Any]:
     return {
         "provider": get_setting("llm_provider", "openrouter"),        # openrouter | openai_compatible | claude_cli
@@ -56,7 +104,13 @@ def _headers(cfg: Dict[str, Any]) -> Dict[str, str]:
 def list_models(limit: int = 400) -> Dict[str, Any]:
     cfg = llm_settings()
     if cfg["provider"] == "claude_cli":
-        return {"ok": True, "models": ["claude-opus-5", "claude-sonnet-5", "claude-haiku-4-5-20251001"], "source": "claude_cli"}
+        return {"ok": True, "source": "claude_cli", "count": 6, "models": [
+            {"id": "sonnet", "name": "Sonnet (alias, recommended)", "context": None, "tools": True},
+            {"id": "opus", "name": "Opus (alias)", "context": None, "tools": True},
+            {"id": "haiku", "name": "Haiku (alias)", "context": None, "tools": True},
+            {"id": "claude-sonnet-5", "name": "claude-sonnet-5", "context": None, "tools": True},
+            {"id": "claude-opus-5", "name": "claude-opus-5", "context": None, "tools": True},
+            {"id": "claude-haiku-4-5-20251001", "name": "claude-haiku-4-5-20251001", "context": None, "tools": True}]}
     s = guarded_session("llm")
     try:
         r = s.get(cfg["base_url"] + "/models", headers=_headers(cfg), timeout=20)
@@ -191,14 +245,18 @@ class LLMClient:
                         '{"tool_calls":[{"name":"<tool>","arguments":{...}}]} . Otherwise reply with plain text.\n'
                         "Available tools:\n" + json.dumps([t["function"] for t in tools])[:12000])
         prompt = redact("\n\n".join(sys_parts) + protocol + "\n\n" + "\n\n".join(convo))
+        model = cli_model(self.cfg["model"])
         try:
-            out = subprocess.run([binary, "-p", "--output-format", "json", "--model", self.cfg["model"]],
+            out = subprocess.run([binary, "-p", "--output-format", "json", "--model", model],
                                  input=prompt, capture_output=True, text=True, timeout=180)
             data = json.loads(out.stdout or "{}")
         except Exception as e:
             raise LLMError(f"claude cli failed: {redact(str(e))}")
         if data.get("is_error"):
-            raise LLMError(f"claude cli error: {redact(str(data.get('result')))[:200]}")
+            msg = redact(str(data.get("result")))[:200]
+            hint = " Fix: Settings → LLM → model 'sonnet' (or ./cli.py set llm_model sonnet)." if "model" in msg.lower() else \
+                   " Fix: run `claude login` in a terminal." if "auth" in msg.lower() or "oauth" in msg.lower() else ""
+            raise LLMError(f"claude cli error: {msg}.{hint}")
         text = str(data.get("result") or "")
         tool_calls = []
         stripped = text.strip()

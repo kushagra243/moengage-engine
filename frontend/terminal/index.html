@@ -1,0 +1,51 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>MoEngage Engine · Agentic Brain Terminal</title>
+<link rel="stylesheet" href="/static/terminal/terminal.css">
+</head>
+<body>
+<div class="scan" aria-hidden="true"></div><div class="vignette" aria-hidden="true"></div>
+<header class="top">
+  <div class="brand"><div class="l1"><span class="dot"></span>MOENGAGE ENGINE</div><div class="l2">Agentic brain · terminal</div></div>
+  <div class="bus" id="bus" data-bus></div>
+  <div class="clock"><span id="clock">--:--:--</span><span class="cursor"></span></div>
+</header>
+<div class="shell">
+  <nav class="rail" id="rail" aria-label="modules">
+    <div class="lab">MODULES</div>
+    <div id="nav"></div>
+    <div class="foot">
+      <div class="lab" style="padding:0 0 4px">CORE LOAD</div>
+      <div id="load"></div>
+      <div class="facts" id="facts">bind 127.0.0.1 · secrets keychain</div>
+      <div class="facts"><a href="#" id="scan-toggle">scanlines: on</a> · <a href="/classic">classic console</a></div>
+    </div>
+  </nav>
+  <main class="content">
+    <div class="crumb" id="crumb">ENGINE / CORE</div>
+    <div class="head">
+      <div><h1 id="h1">Brain</h1><div class="sub" id="sub"></div></div>
+      <div class="actions">
+        <button class="toggle" id="auto" aria-pressed="false"><span>AUTOPILOT · <span id="auto-lab">OFF</span></span><span class="track"><span class="dot"></span></span></button>
+        <button class="btn primary" id="cycle">▷ Run daily cycle</button>
+      </div>
+    </div>
+    <div class="strip" id="strip"></div>
+    <section id="body"></section>
+    <div class="cmd" id="cmd" role="button" tabindex="0"><span class="k">ASK THE BRAIN</span><span class="p" id="cmd-p">audit the winback family and propose one counter experiment <span class="cursor"></span></span><span class="h">⌘K · COMMAND PALETTE</span></div>
+  </main>
+</div>
+<div class="palette" id="palette" hidden>
+  <div class="pal">
+    <div class="in"><span class="lab10" style="color:var(--cyan-dim)">ASK</span><input id="pal-in" placeholder="ask the brain… (Enter to send · Esc to close)" autocomplete="off"><span class="cursor"></span></div>
+    <div class="out" id="pal-out"><div class="ghost">brain answers here · every reply is grounded in tools · writes still need approval</div></div>
+    <div class="ft"><span>1–7 modules · a approve focused directive · esc close</span><span id="pal-model"></span></div>
+  </div>
+</div>
+<div class="toasts" id="toasts"></div>
+<script src="/static/terminal/terminal.js"></script>
+</body>
+</html>

@@ -35,7 +35,8 @@ pkill -f start.py            # the server's cmdline is start.py, not uvicorn
 | market data (Binance ∪ Hyperliquid universe), listings + OI signals, hooks | `backend/market/exchanges.py`, `derivs.py`, `hooks.py`, `context.py` |
 | LLM provider, agent loop, tools | `backend/llm/provider.py`, `agent.py`, `tools.py` |
 | skills, guidance, API catalog | `backend/skills.py`, `guidance.py`, `api_catalog.py`, `backend/knowledge/` |
-| console | `frontend/index.html` (tabs), `app.js` (`loaders.<tab>`), `style.css` (tokens + HUD theme) |
+| terminal (default console) | `frontend/terminal/index.html`, `terminal.js` (`views.<module>`), `terminal.css` (handoff tokens; no radius, no shadows), `backend/brain.py` (`/api/brain/*`) |
+| classic console (`/classic`) | `frontend/index.html` (tabs), `app.js` (`loaders.<tab>`), `style.css` (tokens + HUD theme) |
 | scheduler (daily run, intraday refresh, autopilot) | `backend/scheduler.py` |
 
 ## Recipes

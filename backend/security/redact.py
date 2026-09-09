@@ -10,6 +10,11 @@ from typing import Iterable
 
 # Order matters: most specific first.
 _PATTERNS = [
+    # personal data that must never reach logs, prompts or the model
+    (re.compile(r"[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}"), "<email>"),
+    (re.compile(r"(?<![\w.])(?:\+?91[\s-]?)?[6-9]\d{4}[\s-]?\d{5}(?![\w.])"), "<phone>"),
+    (re.compile(r"\b[A-Z]{5}\d{4}[A-Z]\b"), "<pan>"),
+    (re.compile(r"\b\d{4}\s\d{4}\s\d{4}\b"), "<aadhaar>"),
     # OpenRouter / OpenAI style keys
     (re.compile(r"sk-or-v1-[A-Za-z0-9]{20,}"), "sk-or-v1-***"),
     (re.compile(r"sk-[A-Za-z0-9_-]{20,}"), "sk-***"),

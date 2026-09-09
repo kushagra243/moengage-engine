@@ -120,6 +120,9 @@ class PublicAPI:
         op = find_operation(method, path)
         if not op:
             raise PublicAPIError(f"{method.upper()} {path} is not a documented MoEngage API (see moengage_api_reference)")
+        from ..api_catalog import is_pii_endpoint
+        if is_pii_endpoint(op.get("full_path") or path):
+            raise PublicAPIError(f"{op['method']} {op['full_path']} returns per-user data; the agent never reads it (it would leave the machine via the model)")
         if not op.get("read_safe"):
             raise PublicAPIError(f"{op['method']} {op['full_path']} is a write; it must go through an approved proposal")
         pth = op["path"]

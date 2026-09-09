@@ -51,9 +51,18 @@ def find_operation(method: str, path: str) -> Optional[Dict[str, Any]]:
     return None
 
 
+# Endpoints that return per-user data (profiles, cards, experiences, preferences, archived messages, GDPR). They are documented
+# and may be read-only, but the agent must never pull them into a prompt: real user data would leave the machine via the model.
+PII_PATH = re.compile(r"(customers?/export|/customer\b|cards/fetch|experiences/(fetch|events|metadata)|user-preferences|opengdpr|archival/view|personalization/preview)", re.I)
+
+
+def is_pii_endpoint(path: str) -> bool:
+    return bool(PII_PATH.search(path or ""))
+
+
 def read_safe(method: str, path: str) -> bool:
     o = find_operation(method, path)
-    return bool(o and o.get("read_safe"))
+    return bool(o and o.get("read_safe") and not is_pii_endpoint(o.get("full_path") or path))
 
 
 def search(query: str, limit: int = 12) -> List[Dict[str, Any]]:
@@ -67,7 +76,7 @@ def search(query: str, limit: int = 12) -> List[Dict[str, Any]]:
         if score:
             out.append((score, o))
     out.sort(key=lambda t: -t[0])
-    return [{k: o.get(k) for k in ("method", "full_path", "title", "summary", "spec", "key_kind", "read_safe", "rate_limit", "doc_url")} for _, o in out[:limit]]
+    return [{**{k: o.get(k) for k in ("method", "full_path", "title", "summary", "spec", "key_kind", "rate_limit", "doc_url")}, "read_safe": bool(o.get("read_safe") and not is_pii_endpoint(o.get("full_path", ""))), "pii": is_pii_endpoint(o.get("full_path", ""))} for _, o in out[:limit]]
 
 
 def _resolve(node: Any, sp: Dict[str, Any], depth: int = 0, seen: Optional[set] = None) -> Any:
@@ -151,9 +160,9 @@ def operation_detail(method: str, path: str) -> Dict[str, Any]:
     server = o.get("server") or "https://api-{dc}.moengage.com"
     return {"method": o["method"], "url": server.rstrip("/") + o["path"], "title": o.get("title") or op.get("summary"), "summary": (op.get("description") or o.get("doc_summary") or "")[:700],
             "auth": f"HTTP Basic (Workspace ID : {o['key_kind']} API key)" + (" + MOE-APPKEY header" if any(k.lower().startswith("appkey") or k.lower() == "moeappkey" for k in ((sp.get("components") or {}).get("securitySchemes") or {})) else ""),
-            "key_kind": o["key_kind"], "read_safe": o["read_safe"], "rate_limit": o.get("rate_limit"), "doc_url": o.get("doc_url"),
+            "key_kind": o["key_kind"], "read_safe": bool(o["read_safe"] and not is_pii_endpoint(o["full_path"])), "pii": is_pii_endpoint(o["full_path"]), "rate_limit": o.get("rate_limit"), "doc_url": o.get("doc_url"),
             "parameters": params[:30], "request_body": body, "responses": responses,
-            "engine_note": ("read-safe: the agent may call it with moengage_api_read" if o["read_safe"] else "write: only through an approved proposal")}
+            "engine_note": ("per-user data: never fetched by the agent (would send user data to the model)" if is_pii_endpoint(o["full_path"]) else "read-safe: the agent may call it with moengage_api_read" if o["read_safe"] else "write: only through an approved proposal")}
 
 
 def overview() -> Dict[str, Any]:

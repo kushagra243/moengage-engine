@@ -91,6 +91,10 @@ git pull && ./setup.sh --no-start                         # update
 Prefer to have Claude do steps 2–7? Run `claude` inside the folder and type `/setup`.
 Full detail, storage map and team hosting: [SETUP-MAC.md](SETUP-MAC.md), [HOSTING.md](HOSTING.md).
 
+## The terminal
+
+`http://127.0.0.1:8080` opens the Agentic Brain Terminal: Brain (ranked directives, cognition pipeline, live trace, morning brief), Competitor Intel, Campaign Ideas, Experiments (kanban), SOP Library, Anomalies and Market Feed. Every write still goes through approval; `⌘K` asks the brain; `1–7` switch modules. The previous console remains at `/classic`.
+
 ## Teach the agent, change the engine, know the whole API
 
 - **Teach** — Agent tab → *Teach the agent*: standing instructions (brand voice, exclusions, cadence) that apply to every conversation; or just say "from now on…" in chat and the agent saves it. Toggle or delete any entry.

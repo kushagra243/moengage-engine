@@ -259,6 +259,9 @@ class LLMClient:
             payload["response_format"] = response_format
         if "openrouter.ai" in self.cfg["base_url"]:
             payload["usage"] = {"include": True}          # provider-reported cost in the usage block
+            if get_setting("llm_data_collection", "deny") == "deny":
+                # privacy: only route to providers that do not store or train on prompts; free models that require data collection are skipped
+                payload["provider"] = {"data_collection": "deny"}
         url = self.cfg["base_url"] + "/chat/completions"
         last_err = None
         for attempt in range(3):

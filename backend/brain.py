@@ -441,7 +441,12 @@ def market_view() -> Dict[str, Any]:
         tiles.append({"symbol": "FEAR & GREED", "price": fg.get("value"), "change": None, "note": fg.get("label", ""), "spark": []})
     hooks = (ctx.get("hooks") or {}).get("hooks") or []
     table = [{"regime": (h.get("angle") or "").upper(), "hook": h.get("trigger"), "cohort": " · ".join((h.get("segments") or [])[:2]), "id": h.get("id"), "sop": h.get("sop"), "c": "#ff5c9e" if h.get("angle") == "suppression" else "#ffb84d" if h.get("angle") == "risk_education" else "#4dffa8"} for h in hooks[:14]]
-    return {"tiles": tiles[:12], "hooks": table, "regime": (ctx.get("hooks") or {}).get("regime"), "tier0": ctx.get("tier0"), "narrative": ctx.get("narrative"), "web3": [(r.get("chain"), r.get("symbol"), r.get("vol_24h_usd")) for r in ((ctx.get("web3") or {}).get("trending") or [])[:8]], "generated_at": ctx.get("generated_at"), "cached": ctx.get("cached")}
+    from .market import feed
+    try:
+        layers = {"flash": feed.flash(ctx), "news": feed.biggest_news(ctx), "top_oi": feed.top_oi(ctx), "by_category": feed.top_by_category(ctx), "by_product": feed.by_product(ctx)}
+    except Exception as e:
+        layers = {"flash": [], "news": [], "top_oi": {}, "by_category": {}, "by_product": [], "feed_error": redact(str(e))}
+    return {"tiles": tiles[:12], "hooks": table, "regime": (ctx.get("hooks") or {}).get("regime"), "tier0": ctx.get("tier0"), "narrative": ctx.get("narrative"), "web3": [(r.get("chain"), r.get("symbol"), r.get("vol_24h_usd")) for r in ((ctx.get("web3") or {}).get("trending") or [])[:8]], "generated_at": ctx.get("generated_at"), "cached": ctx.get("cached"), **layers}
 
 
 def trace(limit: int = 40) -> List[Dict[str, str]]:

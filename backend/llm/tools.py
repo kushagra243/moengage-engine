@@ -552,6 +552,31 @@ def onchain_vs_cex(force: bool = False) -> Dict[str, Any]:
     return onchain_cex.compare(force=force)
 
 
+def market_flash(hours: int = 6) -> Dict[str, Any]:
+    """Breaking now: Tier-0, regime, big moves across crypto / US-stock / index / commodity perps, OI surges, listings, funding extremes, risk headlines, competitor actions, macro prints in 24h, web3 spikes — each with the products it touches. Plus biggest news, top OI assets and intel per CoinDCX product."""
+    from ..market import feed
+    from ..market.context import _latest
+    ctx = _latest(6 * 3600) or {}
+    return {"flash": feed.flash(ctx, hours=hours), "news": feed.biggest_news(ctx, 8), "top_oi": feed.top_oi(ctx, 8), "by_product": feed.by_product(ctx)}
+
+
+def campaign_from_alert(product: str, headline: str, detail: str = "", sop_id: Optional[str] = None, segment_name: Optional[str] = None, dry_run: bool = True) -> Dict[str, Any]:
+    """Turn a market alert into an approval-gated campaign on the go: picks the product's default SOP (or sop_id), builds two compliant fact+tool variants (rewrite them with revise_proposal if you can do better), runs pre-flight and queues proposals. dry_run first."""
+    from .. import sops
+    return sops.run_from_alert(product, headline, detail, sop_id=sop_id, segment_name=segment_name, created_by="agent", dry_run=dry_run)
+
+
+def competitor_dossier(venue: str) -> Dict[str, Any]:
+    """Marketing dossier for one rival (delta, binance, bybit, okx, bitget, coinbase, kraken, kucoin, gate, mexc, htx, wazirx, zebpay, giottus, koinbx, unocoin, hyperliquid): market position by category, share and 7-day changes, fees, traffic, app rank/rating/version, campaigns in 7 days (types, cadence, channels, audience focus), inferred playbook, latest pair moves, our counters and how to beat them. Internal."""
+    from ..market import dossiers, competitors, benchmarks
+    from .. import brain
+    try:
+        it = brain.intel()
+    except Exception:
+        it = {}
+    return dossiers.dossier(venue, {**competitors.intel({"crypto_markets": []}), "rivals": it.get("rivals") or []}, benchmarks.benchmarks())
+
+
 def pair_battle(symbol: str) -> Dict[str, Any]:
     """One pair across every tracked venue: 24h volume, share, OI, funding, 24h change; whether we list it."""
     from ..market import competitors
@@ -788,6 +813,9 @@ TOOL_SCHEMAS: List[Dict[str, Any]] = [
     _fn("competitor_benchmarks", "Category leaderboards (spot / perps / options / commodities_tokenised) across Indian and global venues with our gap multiple and pair-level targets to match. Internal.", {"category": {"type": "string", "enum": ["spot", "perps", "options", "commodities_tokenised"]}, "force": {"type": "boolean"}}),
     _fn("competitor_campaigns", "Competitor campaigns detected in the last N hours from announcements, blogs, news and App Store notes — type, impact, counter SOP; App Store ranks. Internal.", {"hours": {"type": "integer"}, "venue": STR, "force": {"type": "boolean"}}),
     _fn("onchain_vs_cex", "Hyperliquid vs centralised venues (volume, OI, users, rank, share), on-chain perps OI landscape, per-coin OI share and funding edges. Internal.", {"force": {"type": "boolean"}}),
+    _fn("market_flash", "Breaking-now market flash with product lenses, biggest news, top OI assets and intel per product.", {"hours": {"type": "integer"}}),
+    _fn("campaign_from_alert", "Queue an approval-gated campaign from a market alert via the product's SOP with compliant placeholder copy; dry_run first, then revise_proposal to improve copy.", {"product": STR, "headline": STR, "detail": STR, "sop_id": STR, "segment_name": STR, "dry_run": {"type": "boolean"}}, ["product", "headline"]),
+    _fn("competitor_dossier", "Marketing dossier for one rival: position by category, 7-day changes, app presence, campaigns and playbook, counters, how to beat them. Internal.", {"venue": STR}, ["venue"]),
     _fn("pair_battle", "One pair across all tracked venues: volume share, OI, funding, change; whether we list it.", {"symbol": STR}, ["symbol"]),
     _fn("web3_trending", "Trending on-chain tokens on our Web3 chains (quality-gated, unverified, paid boosts separate). Data for analysis; copy never picks tokens or names the data venue.", {"chain": STR, "force": {"type": "boolean"}}),
     _fn("product_cohorts", "Families grouped by product affinity with reach/performance and the product treatment matrix (pillars, cadence, never-list, cross-sell on intent, SOPs, Tier-0 lens)."),
@@ -826,5 +854,5 @@ TOOLS: Dict[str, Callable[..., Dict[str, Any]]] = {
     "north_star": _safe(north_star), "set_north_star": _safe(set_north_star), "comms_limits": _safe(comms_limits), "set_comms_limits": _safe(set_comms_limits), "peace_index": _safe(peace_index),
     "guardrail_monitor": _safe(guardrail_monitor), "write_flight_plan": _safe(write_flight_plan), "flight_plans": _safe(flight_plans),
     "segment_study": _safe(segment_study), "define_nomenclature": _safe(define_nomenclature), "list_sops": _safe(list_sops), "sop_detail": _safe(sop_detail), "define_sop": _safe(define_sop), "run_sop": _safe(run_sop), "sop_runs": _safe(sop_runs), "channel_matrix": _safe(channel_matrix),
-    "competitor_intel": _safe(competitor_intel), "competitor_benchmarks": _safe(competitor_benchmarks), "competitor_campaigns": _safe(competitor_campaigns), "onchain_vs_cex": _safe(onchain_vs_cex), "pair_battle": _safe(pair_battle), "web3_trending": _safe(web3_trending), "product_cohorts": _safe(product_cohorts), "announcement_lenses": _safe(announcement_lenses), "request_data": _safe(request_data), "data_requests": _safe(data_requests),
+    "competitor_intel": _safe(competitor_intel), "competitor_benchmarks": _safe(competitor_benchmarks), "competitor_campaigns": _safe(competitor_campaigns), "onchain_vs_cex": _safe(onchain_vs_cex), "market_flash": _safe(market_flash), "campaign_from_alert": _safe(campaign_from_alert), "competitor_dossier": _safe(competitor_dossier), "pair_battle": _safe(pair_battle), "web3_trending": _safe(web3_trending), "product_cohorts": _safe(product_cohorts), "announcement_lenses": _safe(announcement_lenses), "request_data": _safe(request_data), "data_requests": _safe(data_requests),
 }

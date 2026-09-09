@@ -745,3 +745,35 @@ def product_cohort_matrix() -> Dict[str, Any]:
     return {"cohorts": rows, "rules": ["a user with several products gets the most specific product's programme (web3 > options > tokenised > crypto perps > earn > SIP > spot) and Tier-0 lenses for each",
                                         "cross-sell only on intent signals (screen views), education-first for derivatives, never to liquidated-14d or loss-dormant users",
                                         "communication limits and regime multipliers apply on top of product cadence", "no venue or competitor names in any cohort's copy"]}
+
+
+BANNED_IN_ALERT_COPY = re.compile(r"\b(buy|sell|long|short|pump|moon|rally|crash|breakout|surge)\b", re.I)
+
+
+def _alert_copy(product: str, headline: str, detail: str, cta: str) -> List[Dict[str, Any]]:
+    """Two fact + tool variants from an alert; venue names and direction words are stripped; lengths respect push limits."""
+    def clean(t: str) -> str:
+        t = re.sub(r"\b(binance|hyperliquid|bybit|okx|bitget|coinbase|delta|kraken|kucoin|gate|mexc)\b", "", t, flags=re.I)
+        t = BANNED_IN_ALERT_COPY.sub("moved", t)
+        return re.sub(r"\s+", " ", t).strip(" ·-—")
+    h = clean(headline)[:60]; d = clean(detail)[:100]
+    tool = {"spot": "Set a 5% alert so you don't have to watch the screen.", "sip": "Your plan continues; here is what volatility means for a recurring buyer.", "perps_crypto": "Check your margin buffer and funding on the position screen.",
+            "perps_us_stocks": "It trades 24/7 on CoinDCX — see how it's pricing now.", "perps_indices": "Review your index exposure and the macro calendar.", "perps_commodities": "See how it trades here, 24/7.", "options": "Defined risk: know your max loss before expiry.",
+            "earn": "Rates are variable; see what changes for your position.", "web3": "Unverified token: check liquidity and slippage before anything."}.get(product, "Open the app to review.")
+    return [{"label": "A · fact + tool", "title": h, "body": (d + " " + tool)[:140], "cta": cta}, {"label": "B · tool first", "title": (tool.split(".")[0])[:60], "body": (h + ". " + d)[:140], "cta": cta}]
+
+
+def run_from_alert(product: str, headline: str, detail: str = "", sop_id: Optional[str] = None, segment_name: Optional[str] = None, created_by: str = "user", dry_run: bool = False) -> Dict[str, Any]:
+    """On-the-go campaign from a market alert: pick the product's SOP, build compliant placeholder copy, queue approval-gated proposals (copy marked for edit)."""
+    from .market.feed import campaign_hint, CTA
+    hint = campaign_hint(product, {"category": ""}) if not sop_id else {"sop": sop_id, "cta": CTA.get(product, "Open")}
+    sop = get_sop(sop_id or hint["sop"])
+    if not sop:
+        return {"ok": False, "error": f"unknown SOP {sop_id or hint['sop']}"}
+    variants = _alert_copy(product, headline, detail, hint["cta"])
+    vbs = {str(i): variants for i, st in enumerate(sop["steps"]) if not str(st.get("purpose", "")).startswith("(internal)")}
+    r = run_sop(sop["id"], segment_name=segment_name, variants_by_step=vbs, created_by=created_by, dry_run=dry_run)
+    r["variants"] = variants; r["source_alert"] = {"product": product, "headline": headline, "detail": detail}
+    if r.get("ok") and r.get("run_id"):
+        audit("sop.run_from_alert", {"run_id": r["run_id"], "product": product, "sop": sop["id"], "headline": headline[:80]}, actor=created_by)
+    return r

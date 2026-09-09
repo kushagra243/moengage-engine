@@ -71,7 +71,15 @@ class DailyAutomationScheduler:
             except Exception as e:
                 report["market_error"] = redact(str(e))
 
-            # 3) agent brief
+            # 3) growth feed (rules; no model needed)
+            try:
+                from .growth import generate_rule_ideas
+                report["growth"] = generate_rule_ideas()
+                report["steps"].append("growth_rules")
+            except Exception as e:
+                report["growth_error"] = redact(str(e))
+
+            # 4) agent brief + agent ideas (only when a model is configured)
             cfg = llm_settings()
             want_llm = (cfg["api_key"] or cfg["provider"] == "claude_cli") if use_llm is None else use_llm
             if want_llm:
@@ -81,6 +89,12 @@ class DailyAutomationScheduler:
                     report["brief"] = brief
                     report["executive_summary"] = brief.get("executive_summary") or brief.get("text", "")[:600]
                     report["steps"].append("agent_brief")
+                    try:
+                        from .growth import generate_agent_ideas
+                        report["growth_agent"] = generate_agent_ideas(agent, n=5)
+                        report["steps"].append("growth_agent")
+                    except Exception as e:
+                        report["growth_agent_error"] = redact(str(e))
                 except Exception as e:
                     report["brief_error"] = redact(str(e))
             if not report.get("executive_summary"):
@@ -102,16 +116,26 @@ class DailyAutomationScheduler:
         finally:
             self._run_lock.release()
 
+    def refresh_intraday(self) -> Dict[str, Any]:
+        """Lightweight, model-free refresh: re-read campaigns, snapshot, detect, market, rules ideas."""
+        return self.trigger_run(trigger_type="intraday", use_llm=False)
+
     def _loop(self):
         last_minute = None
+        last_intraday = time.time()
         while self.is_running:
             try:
                 enabled = get_setting("schedule_enabled", "true").lower() == "true"
                 sched = get_setting("schedule_time", "09:00").strip()
+                every_h = float(get_setting("refresh_interval_hours", "6") or 6)
                 now = datetime.now().strftime("%H:%M")
                 if enabled and now == sched and last_minute != now:
                     last_minute = now
                     self.trigger_run(trigger_type="scheduled")
+                    last_intraday = time.time()
+                elif enabled and every_h > 0 and time.time() - last_intraday >= every_h * 3600:
+                    last_intraday = time.time()
+                    self.refresh_intraday()
                 time.sleep(30)
             except Exception as e:
                 log.warning("scheduler loop error: %s", redact(str(e)))

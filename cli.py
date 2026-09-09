@@ -51,7 +51,7 @@ def cmd_set_key(a):
 
 
 def cmd_set(a):
-    if not a.key.startswith(("moengage_", "llm_", "market_", "schedule_", "mock_mode")):
+    if not a.key.startswith(("moengage_", "llm_", "market_", "schedule_", "refresh_", "mock_mode")):
         sys.exit("refusing unknown setting")
     set_setting(a.key, a.value)
     print(f"{a.key} = {a.value if 'key' not in a.key and 'cookie' not in a.key else '<hidden>'}")
@@ -154,6 +154,63 @@ def cmd_daily_run(a):
         _print(r)
 
 
+def cmd_growth(a):
+    from backend import growth
+    if a.action == "refresh":
+        out = {"rules": growth.generate_rule_ideas()}
+        if a.llm:
+            from backend.llm.agent import MarketerAgent
+            out["agent"] = growth.generate_agent_ideas(MarketerAgent(), n=a.n)
+        _print(out)
+    elif a.action == "list":
+        for i in growth.list_ideas(status=a.status or "new", limit=a.n or 40):
+            print(f"#{i['id']:<4} [{i['kind']:18}] p{i['priority']:<3} {i['title']}\n      why: {i['why'][:140]}")
+    elif a.action == "set":
+        _print(growth.set_status(a.id, a.status))
+
+
+PLIST = os.path.expanduser("~/Library/LaunchAgents/com.moengage-engine.plist")
+
+
+def cmd_service(a):
+    """Run persistently under launchd (starts at login, restarts on crash). No model needed."""
+    import subprocess
+    label = "com.moengage-engine"
+    if a.action == "install":
+        port = a.port or "8080"
+        plist = f"""<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0"><dict>
+  <key>Label</key><string>{label}</string>
+  <key>ProgramArguments</key><array><string>{os.path.join(ROOT, '.venv', 'bin', 'python3')}</string><string>{os.path.join(ROOT, 'start.py')}</string></array>
+  <key>WorkingDirectory</key><string>{ROOT}</string>
+  <key>EnvironmentVariables</key><dict><key>PORT</key><string>{port}</string><key>PATH</key><string>/usr/local/bin:/opt/homebrew/bin:/usr/bin:/bin</string></dict>
+  <key>RunAtLoad</key><true/>
+  <key>KeepAlive</key><true/>
+  <key>ThrottleInterval</key><integer>10</integer>
+  <key>StandardOutPath</key><string>{os.path.join(ROOT, 'data', 'logs', 'service.out.log')}</string>
+  <key>StandardErrorPath</key><string>{os.path.join(ROOT, 'data', 'logs', 'service.err.log')}</string>
+</dict></plist>
+"""
+        os.makedirs(os.path.dirname(PLIST), exist_ok=True); os.makedirs(os.path.join(ROOT, "data", "logs"), exist_ok=True)
+        subprocess.run(["launchctl", "bootout", f"gui/{os.getuid()}", PLIST], capture_output=True)
+        open(PLIST, "w").write(plist)
+        r = subprocess.run(["launchctl", "bootstrap", f"gui/{os.getuid()}", PLIST], capture_output=True, text=True)
+        print("installed", PLIST); print(r.stdout or r.stderr or "loaded"); print(f"console: http://127.0.0.1:{port}  (starts at login, restarts on crash; runs snapshots, anomalies, market and growth rules on schedule without any model)")
+    elif a.action == "uninstall":
+        subprocess.run(["launchctl", "bootout", f"gui/{os.getuid()}", PLIST], capture_output=True)
+        if os.path.exists(PLIST):
+            os.remove(PLIST)
+        print("removed", PLIST)
+    else:
+        r = subprocess.run(["launchctl", "print", f"gui/{os.getuid()}/{label}"], capture_output=True, text=True)
+        if r.returncode == 0:
+            state = [l.strip() for l in r.stdout.splitlines() if "state =" in l or "pid =" in l]
+            print("service loaded;", "; ".join(state) or "running")
+        else:
+            print("service not installed (run: ./cli.py service install)")
+
+
 def cmd_audit_log(a):
     from backend.security.audit import tail, verify_chain
     _print({"chain": verify_chain(), "entries": tail(a.n)})
@@ -178,6 +235,8 @@ def main():
     s = sp.add_parser("approvals"); s.add_argument("action", choices=["list", "show", "approve", "reject"]); s.add_argument("id", nargs="?", type=int); s.add_argument("--status"); s.add_argument("--note"); s.set_defaults(fn=cmd_approvals)
     s = sp.add_parser("daily-run"); s.add_argument("--full", action="store_true"); s.set_defaults(fn=cmd_daily_run)
     s = sp.add_parser("audit-log"); s.add_argument("-n", type=int, default=30); s.set_defaults(fn=cmd_audit_log)
+    s = sp.add_parser("growth", help="growth feed: refresh | list | set"); s.add_argument("action", choices=["refresh", "list", "set"]); s.add_argument("id", nargs="?", type=int); s.add_argument("--status"); s.add_argument("--llm", action="store_true"); s.add_argument("-n", type=int, default=5); s.set_defaults(fn=cmd_growth)
+    s = sp.add_parser("service", help="persistent background service (launchd): install | uninstall | status"); s.add_argument("action", choices=["install", "uninstall", "status"]); s.add_argument("--port"); s.set_defaults(fn=cmd_service)
     a = p.parse_args()
     a.fn(a)
 

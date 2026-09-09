@@ -442,3 +442,40 @@ ol.steps-list code { background: var(--bg); padding: 0 4px; border-radius: 3px; 
   .grid-2 { grid-template-columns: 1fr; }
   .form-grid { grid-template-columns: 1fr; }
 }
+
+/* ── Overview: content + sticky growth column ───────────────────────────── */
+.ov-grid { display: grid; grid-template-columns: minmax(0, 1fr) 400px; gap: 12px; align-items: start; }
+@media (max-width: 1280px) { .ov-grid { grid-template-columns: minmax(0, 1fr) 340px; } }
+@media (max-width: 1100px) { .ov-grid { grid-template-columns: 1fr; } .feed-col { position: static; max-height: none; } }
+.feed-col { position: sticky; top: 8px; max-height: calc(100vh - 80px); display: flex; flex-direction: column; gap: 8px; min-width: 0; }
+.feed-col .feed-head { margin: 0; }
+.feed { overflow: auto; display: flex; flex-direction: column; gap: 8px; padding-right: 2px; min-height: 120px; }
+.market-strip { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 6px; margin-bottom: 8px; }
+.market-strip .m { background: var(--bg); border: 1px solid var(--line); border-radius: var(--r); padding: 6px 8px; min-width: 0; }
+.market-strip .m .k { font-size: 10px; text-transform: uppercase; letter-spacing: .06em; color: var(--dim); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.market-strip .m .v { font-family: var(--mono); font-size: 13px; margin-top: 2px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.market-strip .m.wide { grid-column: 1 / -1; }
+.idea { background: var(--panel); border: 1px solid var(--line); border-left: 3px solid var(--line-2); border-radius: 8px; padding: 10px 12px; display: flex; flex-direction: column; gap: 5px; }
+.idea.k-trending_campaign { border-left-color: var(--accent); }
+.idea.k-growth_hack { border-left-color: var(--ok); }
+.idea.k-market_play { border-left-color: var(--info); }
+.idea.k-moengage_activity { border-left-color: var(--warn); }
+.idea.k-fix { border-left-color: var(--bad); }
+.idea .top { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }
+.idea .kind { font-size: 10px; font-weight: 700; text-transform: uppercase; letter-spacing: .06em; padding: 1px 6px; border-radius: 3px; background: var(--bg-3); color: var(--muted); }
+.idea .kind.k-trending_campaign { background: var(--accent-dim); color: var(--accent); }
+.idea .kind.k-growth_hack { background: var(--ok-dim); color: var(--ok); }
+.idea .kind.k-market_play { background: var(--info-dim); color: var(--info); }
+.idea .kind.k-moengage_activity { background: var(--warn-dim); color: var(--warn); }
+.idea .kind.k-fix { background: var(--bad-dim); color: var(--bad); }
+.idea .title { font-size: 13px; font-weight: 600; line-height: 1.35; }
+.idea .why { font-size: 12px; color: var(--text); }
+.idea .why b { color: var(--muted); font-weight: 600; }
+.idea .how { font-size: 11.5px; color: var(--muted); white-space: pre-wrap; }
+.idea .meta { font-size: 10.5px; color: var(--dim); font-family: var(--mono); display: flex; gap: 8px; flex-wrap: wrap; }
+.idea .foot { display: flex; gap: 6px; align-items: center; margin-top: 2px; }
+.idea .foot .grow { flex: 1; }
+.idea details summary { cursor: pointer; font-size: 11px; color: var(--dim); }
+.idea .src { font-size: 10px; color: var(--dim); font-family: var(--mono); }
+.idea .src.agent { color: var(--accent); }
+.chip.on { border-color: var(--accent); color: var(--accent); }

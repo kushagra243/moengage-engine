@@ -78,3 +78,24 @@ def test_llm_scope_cannot_reach_other_hosts(fake_server):
         s.get("https://openrouter.ai/api/v1/models")   # base_url is the fake server now, so openrouter is off-list
     with pytest.raises(NetworkPolicyError):
         s.get("https://api-01.moengage.com/v1/x")
+
+
+def test_growth_feed_rules_dedupe_and_status():
+    from backend import growth
+    from backend.database import set_setting
+    set_setting("mock_mode", "true")
+    r1 = growth.generate_rule_ideas()
+    assert r1["generated"] >= 10 and r1["added"] >= 10
+    r2 = growth.generate_rule_ideas()
+    assert r2["added"] == 0 and r2["refreshed"] >= 10          # de-duplicated by normalised title
+    new = growth.list_ideas(status="new")
+    assert new and new[0]["priority"] >= new[-1]["priority"]     # ranked
+    kinds = {i["kind"] for i in new}
+    assert "trending_campaign" in kinds and "moengage_activity" in kinds
+    first = new[0]
+    saved = growth.set_status(first["id"], "saved")
+    assert saved["status"] == "saved" and growth.counts().get("saved", 0) >= 1
+    with pytest.raises(ValueError):
+        growth.set_status(first["id"], "bogus")
+    digest = growth.digest_for_agent()
+    assert "existing_titles" in digest and first["title"] in digest["existing_titles"]

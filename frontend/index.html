@@ -44,18 +44,12 @@
           </div>
         </div>
         <div class="grid grid-5 mb" id="ov-tiles"></div>
-        <div class="grid grid-2">
+        <div class="ov-grid">
           <div class="stack">
             <div class="card">
               <div class="card-head"><h3>Audited campaigns</h3><span class="small dim" id="ov-board-meta"></span></div>
               <div id="ov-board"></div>
             </div>
-            <div class="card">
-              <div class="card-head"><h3>Lifecycle templates</h3></div>
-              <div id="ov-templates"></div>
-            </div>
-          </div>
-          <div class="stack">
             <div class="card">
               <div class="card-head"><h3>Anomaly summary</h3><button class="btn ghost sm" id="ov-goto-anomalies">Open anomalies →</button></div>
               <div id="ov-anomaly"></div>
@@ -64,7 +58,24 @@
               <div class="card-head"><h3>Latest daily run</h3><span class="small dim" id="ov-run-meta"></span></div>
               <div id="ov-run"></div>
             </div>
+            <div class="card">
+              <div class="card-head"><h3>Lifecycle templates</h3></div>
+              <div id="ov-templates"></div>
+            </div>
           </div>
+          <aside class="feed-col">
+            <div class="card feed-head">
+              <div class="card-head"><h3>Markets &amp; growth hacks</h3><div class="actions"><span class="small dim" id="gf-meta"></span><button class="btn sm" id="gf-refresh-btn" data-icon="zap" title="Re-derive from data (and ask the agent if a model is configured)">Refresh</button></div></div>
+              <div id="gf-market" class="market-strip"></div>
+              <div class="subtabs" id="gf-tabs">
+                <button class="subtab active" data-gstatus="new">New <span class="count" data-gcount="new">0</span></button>
+                <button class="subtab" data-gstatus="saved">Saved <span class="count" data-gcount="saved">0</span></button>
+                <button class="subtab" data-gstatus="proposed">Proposed <span class="count" data-gcount="proposed">0</span></button>
+              </div>
+              <div class="row small" id="gf-kinds"></div>
+            </div>
+            <div id="gf-feed" class="feed"></div>
+          </aside>
         </div>
       </section>
 

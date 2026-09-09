@@ -127,11 +127,17 @@ Leave **Demo / mock mode** on. Everything works on a simulated workspace and
 every number is labelled `mock`. The CLI walkthrough in the README exercises
 each feature without touching MoEngage.
 
-## 7. Keeping it running
+## 7. Keeping it running (persistent, no model needed)
 
-- The scheduler runs the daily process at the time in **Settings → Scheduler**
-  while `start.py` is running. To keep it up after logout, run it under
-  `launchd` or simply leave a terminal open with `python3 start.py`.
+```bash
+./cli.py service install     # launchd agent: starts at login, restarts on crash, console on :8080
+./cli.py service status
+```
+
+The service runs the daily process at **Settings → Scheduler** time and a
+model-free refresh every 6 hours (`refresh_interval_hours`): API/dashboard
+reads, snapshots, anomalies, market context and the growth feed. No model
+credits are used unless a provider is configured.
 - Update: `git pull && python3 start.py` (dependencies are re-checked).
 - Restart cleanly: `pkill -f start.py && python3 start.py`.
 

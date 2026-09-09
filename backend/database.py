@@ -123,6 +123,7 @@ def init_db():
         "market_macro": "DX-Y.NYB,^TNX,^VIX,INR=X",
         "market_region": "IN",
         "schedule_time": "09:00",
+        "refresh_interval_hours": "6",
         "schedule_enabled": "true",
         "mock_mode": "true"  # Defaults to true so users have working experience instantly
     }

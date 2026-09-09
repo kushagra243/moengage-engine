@@ -34,6 +34,7 @@ from .anomaly.store import recent_events
 from .market import market_context, market_news, campaign_hooks
 from .llm import llm_settings, list_models, probe as llm_probe, LLMError
 from .llm.agent import MarketerAgent
+from . import growth
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(name)s %(levelname)s %(message)s")
 install_log_redaction()
@@ -41,6 +42,7 @@ install_log_redaction()
 init_db()
 init_anomaly_tables()
 approvals.init_approval_tables()
+growth.init_growth_tables()
 _migrated = migrate_plaintext_secrets()
 if _migrated:
     logging.getLogger("moengage").info("encrypted %d legacy plaintext secret(s)", _migrated)
@@ -113,11 +115,12 @@ def status():
         "security": {"secrets_backend": secret_store.status()["backend"], "audit": verify_chain(), "bind": "127.0.0.1"},
         "integration": {k: v for k, v in registry_status().items() if k in ("usable_reads", "usable_writes", "learned_file", "verified_file")},
         "anomaly": {"days_of_history": snapshot_count(moe.mode)},
+        "growth": growth.counts(),
     }
 
 
 # ── settings ───────────────────────────────────────────────────────────────────
-ALLOWED_SETTING_PREFIXES = ("moengage_", "llm_", "market_", "schedule_", "mock_mode")
+ALLOWED_SETTING_PREFIXES = ("moengage_", "llm_", "market_", "schedule_", "refresh_", "mock_mode")
 
 
 @app.get("/api/settings")
@@ -415,6 +418,45 @@ def approvals_reject(pid: int, payload: DecisionPayload):
         return approvals.reject(pid, note=payload.note, decided_by="user")
     except approvals.ApprovalError as e:
         raise HTTPException(400, str(e))
+
+
+# ── growth feed ────────────────────────────────────────────────────────────────
+class IdeaStatus(BaseModel):
+    status: str
+
+class GrowthRefresh(BaseModel):
+    use_llm: Optional[bool] = None
+    n: int = 5
+
+
+@app.get("/api/growth/feed")
+def growth_feed(status: Optional[str] = "new", kind: Optional[str] = None, limit: int = 40):
+    return {"ideas": growth.list_ideas(status=status or None, kind=kind, limit=limit), "counts": growth.counts()}
+
+
+@app.post("/api/growth/refresh")
+def growth_refresh(payload: GrowthRefresh):
+    out: Dict[str, Any] = {"rules": growth.generate_rule_ideas()}
+    cfg = llm_settings()
+    want = (bool(cfg["api_key"]) or cfg["provider"] == "claude_cli") if payload.use_llm is None else payload.use_llm
+    if want:
+        try:
+            out["agent"] = growth.generate_agent_ideas(MarketerAgent(), n=payload.n)
+        except Exception as e:
+            out["agent_error"] = redact(str(e))
+    out["counts"] = growth.counts()
+    return out
+
+
+@app.post("/api/growth/{idea_id}/status")
+def growth_status(idea_id: int, payload: IdeaStatus):
+    try:
+        r = growth.set_status(idea_id, payload.status)
+    except ValueError as e:
+        raise HTTPException(400, str(e))
+    if not r:
+        raise HTTPException(404, "idea not found")
+    return r
 
 
 # ── agent / LLM ────────────────────────────────────────────────────────────────

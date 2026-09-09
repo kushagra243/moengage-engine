@@ -923,6 +923,12 @@ def market_competitor_campaigns(hours: int = 48, venue: Optional[str] = None, fo
     return campaign_intel.campaigns(hours=hours, venue=venue, force=force)
 
 
+@app.get("/api/market/onchain-vs-cex")
+def market_onchain_vs_cex(force: bool = False):
+    from .market import onchain_cex
+    return onchain_cex.compare(force=force)
+
+
 @app.get("/api/market/benchmarks")
 def market_benchmarks(category: Optional[str] = None, force: bool = False):
     from .market import benchmarks

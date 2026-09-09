@@ -65,6 +65,9 @@ Outbound HTTP only through `guarded_session` allowlists; the agent may not read 
 ## Campaign listening
 `backend/market/campaign_intel.py` → `/api/market/competitor-campaigns`, tool `competitor_campaigns`, terminal Intel "Campaigns detected" + App Store panel. Free channels only (exchange announcement APIs, Mudrex RSS, Google News per venue, App Store lookup/rank feeds); keyword classification; persisted 30 days; MATERIAL items feed actions/hooks with the counter SOP.
 
+## Hyperliquid vs CEX
+`backend/market/onchain_cex.py` → `/api/market/onchain-vs-cex`, tool `onchain_vs_cex`, terminal Intel panel. HL global stats + CMC CEX derivatives + DefiLlama OI (free) + Binance/Bybit/OKX per-coin OI and funding; optional Coinglass key (`market_coinglass_api_key`, encrypted).
+
 ## Category benchmarks
 `backend/market/benchmarks.py` → `/api/market/benchmarks`, agent tool `competitor_benchmarks`, terminal Intel → "Best in industry". Spot / perps / options / commodities-tokenised leaderboards across Binance, OKX, Bybit, Bitget, Coinbase, Kraken, KuCoin, Gate, MEXC, HTX, Deribit, Hyperliquid (reference) and the Indian venues, from CMC listings + direct public tickers; our figure per category (spot = CMC; perps/tokenised = liquidity-venue reference; options unknown), gap multiples to the India and global leaders, and pair-level "match their numbers" targets. Daily rows kept 120 days for trends.
 

@@ -112,6 +112,7 @@ MARKET_HOSTS = [
     "api.coinmarketcap.com",                                                                 # CMC public data-api: exchange market pairs / listings (keyless)
     "eapi.binance.com", "api.bitget.com", "www.deribit.com",                                 # category benchmarks: Binance options, Bitget futures, Deribit options (keyless)
     "www.binance.com", "itunes.apple.com", "mudrex.com",                                    # campaign listening: Binance CMS announcements, App Store lookup/rank feeds, Mudrex blog RSS
+    "api.llama.fi", "open-api-v4.coinglass.com",                                             # on-chain vs CEX: DefiLlama open-interest (free), Coinglass (optional key)
 ]
 
 _sessions: Dict[str, GuardedSession] = {}

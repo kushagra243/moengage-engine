@@ -425,7 +425,7 @@ def intel() -> Dict[str, Any]:
         if camp_act:
             counter = camp_act["what"].split("→", 1)[-1].strip()
         elif mine_s:
-            counter = f"spotlight {', '.join(x['symbol'] for x in mine_s[:3])} to our watchers/holders today (they are surging there)"
+            counter = f"spotlight {', '.join(list(dict.fromkeys(x['symbol'] for x in mine_s))[:3])} to our watchers/holders today (they are surging there)"
         elif g_n:
             counter = f"listing asks for {g_n} pair(s) they have; spotlight what we already list"
         elif t.get("taker_fee_pct") is not None and ours.get("taker_fee_pct") is not None and float(t["taker_fee_pct"]) < float(ours["taker_fee_pct"]):
@@ -562,6 +562,43 @@ def queue_recommendation(rec_id: str, actor: str = "user") -> Dict[str, Any]:
     return {"ok": True, "run_id": real.get("run_id"), "proposal_ids": real.get("proposal_ids", []), "sop": rec["sop"]}
 
 
+GLOBAL_LEADERS = ["binance", "okx", "bitget", "coinbase", "kraken", "bybit"]
+
+
+def global_leaders(bench: Dict[str, Any], campaigns: List[Dict[str, Any]], exclude: Optional[set] = None) -> List[Dict[str, Any]]:
+    """Reference cards for the global leaders: per-category volume, OI, rank and gap to us, top pairs, campaigns detected in 48h and the counter play."""
+    cats = bench.get("categories") or {}
+    ours = {cat: ((c.get("ours") or {}).get("vol_24h_usd") if not (c.get("ours") or {}).get("unknown") else None) for cat, c in cats.items()}
+    out = []
+    for vid in GLOBAL_LEADERS:
+        if vid in (exclude or set()):
+            continue
+        per, top_pairs, total = {}, [], 0.0
+        name = None
+        for cat, c in cats.items():
+            for rank, v in enumerate(c.get("venues") or [], 1):
+                if v.get("venue") == vid:
+                    name = v.get("name"); vol = v.get("vol_24h_usd") or 0; total += vol
+                    per[cat] = {"vol_24h_usd": vol, "oi_usd": v.get("oi_usd"), "rank": rank, "gap_x": round(vol / ours[cat], 1) if ours.get(cat) and vol else None, "taker_fee_pct": v.get("taker_fee_pct"), "markets": v.get("markets")}
+                    if cat in ("perps", "spot") and not top_pairs:
+                        top_pairs = [p.get("symbol") for p in (v.get("top_pairs") or [])[:5]]
+        if not name:
+            continue
+        camps = [c for c in campaigns if c.get("venue") == vid][:4]
+        material = next((c for c in camps if c.get("impact") == "MATERIAL" and c.get("counter_sop")), None) or next((c for c in camps if c.get("counter_sop")), None)
+        worst = max(((cat, d["gap_x"]) for cat, d in per.items() if d.get("gap_x")), key=lambda kv: kv[1], default=None)
+        if material:
+            how = (material.get("counter") or "").strip()
+            counter = f"counter their {material['type'].replace('_', ' ')} with {material['counter_sop'].replace('sop_', '')}" + (f": {how[:90]}" if how else " (compliant, no matching offer)")
+        elif worst:
+            counter = f"match their numbers in {worst[0].replace('_', ' / ')} ({worst[1]}× us): pair-level battles on shared top pairs, product asks where liquidity is the gap"
+        else:
+            counter = "reference only; watch listings and campaign cadence"
+        out.append({"id": vid, "name": name, "scope": "global reference", "vol_24h_usd": total, "categories": per, "top_pairs": top_pairs, "campaigns_48h": len([c for c in campaigns if c.get("venue") == vid]), "latest_campaign": ({"title": camps[0].get("title"), "type": camps[0].get("type"), "impact": camps[0].get("impact"), "url": camps[0].get("url")} if camps else None), "counterPlay": counter[:200]})
+    out.sort(key=lambda r: -r["vol_24h_usd"])
+    return out
+
+
 def lab_view() -> Dict[str, Any]:
     """Brain Lab: one intel-heavy page — situation, money flow, trader behaviour, recommendations (structural P0 first, ICE-ranked), global events, rivals that matter, campaigns, markets, benchmarks summary, HL vs CEX summary."""
     from .market import moneyflow, feed
@@ -586,9 +623,14 @@ def lab_view() -> Dict[str, Any]:
         o = compare(); ocx = {"hl": o.get("hyperliquid"), "vs": o.get("hl_vs_cex"), "onchain_top": (o.get("onchain") or {}).get("protocols", [])[:5], "per_coin": (o.get("per_coin") or [])[:6]}
     except Exception:
         pass
+    try:
+        from .market.benchmarks import benchmarks as _bm
+        globals_ = global_leaders(_bm(), it.get("campaigns", []), exclude={r["id"] for r in majors})
+    except Exception:
+        globals_ = []
     return {"generated_at": ctx.get("generated_at"), "situation": {"regime": (ctx.get("hooks") or {}).get("regime"), "tier0": ctx.get("tier0"), "flash": feed.flash(ctx)[:10], "risk_appetite": (L["flow"] or {}).get("risk_appetite")},
             "flow": L["flow"], "reads": L["reads"], "recommendations": L["recommendations"], "events": {"news": feed.biggest_news(ctx, 10), "calendar": [e for e in (ctx.get("calendar") or []) if e.get("impact") == "High"][:8], "risk_flags": ((ctx.get("news") or {}).get("risk_flags") or [])[:6]},
-            "rivals": {"major": majors, "minor": minors, "moves": it.get("moves", [])[:12], "campaigns": it.get("campaigns", [])[:12], "apps": it.get("apps", {}), "actions": it.get("actions", [])[:8], "sov": it.get("sov", [])},
+            "rivals": {"major": majors, "minor": minors, "global": globals_, "moves": it.get("moves", [])[:12], "campaigns": it.get("campaigns", [])[:12], "apps": it.get("apps", {}), "actions": it.get("actions", [])[:8], "sov": it.get("sov", [])},
             "benchmarks": bench_summary, "hl_vs_cex": ocx, "market": {k: mv.get(k) for k in ("tiles", "hooks", "regime", "narrative", "top_oi", "by_category", "by_product")},
             "note": "internal intelligence from free public sources; venue data is never named in user copy"}
 

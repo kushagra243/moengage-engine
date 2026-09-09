@@ -28,7 +28,13 @@ def _safe(fn: Callable[..., Any]) -> Callable[..., Dict[str, Any]]:
             out = fn(**kw)
             return out if isinstance(out, dict) else {"result": out}
         except Exception as e:
-            return {"error": redact(str(e)), "error_type": type(e).__name__}
+            sig = ""
+            try:
+                from ..selfheal import record_error
+                sig = record_error("tool", fn.__name__, e, kw)
+            except Exception:
+                pass
+            return {"error": redact(str(e)), "error_type": type(e).__name__, "error_signature": sig, "self_repair": "call self_diagnose, then propose_code_change with the fix_request for this signature"}
     return wrapper
 
 
@@ -225,9 +231,40 @@ def experiment_plan(baseline_rate_pct: float, min_detectable_lift_pct_points: fl
                       ("Not measurable in 14 days at this reach. Options: widen audience, raise MDE to %.1f pts, lengthen window to %d days, or treat as non-experimental." % (min_detectable_lift_pct_points * math.sqrt(days / 14), days))}
 
 
-def campaign_brief_check(goal: Dict[str, Any], variants: Optional[List[Dict[str, Any]]] = None, channel: str = "push", market_linked: bool = False, ttl_hours: Optional[int] = None) -> Dict[str, Any]:
-    """Validate a campaign brief against the goal discipline and copy rules before proposing."""
+DERIVATIVE_WORDS = re.compile(r"\b(perp|perps|perpetual|futures|leverage|\d+x|margin|short|long)\b", re.I)
+BANNED_COPY = re.compile(r"\b(guaranteed|will (rise|pump|moon|double)|buy now|sell now|can'?t lose|risk[- ]free|100%|to the moon|last chance( to buy)?|don'?t miss|passive income|earn while you sleep|safe (bet|investment)|sure ?shot|get in early|listing pump|moon|pump)\b", re.I)
+LEVERAGE_LURE = re.compile(r"\bup to \d+x\b|\b\d{2,3}x leverage\b", re.I)
+STANDARD_SUPPRESSIONS = ("liquidat", "loss-dormant", "kyc", "dnd", "unsub", "ticket")
+
+
+def campaign_brief_check(goal: Dict[str, Any], variants: Optional[List[Dict[str, Any]]] = None, channel: str = "push", market_linked: bool = False, ttl_hours: Optional[int] = None,
+                         audience_countries: Optional[List[str]] = None, disclaimer_included: Optional[bool] = None) -> Dict[str, Any]:
+    """Validate a campaign brief against the goal discipline, compliance (India ASCI, UK FCA, US) and copy rules before proposing.
+    audience_countries: ISO codes of the audience (default India); disclaimer_included: whether the ASCI VDA disclaimer is carried by the message/landing."""
     problems: List[str] = []; warnings: List[str] = []
+    countries = {c.upper() for c in (audience_countries or ["IN"])}
+    text_all = " ".join(str(v.get("title", "")) + " " + str(v.get("body", "")) for v in (variants or []))
+    derivative_content = bool(DERIVATIVE_WORDS.search(text_all)) or market_linked
+    if "GB" in countries or "UK" in countries:
+        if derivative_content:
+            problems.append("UK residents in audience: crypto derivatives marketing to UK retail is banned (FCA); exclude GB from this send")
+        if re.search(r"refer|bonus|reward|cashback|free", text_all, re.I):
+            problems.append("UK residents in audience: incentives to invest are banned under the FCA cryptoasset promotion rules")
+    if "US" in countries and derivative_content:
+        problems.append("US persons in audience: perps/derivatives content must be geo-fenced away from US users")
+    if "IN" in countries and derivative_content and not market_linked and re.search(r"trade (perps?|futures) now|open a (long|short)|start (trading )?with leverage", text_all, re.I):
+        problems.append("India: derivatives content must be education-only until counsel clears acquisition (see crypto-compliance-copy)")
+    if LEVERAGE_LURE.search(text_all):
+        problems.append("leverage figures used as a lure ('up to 50x') are not allowed in marketing copy")
+    if channel.lower() in ("email", "whatsapp", "in-app", "inapp", "in_app", "cards") and "IN" in countries and disclaimer_included is False:
+        problems.append("India audience on a channel that can carry it: the ASCI VDA disclaimer must be included (email footer / template body / card)")
+    if channel.lower() == "push" and "IN" in countries and disclaimer_included is None and re.search(r"offer|bonus|reward|% off|cashback", text_all, re.I):
+        warnings.append("promotional push to India users: the landing screen must carry the ASCI disclaimer (push cannot)")
+    supp = " ".join(str(x).lower() for x in (goal.get("suppressions") or []))
+    if (market_linked or derivative_content) and not any(k in supp for k in ("liquidat",)):
+        problems.append("market/derivatives send must suppress users liquidated in the last 14 days")
+    if (market_linked or derivative_content) and "loss" not in supp:
+        problems.append("market/derivatives send must suppress loss-dormant users")
     for k in REQUIRED_GOAL:
         if goal.get(k) in (None, "", []):
             problems.append(f"goal.{k} missing")
@@ -246,7 +283,7 @@ def campaign_brief_check(goal: Dict[str, Any], variants: Optional[List[Dict[str,
         problems.append("market-linked campaigns need ttl_hours (2-6)")
     if market_linked and ttl_hours and ttl_hours > 6:
         warnings.append("ttl_hours > 6 on a market-linked send risks stale price facts")
-    banned = re.compile(r"\b(guaranteed|will (rise|pump|moon|double)|buy now|sell now|can'?t lose|risk[- ]free|100%|to the moon|last chance to buy)\b", re.I)
+    banned = BANNED_COPY
     for i, v in enumerate(variants or []):
         t, b = str(v.get("title", "")), str(v.get("body", ""))
         if channel.lower() == "push":
@@ -415,6 +452,134 @@ def propose_code_change(title: str, request: str, scope: str = "any", rationale:
     return {"proposal_id": p["id"], "status": p["status"], "preview": p.get("preview"), "drafting": p.get("drafting"), "duplicate_of_pending": p.get("duplicate_of_pending", False)}
 
 
+def segment_study(refresh: bool = False, days: int = 30) -> Dict[str, Any]:
+    """Cohort families decoded from segment nomenclature (HVT_Sep26 → family HVT, version 2026-09): versions, reach, attached campaigns and performance, version-over-version deltas, flags and studies to run."""
+    from .. import segments
+    c = _client()
+    if refresh:
+        segments.sync(c.get_segments())
+    elif not segments.registry(limit=1):
+        segments.sync(c.get_segments())
+    return segments.study(c.get_campaigns(), days=days)
+
+
+def define_nomenclature(code: str, meaning: str) -> Dict[str, Any]:
+    """Teach the engine a segment/campaign name code, e.g. code='HVT', meaning='value:High value trader' (facet:label). Applies immediately to every decode."""
+    from .. import guidance
+    if ":" not in meaning:
+        meaning = "cohort:" + meaning
+    return guidance.set_engine_setting("taxonomy_codes", {code.upper(): meaning}, actor="agent")
+
+
+def list_sops(campaign_type: Optional[str] = None) -> Dict[str, Any]:
+    """Standard operating procedures for campaign types (sequence, cohort family, duration, frequency, holdout, KPI, kill rules, checks)."""
+    from .. import sops
+    rows = sops.list_sops()
+    if campaign_type:
+        rows = [r for r in rows if r["campaign_type"] == campaign_type]
+    return {"sops": [{k: r.get(k) for k in ("id", "name", "campaign_type", "transition", "objective", "steps_count", "duration_days", "frequency", "holdout_pct", "primary_kpi", "framework_ok", "version", "source")} | {"segment_family": (r.get("audience") or {}).get("segment_family")} for r in rows], "types": list(sops.CAMPAIGN_TYPES)}
+
+
+def sop_detail(sop_id: str) -> Dict[str, Any]:
+    from .. import sops
+    return sops.get_sop(sop_id) or {"error": f"unknown SOP {sop_id}"}
+
+
+def define_sop(spec: Dict[str, Any]) -> Dict[str, Any]:
+    """Create or update an SOP. spec: {id?, name, campaign_type, transition, objective, audience{segment_family, exclusions[], min_reach, jurisdictions_excluded[]}, steps[{day, channel, purpose, copy_brief, send_time_ist, condition?, ttl_hours?}], duration_days, frequency{cadence, max_messages_per_user_per_week}, holdout_pct, primary_kpi, target, guardrail_metric, measurement_window_days, kill_criteria[], compliance{disclaimer_channels[], banned_angles[]}}. Validated against the framework."""
+    from .. import sops
+    return sops.define_sop(spec, author="agent")
+
+
+def run_sop(sop_id: str, segment_name: Optional[str] = None, start_date: Optional[str] = None, variants_by_step: Optional[Dict[str, Any]] = None, dry_run: bool = False) -> Dict[str, Any]:
+    """Run an SOP on a cohort: resolves the segment (exact name or latest version of the family), pre-flight checks, then one approval-gated campaign proposal per step. Provide variants_by_step {"0": [{label,title,body,cta}], ...} written per crypto-copywriting; use dry_run first."""
+    from .. import sops
+    return sops.run_sop(sop_id, segment_name=segment_name, start_date=start_date, variants_by_step=variants_by_step, created_by="agent", dry_run=dry_run)
+
+
+def sop_runs(limit: int = 20) -> Dict[str, Any]:
+    from .. import sops
+    return {"runs": sops.list_runs(limit)}
+
+
+def north_star() -> Dict[str, Any]:
+    """The sentence the programme optimises for, plus current communication limits and this month's flight-plan summary."""
+    from .. import guardrails, plans
+    return {"north_star": guardrails.north_star(), "limits": guardrails.limits(), "month": plans.month_summary()}
+
+
+def set_north_star(text: str) -> Dict[str, Any]:
+    from .. import guardrails
+    return guardrails.set_north_star(text, actor="agent")
+
+
+def comms_limits(regime: Optional[str] = None, stage: Optional[str] = None) -> Dict[str, Any]:
+    """Global hard communication limits per user (per channel per day/week, stage overrides, regime multipliers) and the effective caps for a regime/stage."""
+    from .. import guardrails
+    return {"limits": guardrails.limits(), "effective": guardrails.effective_limits(regime, stage)}
+
+
+def set_comms_limits(patch: Dict[str, Any]) -> Dict[str, Any]:
+    """Hard-set global limits from the team, e.g. {"per_user": {"push": {"per_week": 3}}, "total_per_week": 6, "stage_overrides": {"Core": {"total_per_week": 3}}}. Enforced immediately in SOP checks, run pre-flight and brief checks."""
+    from .. import guardrails
+    return guardrails.set_limits(patch, actor="agent")
+
+
+def peace_index() -> Dict[str, Any]:
+    """Per cohort family: planned + observed touches per user per week vs the effective limit (regime- and stage-adjusted) → too_much / in_band / too_little, with breaches. Cohort-level estimate (no per-user send logs in the public API)."""
+    from .. import guardrails
+    c = _client()
+    regime = None
+    try:
+        from ..market.context import _latest
+        regime = (((_latest(6 * 3600) or {}).get("hooks") or {}).get("regime"))
+    except Exception:
+        pass
+    return guardrails.peace_index(c.get_campaigns(), regime)
+
+
+def guardrail_monitor() -> Dict[str, Any]:
+    """SOP misses (overdue steps awaiting approval) and breaches (promotional steps executed in stress regimes); posts priority fixes to the growth feed."""
+    from .. import guardrails
+    regime = None
+    try:
+        from ..market.context import _latest
+        regime = (((_latest(6 * 3600) or {}).get("hooks") or {}).get("regime"))
+    except Exception:
+        pass
+    return guardrails.sop_monitor(regime)
+
+
+def write_flight_plan(spec: Dict[str, Any]) -> Dict[str, Any]:
+    """Write the full campaign requirement document (Flight Plan) for a programme. spec: {title, month 'YYYY-MM', objective, north_star_link, transition, cohort_family, sop_id?, audience{definition, version, reach, exclusions[], jurisdictions_excluded[]}, sequence[{day, channel, purpose, condition?, send_time_ist, variants[{label,title,body,cta}]}], kpi{primary, target, baseline, guardrail, holdout_pct, window_days}, experiment{sample_size, days_to_read, kill_criteria[]}, timeline[{date, what}], month_on_month{last_month_result, change, expected_gain}, risks[], compliance[], whats_possible{now[], needs_data[], needs_api[]}}. Stored, rendered to Markdown, limits-checked, and recorded in the growth feed."""
+    from .. import plans
+    return plans.create_plan(spec, author="agent")
+
+
+def flight_plans(month: Optional[str] = None, plan_id: Optional[int] = None) -> Dict[str, Any]:
+    """List flight plans (optionally for a month) or fetch one with its Markdown document."""
+    from .. import plans
+    if plan_id:
+        return plans.get_plan(int(plan_id)) or {"error": "not found"}
+    return {"plans": plans.list_plans(month), "summary": plans.month_summary(month)}
+
+
+def self_diagnose(run_tests: bool = False) -> Dict[str, Any]:
+    """Health report of the engine itself: grouped tool errors (48h), failed scheduler steps, failed proposals, server-log tracebacks, optional test run, and ready-to-file fix requests for propose_code_change."""
+    from ..selfheal import health_report
+    return health_report(run_tests=run_tests)
+
+
+def rollback_last_change(reason: str = "requested by operator") -> Dict[str, Any]:
+    """Revert the last merged code change (git revert of the merge commit) and restart. Use only when the operator asks or a merged change is clearly broken."""
+    from ..selfheal import rollback_last_merge
+    from .. import devagent
+    r = rollback_last_merge(reason)
+    if r.get("ok") and devagent.RESTART:
+        r["restart_scheduled"] = devagent.schedule_restart()
+    return r
+
+
 def _capture_proposal_idea(kind: str, title: str, payload: Dict[str, Any], rationale: str, proposal_id: int) -> None:
     try:
         from .. import growth
@@ -463,7 +628,7 @@ TOOL_SCHEMAS: List[Dict[str, Any]] = [
         {"baseline_rate_pct": {"type": "number"}, "min_detectable_lift_pct_points": {"type": "number"}, "daily_eligible_users": {"type": "integer"}, "control_group_pct": {"type": "number"}},
         ["baseline_rate_pct", "min_detectable_lift_pct_points", "daily_eligible_users"]),
     _fn("campaign_brief_check", "Validate a goal brief + copy against the goal discipline and compliance rules. Returns problems (blocking) and warnings.",
-        {"goal": OBJ, "variants": {"type": "array", "items": OBJ}, "channel": STR, "market_linked": {"type": "boolean"}, "ttl_hours": {"type": "integer"}}, ["goal"]),
+        {"goal": OBJ, "variants": {"type": "array", "items": OBJ}, "channel": STR, "market_linked": {"type": "boolean"}, "ttl_hours": {"type": "integer"}, "audience_countries": {"type": "array", "items": STR}, "disclaimer_included": {"type": "boolean"}}, ["goal"]),
     _fn("propose_campaign", "Propose a DRAFT campaign for human approval. REQUIRES a complete goal brief: {transition, hypothesis, primary_kpi, target, guardrail_metric, control_group_pct (>=5), measurement_window_days, kill_criteria, suppressions[]}. variants: [{label,title,body,cta}]. Include ttl_hours for market-linked sends and exclusions[].",
         {"name": STR, "channel": STR, "target_segment": STR, "variants": {"type": "array", "items": OBJ}, "rationale": STR, "goal": OBJ, "schedule": OBJ,
          "ttl_hours": {"type": "integer"}, "market_hook_id": STR, "exclusions": {"type": "array", "items": STR}, "frequency_cap": STR},
@@ -480,6 +645,23 @@ TOOL_SCHEMAS: List[Dict[str, Any]] = [
     _fn("record_ideas", "Capture every recommendation you make (campaign, segment, experiment, growth hack, fix) into the persistent growth feed so nothing is lost. ideas: [{title, kind: trending_campaign|growth_hack|market_play|moengage_activity|fix, why (cite data), how (MoEngage steps), segment, channel, angle, kpi, transition, effort, expected_impact, priority}].",
         {"ideas": {"type": "array", "items": OBJ}}, ["ideas"]),
     _fn("propose_pause_campaign", "Propose pausing a campaign (e.g. deliverability collapse or market suppression rule).", {"campaign_id": STR, "rationale": STR}, ["campaign_id", "rationale"]),
+    _fn("self_diagnose", "Diagnose the engine itself: grouped tool errors, failed jobs/proposals, log tracebacks, optional test run, with ready-to-file fix requests. Call whenever a tool returned an error or a job failed; then propose_code_change with the fix_request.", {"run_tests": {"type": "boolean"}}),
+    _fn("rollback_last_change", "Revert the last merged code change and restart (only when asked, or when the change is clearly broken).", {"reason": STR}),
+    _fn("north_star", "The north star sentence, current communication limits and this month's flight-plan coverage. Read before planning."),
+    _fn("set_north_star", "Replace the north star sentence (only when the team asks).", {"text": STR}, ["text"]),
+    _fn("comms_limits", "Global hard per-user communication limits (channel × per day/week, stage overrides, regime multipliers) and effective caps for a regime/stage.", {"regime": STR, "stage": STR}),
+    _fn("set_comms_limits", "Hard-set limits from the team (merge patch, validated). Applies immediately to SOP checks, pre-flight and brief checks.", {"patch": OBJ}, ["patch"]),
+    _fn("peace_index", "Are we reaching each cohort too much or too little? Planned + observed touches per user/week vs effective caps by family; breaches listed."),
+    _fn("guardrail_monitor", "SOP misses and breaches now (overdue steps, promotional steps in stress regimes); posts fixes to the feed."),
+    _fn("write_flight_plan", "Write the complete campaign requirement document (Flight Plan) for a programme: objective ↔ north star, cohort & sizing, journey, copy, KPI/experiment, limits & peace check, month timeline, month-on-month, risks/compliance, checks, what's possible now vs needs data/API. Use for every programme you propose and for the monthly plan.", {"spec": OBJ}, ["spec"]),
+    _fn("flight_plans", "List flight plans for a month with coverage summary, or fetch one (Markdown).", {"month": STR, "plan_id": {"type": "integer"}}),
+    _fn("segment_study", "Cohort families decoded from segment names (HVT_Sep26 → HVT / 2026-09): versions, reach, attached campaigns + performance, month-over-month deltas, flags (new, orphan, worse, shrank, undefined codes) and suggested studies. Use for any cohort or 'new upload' question.", {"refresh": {"type": "boolean"}, "days": {"type": "integer"}}),
+    _fn("define_nomenclature", "Teach a name code: code='HVT', meaning='value:High value trader' (facet:label; facets: value|cohort|trader|product|programme|propensity|risk|message|window). Immediate.", {"code": STR, "meaning": STR}, ["code", "meaning"]),
+    _fn("list_sops", "List campaign SOPs (standard operating procedures) by type with sequence length, cohort family, duration, frequency, holdout, KPI and framework status.", {"campaign_type": STR}),
+    _fn("sop_detail", "Full SOP: audience, steps (day/channel/purpose/copy brief), kill criteria, checks, compliance.", {"sop_id": STR}, ["sop_id"]),
+    _fn("define_sop", "Create or update an SOP from a full spec; validated against the framework (one KPI, holdout, caps, DND windows, exclusions for derivatives, disclaimers, kill criteria).", {"spec": OBJ}, ["spec"]),
+    _fn("run_sop", "Run an SOP on a cohort: resolve segment (name or family → latest version), pre-flight, then one approval-gated proposal per step. Write variants_by_step per crypto-copywriting; dry_run first to see the plan.", {"sop_id": STR, "segment_name": STR, "start_date": STR, "variants_by_step": OBJ, "dry_run": {"type": "boolean"}}, ["sop_id"]),
+    _fn("sop_runs", "Recent SOP runs with proposal statuses and mid-flight flags.", {"limit": {"type": "integer"}}),
     _fn("moengage_api_reference", "Search the complete local catalog of documented MoEngage APIs (131 operations across data, segments, campaigns v1/v5, stats, flows, templates, content blocks, catalog, coupons, inform, analytics, subscriptions, GDPR…). query → matches; method+path → parameters, body schema, auth key, rate limit, doc URL. No network.",
         {"query": STR, "method": STR, "path": STR}),
     _fn("moengage_api_read", "Call a documented READ-SAFE MoEngage API directly (any GET, or POST search/meta/stats endpoints), e.g. GET /v5/flows/{flow_id}, POST /v5/campaigns/search, GET /v5/analytics/dashboards. Writes are refused — propose them. Live mode only.",
@@ -506,4 +688,8 @@ TOOLS: Dict[str, Callable[..., Dict[str, Any]]] = {
     "propose_flow": _safe(propose_flow), "propose_pause_campaign": _safe(propose_pause_campaign),
     "moengage_api_reference": _safe(moengage_api_reference), "moengage_api_read": _safe(moengage_api_read), "skill": _safe(skill),
     "remember_guidance": _safe(remember_guidance), "set_engine_setting": _safe(set_engine_setting), "propose_code_change": _safe(propose_code_change),
+    "self_diagnose": _safe(self_diagnose), "rollback_last_change": _safe(rollback_last_change),
+    "north_star": _safe(north_star), "set_north_star": _safe(set_north_star), "comms_limits": _safe(comms_limits), "set_comms_limits": _safe(set_comms_limits), "peace_index": _safe(peace_index),
+    "guardrail_monitor": _safe(guardrail_monitor), "write_flight_plan": _safe(write_flight_plan), "flight_plans": _safe(flight_plans),
+    "segment_study": _safe(segment_study), "define_nomenclature": _safe(define_nomenclature), "list_sops": _safe(list_sops), "sop_detail": _safe(sop_detail), "define_sop": _safe(define_sop), "run_sop": _safe(run_sop), "sop_runs": _safe(sop_runs),
 }

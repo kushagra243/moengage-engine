@@ -37,11 +37,11 @@ def campaigns(jitter: bool = False) -> List[Dict[str, Any]]:
          "sent_count": 482100, "delivered_count": 453174, "delivery_rate": 94.0, "opened_count": 28450, "ctr": 6.27, "conversions": 3410, "conversion_rate": 1.2, "revenue_generated": 68200.0, "last_run": _ago(18)},
         {"id": "cmp_002", "name": "Cart Abandonment 1-Hour Reminder", "channel": "Push", "status": "Active", "target_segment": "Cart Abandoners (< 2h)",
          "sent_count": 42100, "delivered_count": 40416, "delivery_rate": 96.0, "opened_count": 5210, "ctr": 12.89, "conversions": 1890, "conversion_rate": 4.68, "revenue_generated": 94500.0, "last_run": _ago(1)},
-        {"id": "cmp_003", "name": "VIP Loyalty Club Double Points", "channel": "Email", "status": "Active", "target_segment": "VIP High LTV (> $500)",
+        {"id": "cmp_003", "name": "VIP Loyalty Club Double Points", "channel": "Email", "status": "Active", "target_segment": "HVT_Sep26",
          "sent_count": 14200, "delivered_count": 13916, "delivery_rate": 98.0, "opened_count": 1244, "ctr": 8.94, "conversions": 717, "conversion_rate": 5.15, "revenue_generated": 141000.0, "last_run": _ago(30)},
-        {"id": "cmp_004", "name": "Reactivation: 30-Day Inactive Winback", "channel": "Email", "status": "Active", "target_segment": "Dormant Users (> 30d)",
+        {"id": "cmp_004", "name": "Reactivation: 30-Day Inactive Winback", "channel": "Email", "status": "Active", "target_segment": "Dormant_D60_LowProp_Sep26",
          "sent_count": 182400, "delivered_count": 171456, "delivery_rate": 94.0, "opened_count": 2434, "ctr": 1.42, "conversions": 412, "conversion_rate": 0.24, "revenue_generated": 12400.0, "last_run": _ago(50)},
-        {"id": "cmp_005", "name": "New User Onboarding Guide", "channel": "In-App", "status": "Active", "target_segment": "New Signups (< 7d)",
+        {"id": "cmp_005", "name": "New User Onboarding Guide", "channel": "In-App", "status": "Active", "target_segment": "FTD_NoTrade_Sep26",
          "sent_count": 30500, "delivered_count": 30500, "delivery_rate": 100.0, "opened_count": 9600, "ctr": 31.47, "conversions": 9600, "conversion_rate": 31.47, "revenue_generated": 0.0, "last_run": _ago(3)},
         {"id": "cmp_006", "name": "Price Drop Alert on Wishlist Items", "channel": "Push", "status": "Active", "target_segment": "Wishlist Users",
          "sent_count": 66700, "delivered_count": 64699, "delivery_rate": 97.0, "opened_count": 10900, "ctr": 16.85, "conversions": 2380, "conversion_rate": 3.68, "revenue_generated": 91600.0, "last_run": _ago(7)},
@@ -59,17 +59,17 @@ def campaigns(jitter: bool = False) -> List[Dict[str, Any]]:
 
 
 def segments() -> List[Dict[str, Any]]:
+    """Monthly cohort uploads named by the team's nomenclature (family_version)."""
     rows = [
-        {"id": "seg_001", "name": "Cart Abandoners (Last 24h)", "description": "Added to cart within 24h, no checkout", "type": "Behavioral", "estimated_reach": 34800,
-         "criteria": {"event_filter": "Added to Cart >= 1 in last 24 hours", "exclusion_filter": "Purchase Completed >= 1 in last 24 hours"}, "created_at": "2026-08-15"},
-        {"id": "seg_002", "name": "VIP High LTV Customers (> $500)", "description": "Cumulative purchase value over $500", "type": "Attribute & Behavioral", "estimated_reach": 14200,
-         "criteria": {"user_attribute": "lifetime_value > 500", "event_filter": "Purchase Completed >= 3 in last 90 days"}, "created_at": "2026-07-10"},
-        {"id": "seg_003", "name": "Dormant Users (Inactive > 45d)", "description": "No app launch in 45 days", "type": "Inactivity", "estimated_reach": 182400,
-         "criteria": {"event_filter": "App Opened == 0 in last 45 days", "user_attribute": "has_previous_purchase == true"}, "created_at": "2026-06-20"},
-        {"id": "seg_004", "name": "High-Intent Window Shoppers", "description": "4+ product views in 7 days, no add to cart", "type": "Behavioral", "estimated_reach": 62100,
-         "criteria": {"event_filter": "Product Viewed >= 4 in last 7 days", "exclusion_filter": "Added to Cart >= 1 in last 7 days"}, "created_at": "2026-08-28"},
-        {"id": "seg_005", "name": "Price-Sensitive Discount Seekers", "description": "Buy only with promo codes", "type": "Affinity", "estimated_reach": 51300,
-         "criteria": {"user_attribute": "coupon_usage_rate > 0.8", "event_filter": "Promo Applied >= 1 in last 30 days"}, "created_at": "2026-08-01"},
+        {"id": "seg_hvt_aug", "name": "HVT_Aug26", "description": "High-value traders, August upload", "type": "File", "estimated_reach": 4180, "created_at": "2026-08-02"},
+        {"id": "seg_hvt_sep", "name": "HVT_Sep26", "description": "High-value traders, September upload", "type": "File", "estimated_reach": 4420, "created_at": "2026-09-02"},
+        {"id": "seg_mvt_sep", "name": "MVT_Sep26", "description": "Mid-value traders", "type": "File", "estimated_reach": 18900, "created_at": "2026-09-02"},
+        {"id": "seg_lvt_sep", "name": "LVT_Sep26", "description": "Low-value traders", "type": "File", "estimated_reach": 61200, "created_at": "2026-09-02"},
+        {"id": "seg_hft_fut", "name": "HFT_Futures_Sep26", "description": "High-frequency futures traders", "type": "File", "estimated_reach": 2650, "created_at": "2026-09-02"},
+        {"id": "seg_dorm", "name": "Dormant_D60_LowProp_Sep26", "description": "No trade 60d, low propensity", "type": "Filter", "estimated_reach": 142000, "created_at": "2026-09-03"},
+        {"id": "seg_ftd", "name": "FTD_NoTrade_Sep26", "description": "First deposit, no trade yet", "type": "Filter", "estimated_reach": 7300, "created_at": "2026-09-03"},
+        {"id": "seg_rekyc", "name": "Re-KYC_Pending_Sep26", "description": "Re-KYC due within 30 days", "type": "Filter", "estimated_reach": 9800, "created_at": "2026-09-01"},
+        {"id": "seg_xq", "name": "XQ_TG_Sep26", "description": "(undefined code XQ) trading game cohort", "type": "File", "estimated_reach": 1200, "created_at": "2026-09-05"},
     ]
     for r in rows:
         r["_source"] = "mock"

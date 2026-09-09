@@ -50,6 +50,13 @@ from .experiments import init_experiment_tables
 init_autopilot_tables(); init_experiment_tables()
 from .guidance import init_guidance_tables
 init_guidance_tables()
+from .segments import init_segment_tables
+from .sops import init_sop_tables
+init_segment_tables(); init_sop_tables()
+from .plans import init_plan_tables
+init_plan_tables()
+from .selfheal import init_selfheal_tables
+init_selfheal_tables()
 _migrated = migrate_plaintext_secrets()
 if _migrated:
     logging.getLogger("moengage").info("encrypted %d legacy plaintext secret(s)", _migrated)
@@ -776,6 +783,180 @@ def api_catalog_view(q: Optional[str] = None, method: Optional[str] = None, path
     if q:
         return {"matches": api_catalog.search(q, limit=25)}
     return api_catalog.overview()
+
+
+# ── cohorts (segment nomenclature) and SOPs ───────────────────────────────────
+class DefineCode(BaseModel):
+    code: str
+    meaning: str
+
+class SopSpec(BaseModel):
+    spec: Dict[str, Any]
+
+class SopRun(BaseModel):
+    segment_name: Optional[str] = None
+    start_date: Optional[str] = None
+    dry_run: bool = False
+
+class SopToggle(BaseModel):
+    active: bool
+
+
+@app.get("/api/segments/study")
+def segments_study(refresh: bool = False):
+    from . import segments
+    c = MoEngageClient()
+    if refresh or not segments.registry(limit=1):
+        try:
+            segments.sync(c.get_segments())
+        except DataUnavailable as e:
+            return {"ok": False, "role": e.role, "reason": str(e)}
+    try:
+        return {"ok": True, **segments.study(c.get_campaigns())}
+    except DataUnavailable as e:
+        return {"ok": False, "role": e.role, "reason": str(e)}
+
+
+@app.post("/api/taxonomy/define")
+def taxonomy_define(payload: DefineCode, request: Request):
+    from . import guidance
+    meaning = payload.meaning if ":" in payload.meaning else "cohort:" + payload.meaning
+    r = guidance.set_engine_setting("taxonomy_codes", {payload.code.upper(): meaning}, actor=request_actor(request))
+    if r.get("error"):
+        raise HTTPException(400, r["error"])
+    return r
+
+
+@app.get("/api/sops")
+def sops_list():
+    from . import sops
+    return {"sops": sops.list_sops(include_inactive=True), "runs": sops.list_runs(20), "types": list(sops.CAMPAIGN_TYPES)}
+
+
+@app.post("/api/sops/define")
+def sops_define(payload: SopSpec, request: Request):
+    from . import sops
+    r = sops.define_sop(payload.spec, author=request_actor(request))
+    if not r.get("ok"):
+        raise HTTPException(400, "; ".join(r.get("problems") or ["invalid SOP"]))
+    return r
+
+
+@app.post("/api/sops/{sop_id}/run")
+def sops_run(sop_id: str, payload: SopRun, request: Request):
+    from . import sops
+    return sops.run_sop(sop_id, segment_name=payload.segment_name, start_date=payload.start_date, created_by=request_actor(request), dry_run=payload.dry_run)
+
+
+@app.post("/api/sops/{sop_id}/toggle")
+def sops_toggle(sop_id: str, payload: SopToggle):
+    from . import sops
+    sops.set_active(sop_id, payload.active)
+    return {"ok": True}
+
+
+@app.post("/api/sops/checks")
+def sops_checks():
+    from . import sops
+    return sops.midflight_checks()
+
+
+# ── guardrails: north star, limits, peace index, monitor; flight plans ────────
+class NorthStar(BaseModel):
+    text: str
+
+class LimitsPatch(BaseModel):
+    patch: Dict[str, Any]
+
+class PlanSpec(BaseModel):
+    spec: Dict[str, Any]
+
+
+def _regime_now() -> Optional[str]:
+    try:
+        from .market.context import _latest
+        return (((_latest(6 * 3600) or {}).get("hooks") or {}).get("regime"))
+    except Exception:
+        return None
+
+
+@app.get("/api/guardrails")
+def guardrails_view():
+    from . import guardrails, plans
+    return {"north_star": guardrails.north_star(), "limits": guardrails.limits(), "effective": guardrails.effective_limits(_regime_now()), "month": plans.month_summary()}
+
+
+@app.post("/api/guardrails/north-star")
+def guardrails_north_star(payload: NorthStar, request: Request):
+    from . import guardrails
+    r = guardrails.set_north_star(payload.text, actor=request_actor(request))
+    if r.get("error"):
+        raise HTTPException(400, r["error"])
+    return r
+
+
+@app.post("/api/guardrails/limits")
+def guardrails_limits(payload: LimitsPatch, request: Request):
+    from . import guardrails
+    r = guardrails.set_limits(payload.patch, actor=request_actor(request))
+    if r.get("error"):
+        raise HTTPException(400, r["error"])
+    return r
+
+
+@app.get("/api/guardrails/peace")
+def guardrails_peace():
+    from . import guardrails
+    try:
+        return {"ok": True, **guardrails.peace_index(MoEngageClient().get_campaigns(), _regime_now())}
+    except DataUnavailable as e:
+        return {"ok": False, "role": e.role, "reason": str(e)}
+
+
+@app.post("/api/guardrails/monitor")
+def guardrails_monitor():
+    from . import guardrails
+    return guardrails.sop_monitor(_regime_now())
+
+
+@app.get("/api/plans")
+def plans_list(month: Optional[str] = None):
+    from . import plans
+    return {"plans": plans.list_plans(month), "summary": plans.month_summary(month)}
+
+
+@app.get("/api/plans/{pid}")
+def plans_get(pid: int):
+    from . import plans
+    p = plans.get_plan(pid)
+    if not p:
+        raise HTTPException(404, "not found")
+    return p
+
+
+@app.post("/api/plans")
+def plans_create(payload: PlanSpec, request: Request):
+    from . import plans
+    r = plans.create_plan(payload.spec, author=request_actor(request))
+    if not r.get("ok"):
+        raise HTTPException(400, r.get("error", "invalid plan"))
+    return r
+
+
+@app.get("/api/selfheal")
+def selfheal_view(run_tests: bool = False):
+    from .selfheal import health_report
+    return health_report(run_tests=run_tests)
+
+
+@app.post("/api/selfheal/rollback")
+def selfheal_rollback(request: Request):
+    from .selfheal import rollback_last_merge
+    r = rollback_last_merge(f"requested by {request_actor(request)}")
+    if not r.get("ok"):
+        raise HTTPException(400, r.get("error", "cannot roll back"))
+    r["restart_scheduled"] = _devagent.schedule_restart()
+    return r
 
 
 @app.get("/api/devagent/status")

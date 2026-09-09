@@ -225,6 +225,18 @@ def cmd_mock(a):
         _print(mock.seed_history(a.days, inject=not a.clean))
 
 
+def cmd_selfheal(a):
+    from backend.selfheal import health_report, rollback_last_merge
+    if a.action == "rollback":
+        print(json.dumps(rollback_last_merge("cli"), indent=2)); return
+    r = health_report(run_tests=a.tests)
+    print(f"status: {r['status']}  tool errors 48h: {r['tool_errors_48h']}  fix requests: {len(r['fix_requests'])}  last merge: {(r.get('last_merge') or {}).get('post_commit')}")
+    for f in r["fix_requests"]:
+        print(f"- [{f['signature']}] {f['title']}")
+    if r.get("tests"):
+        print("tests:", "passed" if r["tests"]["passed"] else "FAILED"); print(r["tests"]["tail"][-600:])
+
+
 def cmd_audit_log(a):
     from backend.security.audit import tail, verify_chain
     _print({"chain": verify_chain(), "entries": tail(a.n)})
@@ -249,6 +261,7 @@ def main():
     s = sp.add_parser("approvals"); s.add_argument("action", choices=["list", "show", "approve", "reject"]); s.add_argument("id", nargs="?", type=int); s.add_argument("--status"); s.add_argument("--note"); s.set_defaults(fn=cmd_approvals)
     s = sp.add_parser("daily-run"); s.add_argument("--full", action="store_true"); s.set_defaults(fn=cmd_daily_run)
     s = sp.add_parser("mock", help="demo data: seed"); s.add_argument("action", choices=["seed"]); s.add_argument("--days", type=int, default=30); s.add_argument("--clean", action="store_true", help="no injected faults"); s.set_defaults(fn=cmd_mock)
+    s = sp.add_parser("selfheal", help="engine health: report | rollback (revert last agent merge)"); s.add_argument("action", nargs="?", default="report", choices=["report", "rollback"]); s.add_argument("--tests", action="store_true"); s.set_defaults(fn=cmd_selfheal)
     s = sp.add_parser("audit-log"); s.add_argument("-n", type=int, default=30); s.set_defaults(fn=cmd_audit_log)
     s = sp.add_parser("growth", help="growth feed: refresh | list | set"); s.add_argument("action", choices=["refresh", "list", "set"]); s.add_argument("id", nargs="?", type=int); s.add_argument("--status"); s.add_argument("--llm", action="store_true"); s.add_argument("-n", type=int, default=5); s.set_defaults(fn=cmd_growth)
     s = sp.add_parser("service", help="persistent background service (launchd): install | uninstall | status"); s.add_argument("action", choices=["install", "uninstall", "status"]); s.add_argument("--port"); s.add_argument("--allowed-hosts", help="comma list of proxy hostnames allowed in the Host header, e.g. engine.tailnet.ts.net"); s.set_defaults(fn=cmd_service)

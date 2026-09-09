@@ -116,6 +116,8 @@ ENGINE_SETTINGS: Dict[str, Dict[str, Any]] = {
     "llm_history_messages":   {"type": "int", "min": 0, "max": 20, "help": "chat turns carried into each request"},
     "llm_max_rounds":         {"type": "int", "min": 1, "max": 12, "help": "max tool rounds per chat"},
     "llm_max_rounds_autopilot": {"type": "int", "min": 1, "max": 10, "help": "max tool rounds per autopilot mission"},
+    "web3_enabled":           {"type": "bool", "help": "web3 trending lane on/off"},
+    "web3_chains":            {"type": "str", "max_len": 120, "help": "comma list: solana,base,bsc,eth,robinhood"},
     "llm_brief_tier":         {"type": "enum", "values": ["bulk", "main"], "help": "which tier writes the daily brief"},
 }
 

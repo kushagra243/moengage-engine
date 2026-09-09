@@ -86,6 +86,7 @@ def market_context(force: bool = False, include_news: bool = True) -> Dict[str, 
         "commodities": lambda: uni.get("commodities", []),
         "macro": lambda: uni.get("fx", []),
         "calendar": sources.econ_calendar,
+        "web3": lambda: __import__("backend.market.onchain", fromlist=["trending"]).trending(),
     }
     if include_news:
         steps["news_raw"] = lambda: news_mod.headlines(limit_per_feed=8)
@@ -165,6 +166,9 @@ def narrative(ctx: Dict[str, Any]) -> str:
         lines.append("Angles that fit: " + ", ".join(pol["prefer"]) + ".")
     if pol.get("block"):
         lines.append("Angles REFUSED: " + ", ".join(pol["block"]) + ".")
+    w3 = ctx.get("web3") or {}
+    if w3.get("trending"):
+        lines.append("Web3 trending (unverified, quality-gated): " + "; ".join(f"{c}: " + ", ".join(r["symbol"] for r in rows[:3]) for c, rows in (w3.get("by_chain") or {}).items() if rows) + ".")
     nl = (ctx.get("listings") or {}).get("new") or []
     if nl:
         lines.append("New listings: " + ", ".join(f"{n['symbol']} ({n['venue']} {n['product']})" for n in nl[:6]) + ".")

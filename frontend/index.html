@@ -144,6 +144,10 @@
                   <div class="row" id="limits-row"></div>
                   <div class="row"><input type="text" id="ns-text" placeholder="north star sentence"><button class="btn sm" id="ns-save" data-icon="plus">Set north star</button></div>
                 </div>
+                <div style="grid-column:1/-1">
+                  <label class="small muted">Asks from the agent — data, segments, events or access it needs (mark fulfilled when done)</label>
+                  <div class="teach-list" id="dr-list"></div>
+                </div>
               </div>
             </details>
           </div>
@@ -173,6 +177,7 @@
               </details></div>
             <div class="card mb"><div class="card-head"><h3>Runs</h3></div><div id="sops-runs"></div></div>
             <div class="card mb"><div class="card-head"><h3>What can be done: user state × channel</h3><span class="small dim">caps from the communication limits; SOPs linked</span></div><div id="sops-matrix" class="small" style="overflow-x:auto"></div></div>
+            <div class="card mb"><div class="card-head"><h3>Product cohorts: how each is treated</h3><span class="small dim">pillars · cadence · never · cross-sell on intent · Tier-0 lens</span></div><div id="sops-products" class="small" style="overflow-x:auto"></div></div>
             <div class="card"><div class="card-head"><h3>Flight plans</h3><span class="small dim" id="plans-meta"></span></div><div id="plans-list"></div><div id="plan-doc" class="md small mt-s"></div></div>
           </div>
         </div>
@@ -255,7 +260,7 @@
       <!-- ── Approvals ────────────────────────────────────────────────── -->
       <section class="tab" id="tab-approvals">
         <div class="page-head">
-          <div><h2>Approvals</h2><div class="sub">Every write to MoEngage is proposed here first. Nothing executes without an explicit approval.</div></div>
+          <div><h2>Experiments</h2><div class="sub">Every write to MoEngage is proposed here first. Nothing executes without an explicit approval.</div></div>
           <div class="actions">
             <button class="btn" id="ap-new-btn" data-icon="plus">New proposal</button>
             <button class="btn ghost sm" id="ap-refresh-btn" data-icon="refresh"></button>

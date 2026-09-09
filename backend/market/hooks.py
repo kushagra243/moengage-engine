@@ -11,13 +11,13 @@ from __future__ import annotations
 from typing import Any, Dict, List
 
 ANGLE_POLICY = {
-    "capitulation":         {"block": ["leverage_upsell", "first_futures_trade", "size_up", "win_framing", "fomo", "breakout_fomo", "new_listing", "referral"],
+    "capitulation":         {"block": ["leverage_upsell", "first_futures_trade", "size_up", "win_framing", "fomo", "breakout_fomo", "new_listing", "referral", "web3_trending"],
                              "prefer": ["support_checkin", "risk_education", "long_term_education", "service_status"]},
-    "high_volatility_down": {"block": ["leverage_upsell", "first_futures_trade", "size_up", "win_framing", "fomo", "breakout_fomo"],
+    "high_volatility_down": {"block": ["leverage_upsell", "first_futures_trade", "size_up", "win_framing", "fomo", "breakout_fomo", "web3_trending"],
                              "prefer": ["risk_education", "capital_preservation", "stablecoin_earn", "support_checkin", "alerts_adoption"]},
     "high_volatility_up":   {"block": ["size_up", "leverage_upsell"],
                              "prefer": ["alerts_adoption", "watchlist_adoption", "reactivation", "feature_discovery", "risk_education"]},
-    "trending_down":        {"block": ["leverage_upsell", "win_framing", "fomo", "breakout_fomo"],
+    "trending_down":        {"block": ["leverage_upsell", "win_framing", "fomo", "breakout_fomo", "web3_trending"],
                              "prefer": ["risk_education", "dca_education", "earn_products", "portfolio_review"]},
     "trending_up":          {"block": [], "prefer": ["reactivation", "trend_following", "new_listing", "graduation", "feature_discovery"]},
     "chop":                 {"block": ["breakout_fomo", "trend_following", "fomo"],
@@ -149,6 +149,21 @@ def _oi_hooks(oi: Dict[str, Any], regime: str) -> List[Dict[str, Any]]:
     return out[:4]
 
 
+def _web3_hooks(web3: Dict[str, Any], regime: str) -> List[Dict[str, Any]]:
+    out = []
+    for ch, rows in ((web3 or {}).get("by_chain") or {}).items():
+        top = [r for r in rows if not r.get("flags")][:2]
+        if not top:
+            continue
+        names = ", ".join(f"{r['symbol']} (${r['vol_24h_usd']/1e6:.1f}M 24h vol, {r['chg_24h']:+.0f}%)" for r in top)
+        out.append({"id": f"web3_trend_{ch}", "trigger": f"Trending on {ch} by volume with liquidity ≥ $150k and age ≥ 24h: {names} — unverified tokens", "asset_class": "web3", "regime": regime,
+                    "segments": [f"Web3 users active on {ch} (30d)", f"{ch} watchlist users"], "clm_stages": ["Habitual", "Core"], "channel": "In-app card (push 1/day max to web3-active users)", "angle": "web3_trending",
+                    "copy_direction": "Report the trend as volume/liquidity facts with 'unverified token' wording and a safety line (slippage, contract risk, only what you can afford to lose). Watchlist CTA. Never a pick, never '100x', never paid/boosted tokens, never name the data venue.",
+                    "timing": "Once a day, 10:00–20:00 IST; TTL 6h", "guardrails": ["exclude loss-dormant and liquidated-14d", "1 web3 trend message per user per day", "blocked in stress regimes", "no token from the boosted (paid) list"],
+                    "kpi": "watchlist adds; safety-content opens; complaint rate (guardrail)"})
+    return out[:5]
+
+
 def build_hooks(ctx: Dict[str, Any]) -> Dict[str, Any]:
     regime = ((ctx.get("crypto") or {}).get("regime") or {}).get("label", "unknown")
     policy = ANGLE_POLICY.get(regime, ANGLE_POLICY["unknown"])
@@ -162,6 +177,7 @@ def build_hooks(ctx: Dict[str, Any]) -> Dict[str, Any]:
     hooks += _mover_hooks(ctx.get("commodity_movers") or [], "commodities (HL perps)", regime)
     hooks += _listing_hooks(ctx.get("listings") or {}, regime)
     hooks += _oi_hooks(ctx.get("oi_movers") or {}, regime)
+    hooks += _web3_hooks(ctx.get("web3") or {}, regime)
     hooks += _calendar_hooks(ctx.get("calendar") or [])
     allowed = [h for h in hooks if h.get("angle") not in policy["block"]]
     blocked = [h["id"] for h in hooks if h.get("angle") in policy["block"]]

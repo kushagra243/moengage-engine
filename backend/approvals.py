@@ -94,6 +94,13 @@ def propose(kind: str, title: str, payload: Dict[str, Any], rationale: str = "",
     row = _row(conn.execute("SELECT * FROM proposals WHERE id=?", (pid,)).fetchone())
     conn.close()
     audit("proposal.created", {"id": pid, "kind": kind, "title": title, "created_by": created_by}, actor=created_by)
+    if kind == "create_campaign":
+        try:
+            from .experiments import register_proposed
+            from .database import get_setting as _gs
+            row["experiment_id"] = register_proposed(row, "mock" if _gs("mock_mode", "true").lower() == "true" else "live")
+        except Exception:
+            pass
     return row
 
 
@@ -133,6 +140,11 @@ def reject(pid: int, note: str = "", decided_by: str = "user") -> Dict[str, Any]
     conn.execute("UPDATE proposals SET status='rejected', decided_at=CURRENT_TIMESTAMP, decided_by=?, decision_note=? WHERE id=?", (decided_by, note[:1000], pid))
     conn.commit(); conn.close()
     audit("proposal.rejected", {"id": pid, "note": note}, actor=decided_by)
+    if p["kind"] == "create_campaign":
+        try:
+            conn = get_db(); conn.execute("UPDATE experiments SET status='abandoned', updated_at=CURRENT_TIMESTAMP WHERE proposal_id=? AND status='proposed'", (pid,)); conn.commit(); conn.close()
+        except Exception:
+            pass
     if p["kind"] == "code_change":
         try:
             from .devagent import cleanup

@@ -348,6 +348,58 @@ LIBRARY += [
          [_st(0, "in-app", "Bottom sheet for the category: what it is, first step, risks", "Category-specific; derivatives → education path only; disclaimer.", "on_open"), _st(3, "push", "The one tool for that category (watchlist / calculator / plan)", "Fact + tool.", "19:00", "still no action")],
          5, "event_triggered", 2, 20, "category_first_action_rate_7d", "+3 pp vs holdout", "notification_disable_rate", 14, ["derivatives category to UK/US → stop"], ["Per-category copy bank", "Intent decay: stop after 7 days"],
          exclusions=DERIV_EXCL, banned=("leverage_upsell", "asset_recommendation"), extra_checks=["jurisdiction"]),
+    _sop("sop_global_announcement_lenses", "Tier-0 global announcement with product lenses (major move / event)", "compliance", "activated_habitual",
+         "When something big happens (major move, geopolitical or regulatory event, incident), every product cohort gets the same verified fact with its own lens; promotional angles are off.",
+         "All active users, split by product affinity: spot, SIP, crypto perps, US-stock/index/commodity perps, options, earn, web3 (family: *)", "*",
+         [_st(0, "in-app", "Bottom sheet: the fact + your product lens", "Core fact (one sentence, time-stamped) + lens per cohort from announcement_lenses; service tone; disclaimer block.", "+30m"),
+          _st(0, "push", "Push only where a tool applies (perps: margin; spot: alerts; web3: safety)", "Fact + tool; TTL 4h; 1 push.", "+45m", "cohort has a tool to act on", ttl=4),
+          _st(0, "email", "Same-day summary for email opt-ins", "Fact, what it means per product, what is unaffected, support; disclaimer footer.", "18:00"), _st(1, "cards", "Persistent recap card", "Facts and links; no outlook.", "09:00")],
+         2, "event_triggered", 4, 5, "support_contacts_avoided", "support_ticket_rate ≤ 1.5× baseline; notification_disable_rate ≤ baseline", "notification_disable_rate", 7,
+         ["any lens contains a forecast or direction → stop", "regime capitulation → in-app + email service copy only", "notification_disable_rate > 0.3%"],
+         ["Lens copy bank per product", "Auto-trigger from |BTC 24h| ≥ 8%, regime flip, or ≥3 risk headlines with geopolitical/regulatory words", "Hindi variant of the core fact"],
+         exclusions=["unsubscribed / DND", "liquidated 14d → in-app service card only", "loss-dormant → email only"], banned=("forecast", "direction", "fomo", "promo", "venue_name"), min_reach=0, extra_checks=["regime_allows"]),
+    _sop("sop_geopolitical_event_brief", "Geopolitical / macro shock brief (facts, risk tools, silence on promos)", "risk", "slipping",
+         "On war, sanctions, major regulatory or macro shocks: one factual brief with risk tools; freeze promotions 24h; commodities/indices cohorts get the macro context lens.",
+         "All active users; perps/options/commodities cohorts first (family: *)", "*",
+         [_st(0, "in-app", "What happened, what it usually does to volatility, your tools", "Facts from reputable sources (no links to venues); margin/alerts/SIP-continues lens; disclaimer.", "+1h"),
+          _st(1, "email", "Day-after brief: what changed, what did not, support", "Service tone; no outlook.", "10:00")],
+         2, "event_triggered", 2, 5, "support_contacts_avoided", "support_ticket_rate ≤ 1.5× baseline", "complaint_rate", 7, ["promotional send detected during the freeze → stop and report"],
+         ["Commodity/index lens for gold/oil/SPX cohorts", "Options expiry note if within 48h", "Autopilot protect mission handles suppression"],
+         exclusions=["unsubscribed / DND"], banned=("forecast", "direction", "promo", "safe_haven_claim"), min_reach=0),
+    _sop("sop_web3_trending_watch", "Web3 trending watch (unverified tokens, education + watchlist only)", "market", "activated_habitual",
+         "Web3 users see what is trending on their chains as volume/liquidity facts with a safety line; never a pick, never paid boosts.",
+         "Web3-active users (swap/wallet event 30d) split by chain: Solana, Base, BNB Chain, Ethereum, Robinhood Chain (family: WEB3_ACTIVE)", "WEB3_ACTIVE",
+         [_st(0, "in-app", "Trending on Solana today: X, Y (24h volume, liquidity) — unverified tokens", "Quality-gated list only; 'unverified'; slippage/contract risk line; watchlist CTA; disclaimer.", "12:00", ttl=6),
+          _st(0, "push", "Push once a day at most, only to users who opted into trend alerts", "Same facts; TTL 6h.", "12:15", "web3_trend_alerts opt-in", ttl=6)],
+         1, "event_triggered", 5, 20, "watchlist_add_rate", "≥ 3% of delivered; complaint_rate ≤ baseline", "complaint_rate", 7, ["regime stress → blocked by policy", "any boosted (paid) token included → stop", "complaint about a scam token → stop and review the gate"],
+         ["Chain-specific timing (US hours for Base/ETH, Asia for Solana)", "Weekly 'what trended and what happened after' education", "Safety quiz before enabling trend alerts"],
+         exclusions=DERIV_EXCL + ["received a web3 trend message today"], banned=("token_pick", "100x", "airdrop_hype", "venue_name"), extra_checks=["angle_policy", "ttl"]),
+    _sop("sop_web3_onboarding_safety", "Web3 onboarding and safety (wallet, gas, slippage, scams)", "onboarding", "funded_activated",
+         "New Web3 users get a 5-day safety-first onboarding: wallet basics, gas, slippage, contract risk, watchlist — before any trend content.",
+         "Web3 wallet created < 7 days, ≤ 1 swap (family: WEB3_NEW)", "WEB3_NEW",
+         [_st(0, "in-app", "Your wallet: what is custodial vs on-chain, how to stay safe", "Education; disclaimer.", "+1h"), _st(1, "push", "Gas and slippage in 30 seconds", "Tool: slippage setting; deep link.", "19:00"),
+          _st(3, "email", "How to spot a scam token (checklist)", "Education; report link; disclaimer.", "09:00"), _st(5, "in-app", "Build a chain watchlist", "Habit tool; no picks.", "on_open")],
+         6, "event_triggered", 4, 20, "second_swap_rate_14d", "+3 pp vs holdout with complaint_rate guardrail", "complaint_rate", 14, ["complaints > 0 about content", "notification_disable_rate > 0.3%"],
+         ["Chain-specific gas explainer", "Hindi variant"], exclusions=["unsubscribed / DND"], banned=("token_pick", "airdrop_hype")),
+    _sop("sop_product_cohort_monthly", "Product cohort monthly programme (each cohort gets its own product content)", "retention", "habitual_core",
+         "Every month each product cohort receives its product's programme (pillars, cadence, never-list from the product matrix); cross-sell happens only on intent signals.",
+         "Product cohorts from segment_study by_product: spot, SIP, crypto perps, US-stock perps, indices, commodities, options, earn, web3 (family: *)", "*",
+         [_st(0, "email", "(per cohort) Monthly statement with the product's own numbers", "Own numbers; product pillars; disclaimer footer.", "09:00"), _st(7, "in-app", "(per cohort) One product tool or explainer", "From the cohort's pillars; bottom sheet.", "13:00"),
+          _st(14, "push", "(per cohort) One product-specific habit nudge", "Fact + tool; product never-list respected.", "19:00"), _st(21, "in-app", "(intent only) Cross-sell path for users with intent signals", "Only cross_sell_on_intent_only paths; education-first for derivatives.", "13:00", "intent signal present")],
+         30, "monthly", 1, 20, "weekly_active_weeks_4w", "+0.3 vs holdout per cohort", "unsubscribe_rate", 30, ["unsubscribe_rate > 0.4% in any cohort → pause that cohort", "a cohort exceeds its product cadence → stop"],
+         ["Per-product copy banks", "Cohort-level peace index review before step 3", "Retire steps that a cohort ignores two months running"], extra_checks=["previous_version_readout"]),
+    _sop("sop_options_education", "Options education (defined risk, expiry notes)", "education", "habitual_core",
+         "Options users and intent users get defined-risk education and expiry-day notes; no strategy recommendations, no 'cheap premium' lures.",
+         "Options traders or options screen viewed ≥2× in 14d, not UK/US (family: OPTIONS_USERS)", "OPTIONS_USERS",
+         [_st(0, "in-app", "Max loss, max gain: how defined risk works", "Education; disclaimer block.", "13:00"), _st(2, "email", "Expiry, IV and time decay in plain words", "Education; calendar; disclaimer.", "09:00", "opened step 0"), _st(6, "push", "Expiry day tomorrow: check open positions", "Tool; no direction.", "18:00", "open options position and expiry within 24h")],
+         7, "monthly", 3, 20, "options_risk_tool_open_rate", "≥ 6% of delivered", "complaint_rate", 21, ["strategy tip detected in copy → stop"], ["Greeks glossary card", "Paper-trade options demo"],
+         exclusions=DERIV_EXCL, jurisdictions=["UK", "US"], banned=("strategy_tip", "cheap_premium", "direction")),
+    _sop("sop_sip_nurture", "SIP nurture (plan continuity through volatility)", "retention", "activated_habitual",
+         "SIP users get continuity and DCA education, especially when markets fall; never a prompt to time or pause the plan.",
+         "Active SIP plan (family: SIP_ACTIVE)", "SIP_ACTIVE",
+         [_st(0, "email", "Your SIP this month: units, average cost, next date", "Own numbers; DCA education; disclaimer.", "09:00"), _st(10, "in-app", "Markets fell this week: what it means for a recurring buyer (education)", "Education, no advice; only in trending_down/high_vol_down.", "13:00", "regime trending_down or high_volatility_down"),
+          _st(20, "push", "Next SIP tomorrow — balance check", "Utility; deposit link if balance short.", "10:30", "balance < next SIP amount")],
+         30, "monthly", 1, 20, "sip_continuation_rate_90d", "+2 pp vs holdout", "sip_pause_rate", 90, ["sip_pause_rate treated > holdout"], ["Salary-week alignment", "Annual SIP statement in April"], banned=("market_timing", "pause_suggestion", "asset_recommendation")),
 ]
 
 def init_sop_tables() -> None:
@@ -676,3 +728,20 @@ def channel_matrix() -> Dict[str, Any]:
             cells[ch] = {"allowed": allowed, "cap": f"{cap.get('per_day', '—')}/day · {cap.get('per_week', '—')}/week", "formats": info["formats"], "note": note}
         rows.append({"state": st, "purposes": r.get("purpose", []), "avoid": r.get("avoid", []), "sops": r.get("sops", []), "channels": cells})
     return {"states": rows, "channels": CHANNEL_INFO, "limits_source": "comms_limits (stage overrides and regime multipliers apply on top)"}
+
+
+def product_cohort_matrix() -> Dict[str, Any]:
+    """How each product cohort is treated: pillars, cadence, channels, cross-sell (intent only), never-list, announcement lens, SOPs."""
+    from .products import PRODUCTS, treatment
+    sop_map = {"spot": ["sop_first_week_habit", "sop_push_alert_digest", "sop_cross_sell_recurring_buy", "sop_asset_spotlight"], "sip": ["sop_sip_nurture", "sop_cross_sell_recurring_buy"],
+               "perps_crypto": ["sop_first_perp_hygiene", "sop_funding_crowding_nudge", "sop_oi_crowding_note", "sop_macro_print_brief", "sop_fee_tier_nudge", "sop_liquidation_recovery"],
+               "perps_us_stocks": ["sop_tokenised_after_hours", "sop_weekend_tokenised", "sop_cross_sell_crypto_to_tokenised"], "perps_indices": ["sop_macro_print_brief", "sop_geopolitical_event_brief"],
+               "perps_commodities": ["sop_cross_sell_to_commodities", "sop_geopolitical_event_brief"], "options": ["sop_options_education"], "earn": ["sop_cross_sell_earn"], "web3": ["sop_web3_onboarding_safety", "sop_web3_trending_watch"]}
+    rows = []
+    for pid in PRODUCTS:
+        t = treatment(pid)
+        rows.append({**t, "channels": {"push": "yes (tool-led)" if pid != "earn" else "rare", "email": "monthly statement + education", "whatsapp": "utility only", "in-app": "bottom sheets / cards (primary)", "cards": "recaps"},
+                     "sops": sop_map.get(pid, []), "tier0": "receives every Tier-0 announcement with this lens"})
+    return {"cohorts": rows, "rules": ["a user with several products gets the most specific product's programme (web3 > options > tokenised > crypto perps > earn > SIP > spot) and Tier-0 lenses for each",
+                                        "cross-sell only on intent signals (screen views), education-first for derivatives, never to liquidated-14d or loss-dormant users",
+                                        "communication limits and regime multipliers apply on top of product cadence", "no venue or competitor names in any cohort's copy"]}

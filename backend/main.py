@@ -59,6 +59,8 @@ from .selfheal import init_selfheal_tables
 init_selfheal_tables()
 from .llm.usage import init_usage_tables
 init_usage_tables()
+from .datarequests import init_datarequest_tables
+init_datarequest_tables()
 _migrated = migrate_plaintext_secrets()
 if _migrated:
     logging.getLogger("moengage").info("encrypted %d legacy plaintext secret(s)", _migrated)
@@ -147,7 +149,7 @@ def status():
 
 
 # ── settings ───────────────────────────────────────────────────────────────────
-ALLOWED_SETTING_PREFIXES = ("moengage_", "llm_", "market_", "schedule_", "refresh_", "analysis_", "taxonomy_", "autopilot_", "devagent_", "mock_mode")
+ALLOWED_SETTING_PREFIXES = ("moengage_", "llm_", "market_", "schedule_", "refresh_", "analysis_", "taxonomy_", "autopilot_", "devagent_", "web3_", "mock_mode")
 
 
 @app.get("/api/settings")
@@ -834,6 +836,58 @@ def taxonomy_define(payload: DefineCode, request: Request):
 def sops_list():
     from . import sops
     return {"sops": sops.list_sops(include_inactive=True), "runs": sops.list_runs(20), "types": list(sops.CAMPAIGN_TYPES)}
+
+
+class DataRequestPayload(BaseModel):
+    kind: str
+    title: str
+    why: str
+    spec: str = ""
+    unblocks: List[str] = []
+    priority: int = 50
+
+class DataRequestStatus(BaseModel):
+    status: str
+    note: str = ""
+
+
+@app.get("/api/data-requests")
+def data_requests_list(status: Optional[str] = None):
+    from . import datarequests
+    return {"requests": datarequests.list_requests(status), "kinds": list(datarequests.KINDS)}
+
+
+@app.post("/api/data-requests")
+def data_requests_create(payload: DataRequestPayload, request: Request):
+    from . import datarequests
+    r = datarequests.request(payload.kind, payload.title, payload.why, spec=payload.spec, unblocks=payload.unblocks, priority=payload.priority, requested_by=request_actor(request))
+    if r.get("error"):
+        raise HTTPException(400, r["error"])
+    return r
+
+
+@app.post("/api/data-requests/{rid}/status")
+def data_requests_status(rid: int, payload: DataRequestStatus, request: Request):
+    from . import datarequests
+    r = datarequests.set_status(rid, payload.status, payload.note, actor=request_actor(request))
+    if not r:
+        raise HTTPException(400, "bad status or id")
+    return r
+
+
+@app.get("/api/market/web3")
+def market_web3(force: bool = False, chain: Optional[str] = None):
+    from .market.onchain import trending
+    t = trending(force=force)
+    if chain:
+        t = {**t, "trending": [r for r in t.get("trending", []) if r.get("chain") == chain]}
+    return t
+
+
+@app.get("/api/sops/product-matrix")
+def sops_product_matrix():
+    from . import sops
+    return sops.product_cohort_matrix()
 
 
 @app.get("/api/sops/matrix")

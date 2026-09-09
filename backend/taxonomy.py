@@ -47,6 +47,10 @@ DEFAULT_CODES: Dict[str, Dict[str, str]] = {
     "TOKENISED": "product:Tokenised equities (HL)", "TOKENIZED": "product:Tokenised equities (HL)", "XSTOCK": "product:Tokenised equities (HL)", "STOCKS": "product:Tokenised equities (HL)",
     "GOLD": "product:Commodities (HL)", "XAU": "product:Commodities (HL)", "OIL": "product:Commodities (HL)", "SPX": "product:Indices (HL)", "NDX": "product:Indices (HL)",
     "LIQ": "cohort:Liquidation recovery", "LIQUIDATED": "cohort:Liquidation recovery", "HEDGE": "message:Hedging education", "FUNDING": "message:Funding", "OI": "message:Open interest",
+    "WEB3": "product:Web3 wallet / DEX", "DEX": "product:Web3 wallet / DEX", "ONCHAIN": "product:Web3 wallet / DEX", "WALLET": "product:Web3 wallet / DEX", "SWAP": "product:Web3 wallet / DEX",
+    "SOL": "chain:Solana", "SOLANA": "chain:Solana", "BASE": "chain:Base", "BNB": "chain:BNB Chain", "BSC": "chain:BNB Chain", "ETH": "chain:Ethereum", "ETHEREUM": "chain:Ethereum", "ROBINHOOD": "chain:Robinhood Chain", "MEME": "product:Memecoins (web3)", "MEMECOIN": "product:Memecoins (web3)",
+    "USS": "product:US stock perps", "USSTOCK": "product:US stock perps", "USSTOCKS": "product:US stock perps", "STOCK": "product:US stock perps", "IDX": "product:Indices (HL)", "INDEX": "product:Indices (HL)", "COMM": "product:Commodities (HL)", "COMMODITY": "product:Commodities (HL)",
+    "SIP": "product:SIP / recurring buy", "DCA": "product:SIP / recurring buy", "RECURRING": "product:SIP / recurring buy", "OPT": "product:Options", "CALL": "product:Options", "PUT": "product:Options", "STAKE": "product:Earn", "YIELD": "product:Earn",
     "LISTING": "message:New listing", "COMP": "message:Competition", "TOURNAMENT": "message:Competition", "AIRDROP": "message:Rewards", "POINTS": "message:Rewards", "REFERRAL": "message:Referral",
     # message type
     "REMINDER": "message:Reminder", "UPDATE": "message:Update", "EXPERTPICKS": "message:Expert picks", "EXPERTPICKSGTM": "message:Expert picks",

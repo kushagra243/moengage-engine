@@ -148,6 +148,22 @@ def run(max_actions: int = 3, force: bool = False) -> Dict[str, Any]:
     except Exception as ex:
         results.append({"mission": "close_the_gap", "outcome": "error", "detail": redact(str(ex))[:200]})
 
+    # 5a. Tier-0: major move / geopolitical / regulatory event → global announcement with product lenses (approval-gated)
+    try:
+        if budget > 0:
+            from .market.context import _latest
+            ctx0 = _latest(6 * 3600) or {}
+            trig = tier0_trigger(ctx0)
+            if trig:
+                target = f"tier0:{date.today().isoformat()}:{trig['kind']}"
+                if not _done_today("major_event_broadcast", target):
+                    prompt = (f"MISSION major_event_broadcast. Tier-0 trigger: {trig['detail']}. Call announcement_lenses('{trig['kind']}: {trig['detail'][:120]}'), write the one-sentence verified core fact and a lens per product cohort "
+                              f"(spot, SIP, crypto perps, US-stock/index/commodity perps, options, earn, web3) with no forecast, no direction, no venue names, service tone; then run_sop('sop_global_announcement_lenses', dry_run=True) and, if pre-flight passes, run_sop for real with variants_by_step. "
+                              f"Promotional sends are frozen today; say so. {BRIEF_RULES}")
+                    results.append(_run_mission(agent, "major_event_broadcast", target, prompt)); budget -= 1
+    except Exception as ex:
+        results.append({"mission": "major_event_broadcast", "outcome": "error", "detail": redact(str(ex))[:200]})
+
     # 5. protect (before market plays so suppression wins on risk days)
     try:
         if budget > 0:
@@ -226,6 +242,29 @@ def run(max_actions: int = 3, force: bool = False) -> Dict[str, Any]:
 
     audit("autopilot.run", {"actions": [(r.get("mission"), r.get("outcome"), r.get("proposal_ids")) for r in results]}, actor="autopilot")
     return {"enabled": True, "actions": results, "pending_total": len(approvals.list_proposals(status="pending"))}
+
+
+TIER0_MOVE_PCT = 8.0
+GEO_WORDS = ("war", "strike", "missile", "sanction", "tariff", "invasion", "ceasefire", "election", "coup", "sebi", "rbi", "ban", "regulat", "tax", "fiu", "hack", "exploit", "halt", "outage")
+
+
+def tier0_trigger(ctx: Dict[str, Any]) -> Optional[Dict[str, str]]:
+    """Major move (|BTC 24h| ≥ 8%), regime flip into stress, or a cluster of geopolitical/regulatory risk headlines."""
+    cr = ctx.get("crypto") or {}
+    btc = None
+    for r in ctx.get("crypto_markets") or []:
+        if r.get("symbol") == "BTC":
+            btc = r.get("chg_24h"); break
+    if btc is not None and abs(float(btc)) >= TIER0_MOVE_PCT:
+        return {"kind": "major_move", "detail": f"BTC {float(btc):+.1f}% in 24h; regime {(cr.get('regime') or {}).get('label')}"}
+    label = (cr.get("regime") or {}).get("label")
+    if label in ("capitulation", "high_volatility_down"):
+        return {"kind": "stress_regime", "detail": f"regime {label}: {'; '.join((cr.get('regime') or {}).get('reasons', [])[:2])}"}
+    flags = ((ctx.get("news") or {}).get("risk_flags") or [])
+    geo = [f for f in flags if any(w in str(f.get("title", "")).lower() for w in GEO_WORDS)]
+    if len(geo) >= 3:
+        return {"kind": "geopolitical_or_regulatory", "detail": "; ".join(str(f.get("title"))[:80] for f in geo[:3])}
+    return None
 
 
 def recent(limit: int = 30) -> List[Dict[str, Any]]:

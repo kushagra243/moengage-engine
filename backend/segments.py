@@ -69,7 +69,9 @@ def decode(name: str) -> Dict[str, Any]:
         if k in ("period", "segment", "tag", "channel", "delivery"):
             continue
         meaning.extend(vals)
-    return {"name": name, "family": family, "version": version, "facets": cls["facets"], "meaning": meaning, "unknown_tokens": cls["unknown_tokens"], "group_key": cls["group_key"]}
+    from .products import affinity_from_tokens, DEFAULT_PRODUCT
+    products = affinity_from_tokens(tokens(name), cls["facets"]) or [DEFAULT_PRODUCT]
+    return {"name": name, "family": family, "version": version, "facets": cls["facets"], "meaning": meaning, "products": products, "unknown_tokens": cls["unknown_tokens"], "group_key": cls["group_key"]}
 
 
 def sync(segments: List[Dict[str, Any]]) -> Dict[str, Any]:
@@ -157,7 +159,7 @@ def study(campaigns: List[Dict[str, Any]], days: int = 30) -> Dict[str, Any]:
     fams: Dict[str, Dict[str, Any]] = {}
     for r in rows:
         dd = decode(r["name"] or "")
-        f = fams.setdefault(r["family"], {"family": r["family"], "meaning": dd["meaning"], "facets": {k: v for k, v in dd["facets"].items() if k != "period"}, "versions": [], "unknown_tokens": dd["unknown_tokens"]})
+        f = fams.setdefault(r["family"], {"family": r["family"], "meaning": dd["meaning"], "products": dd["products"], "facets": {k: v for k, v in dd["facets"].items() if k != "period"}, "versions": [], "unknown_tokens": dd["unknown_tokens"]})
         f["versions"].append({"segment_id": r["segment_id"], "name": r["name"], "version": r.get("version"), "first_seen": r.get("first_seen"), "reach": r.get("reach")})
     out = []
     now = datetime.utcnow()
@@ -215,7 +217,18 @@ def study(campaigns: List[Dict[str, Any]], days: int = 30) -> Dict[str, Any]:
     for f in out:
         for t in f["unknown_tokens"]:
             unknown[t] += 1
-    return {"families": out, "segments": len(rows), "unknown_tokens": sorted(unknown.items(), key=lambda kv: -kv[1])[:20], "studies": suggest_studies(out)}
+    by_product: Dict[str, Dict[str, Any]] = {}
+    for f in out:
+        for pid in f.get("products") or []:
+            b = by_product.setdefault(pid, {"product": pid, "families": [], "reach": 0, "campaigns": 0, "delivered": 0, "clicks": 0.0})
+            b["families"].append(f["family"]); b["reach"] += f.get("reach") or 0; b["campaigns"] += len(f.get("campaigns_attached") or [])
+            perf = f.get("performance") or {}
+            if perf.get("delivered") and perf.get("click_rate") is not None:
+                b["delivered"] += perf["delivered"]; b["clicks"] += perf["delivered"] * perf["click_rate"] / 100.0
+    for b in by_product.values():
+        b["click_rate"] = round(b["clicks"] / b["delivered"] * 100, 2) if b["delivered"] else None; b.pop("clicks", None)
+    return {"families": out, "segments": len(rows), "unknown_tokens": sorted(unknown.items(), key=lambda kv: -kv[1])[:20], "studies": suggest_studies(out),
+            "by_product": sorted(by_product.values(), key=lambda b: -b["reach"])}
 
 
 def suggest_studies(families: List[Dict[str, Any]]) -> List[Dict[str, Any]]:

@@ -500,6 +500,40 @@ def run_sop(sop_id: str, segment_name: Optional[str] = None, start_date: Optiona
     return sops.run_sop(sop_id, segment_name=segment_name, start_date=start_date, variants_by_step=variants_by_step, created_by="agent", dry_run=dry_run)
 
 
+def web3_trending(chain: Optional[str] = None, force: bool = False) -> Dict[str, Any]:
+    """Trending on-chain tokens for our Web3 chains (Solana, Base, BNB Chain, Ethereum, Robinhood Chain), quality-gated (liquidity, volume, age) and labelled unverified; paid boosts listed separately. Data only — never a recommendation, never name the data venue in copy."""
+    from ..market.onchain import trending
+    t = trending(force=force)
+    if chain:
+        t = {**t, "trending": [r for r in t.get("trending", []) if r.get("chain") == chain.lower()], "rejected": [r for r in t.get("rejected", []) if r.get("chain") == chain.lower()]}
+    t.pop("profiles", None)
+    return t
+
+
+def product_cohorts() -> Dict[str, Any]:
+    """Product affinity view: families grouped by product (spot, SIP, crypto perps, US-stock/index/commodity perps, options, earn, web3) with reach and performance, plus the treatment matrix (pillars, cadence, never-list, cross-sell on intent, SOPs, Tier-0 lens)."""
+    from .. import sops
+    st = segment_study()
+    return {"by_product": st.get("by_product", []), "matrix": sops.product_cohort_matrix()}
+
+
+def announcement_lenses(event: str) -> Dict[str, Any]:
+    """Tier-0 plan for a major move / geopolitical / regulatory event: core-fact rules, one lens per product cohort, suppressions, channel plan, regime rule. Fill the lenses, then run_sop('sop_global_announcement_lenses')."""
+    from ..products import announcement_lenses as _al
+    return _al(event)
+
+
+def request_data(kind: str, title: str, why: str, spec: str = "", unblocks: Optional[List[str]] = None, priority: int = 50) -> Dict[str, Any]:
+    """Ask the team for a segment, event, attribute, export, API access, dashboard capture or content you need (kind), with why it matters and which campaigns it unblocks. Shown in the Agent tab; link it in flight plans."""
+    from .. import datarequests
+    return datarequests.request(kind, title, why, spec=spec, unblocks=unblocks, priority=priority, requested_by="agent")
+
+
+def data_requests(status: Optional[str] = None) -> Dict[str, Any]:
+    from .. import datarequests
+    return {"requests": datarequests.list_requests(status)}
+
+
 def channel_matrix() -> Dict[str, Any]:
     """User state × channel capability matrix: allowed purposes, formats (push / email / WhatsApp / SMS / in-app bottom sheets / cards), caps, compliance and the SOPs for each."""
     from .. import sops
@@ -677,6 +711,11 @@ TOOL_SCHEMAS: List[Dict[str, Any]] = [
     _fn("sop_detail", "Full SOP: audience, steps (day/channel/purpose/copy brief), kill criteria, checks, compliance.", {"sop_id": STR}, ["sop_id"]),
     _fn("define_sop", "Create or update an SOP from a full spec; validated against the framework (one KPI, holdout, caps, DND windows, exclusions for derivatives, disclaimers, kill criteria).", {"spec": OBJ}, ["spec"]),
     _fn("run_sop", "Run an SOP on a cohort: resolve segment (name or family → latest version), pre-flight, then one approval-gated proposal per step. Write variants_by_step per crypto-copywriting; dry_run first to see the plan.", {"sop_id": STR, "segment_name": STR, "start_date": STR, "variants_by_step": OBJ, "dry_run": {"type": "boolean"}}, ["sop_id"]),
+    _fn("web3_trending", "Trending on-chain tokens on our Web3 chains (quality-gated, unverified, paid boosts separate). Data for analysis; copy never picks tokens or names the data venue.", {"chain": STR, "force": {"type": "boolean"}}),
+    _fn("product_cohorts", "Families grouped by product affinity with reach/performance and the product treatment matrix (pillars, cadence, never-list, cross-sell on intent, SOPs, Tier-0 lens)."),
+    _fn("announcement_lenses", "Tier-0 plan for a major move / geopolitical / regulatory event: one fact, one lens per product cohort, suppressions, channels, regime rule.", {"event": STR}, ["event"]),
+    _fn("request_data", "Ask the team for data you lack (segment upload, event, attribute, export, API access, dashboard capture, content) with why and what it unblocks.", {"kind": {"type": "string", "enum": ["segment", "event", "attribute", "export", "api_access", "dashboard_capture", "content", "other"]}, "title": STR, "why": STR, "spec": STR, "unblocks": {"type": "array", "items": STR}, "priority": {"type": "integer"}}, ["kind", "title", "why"]),
+    _fn("data_requests", "Open / fulfilled data requests.", {"status": STR}),
     _fn("channel_matrix", "What can be done for each user state on each channel (push, email, WhatsApp, SMS, in-app bottom sheets, cards): purposes, formats, caps, compliance, SOPs."),
     _fn("sop_runs", "Recent SOP runs with proposal statuses and mid-flight flags.", {"limit": {"type": "integer"}}),
     _fn("moengage_api_reference", "Search the complete local catalog of documented MoEngage APIs (131 operations across data, segments, campaigns v1/v5, stats, flows, templates, content blocks, catalog, coupons, inform, analytics, subscriptions, GDPR…). query → matches; method+path → parameters, body schema, auth key, rate limit, doc URL. No network.",
@@ -709,4 +748,5 @@ TOOLS: Dict[str, Callable[..., Dict[str, Any]]] = {
     "north_star": _safe(north_star), "set_north_star": _safe(set_north_star), "comms_limits": _safe(comms_limits), "set_comms_limits": _safe(set_comms_limits), "peace_index": _safe(peace_index),
     "guardrail_monitor": _safe(guardrail_monitor), "write_flight_plan": _safe(write_flight_plan), "flight_plans": _safe(flight_plans),
     "segment_study": _safe(segment_study), "define_nomenclature": _safe(define_nomenclature), "list_sops": _safe(list_sops), "sop_detail": _safe(sop_detail), "define_sop": _safe(define_sop), "run_sop": _safe(run_sop), "sop_runs": _safe(sop_runs), "channel_matrix": _safe(channel_matrix),
+    "web3_trending": _safe(web3_trending), "product_cohorts": _safe(product_cohorts), "announcement_lenses": _safe(announcement_lenses), "request_data": _safe(request_data), "data_requests": _safe(data_requests),
 }

@@ -3,7 +3,7 @@
 This file is committed so every machine and every session starts with the same context. Keep it short and current; details live in the skills under `.claude/skills/`.
 
 ## Who we are
-CoinDCX: spot + SIP (recurring buy), crypto perps, US stock / index / commodity perps (tokenised, 24/7), earn. Binance (spot listings) and Hyperliquid (perps, builder dexes) are **data sources only** — never named in user copy, nor any competitor. `campaign_brief_check` blocks venue/competitor names.
+CoinDCX: spot + SIP (recurring buy), crypto perps, US stock / index / commodity perps (tokenised, 24/7), options, earn, and a Web3 wallet/DEX (Solana, Base, BNB Chain, Ethereum, Robinhood Chain; trending tokens from GeckoTerminal/DexScreener as unverified data). Binance (spot listings) and Hyperliquid (perps, builder dexes) are **data sources only** — never named in user copy, nor any competitor. `campaign_brief_check` blocks venue/competitor names.
 
 ## What this is
 A local, leak-proof MoEngage CLM (lifecycle marketing) engine for CoinDCX: FastAPI backend (`backend/`), vanilla-JS console (`frontend/`), CLI (`cli.py`), SQLite in `data/agent.db`, secrets encrypted with a Keychain-held key. Everything runs on 127.0.0.1; nothing leaves the Mac except allowlisted calls to MoEngage, the chosen model provider, and public market data.
@@ -31,6 +31,7 @@ Or type `/setup` in Claude Code. Persistent service: `./cli.py service install`.
 - `cohort-studies` — decoding segment nomenclature (HVT_Sep26), families/versions, monthly routine, standard studies.
 - `campaign-sops` — the SOP framework, library, run procedure and pre/mid/post-flight checks.
 - `flight-plans-and-guardrails` — the Flight Plan (campaign requirement doc) template, north star, hard communication limits, peace index, SOP monitor.
+- `product-cohort-playbook` — product affinity from names, treatment matrix per product, Tier-0 announcements with lenses, web3 lane rules, data requests.
 Load the relevant one before working; the agent does the same via its `skill` tool.
 
 ## Invariants (do not weaken)

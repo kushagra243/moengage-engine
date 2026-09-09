@@ -39,6 +39,24 @@ KPI_TO_METRIC = {"ctr": "ctr", "click_rate": "ctr", "open_rate": "ctr", "convers
                  "delivery_rate": "delivery_rate", "revenue": "revenue_generated", "incremental_gmv_vs_holdout": "revenue_generated"}
 
 
+def register_proposed(proposal: Dict[str, Any], source: str) -> Optional[int]:
+    """Every proposed campaign is an experiment from day one (status 'proposed'); execution upgrades it to running."""
+    if proposal.get("kind") != "create_campaign":
+        return None
+    init_experiment_tables()
+    conn = get_db()
+    ex = conn.execute("SELECT id FROM experiments WHERE proposal_id=?", (proposal["id"],)).fetchone()
+    if ex:
+        conn.close(); return ex["id"]
+    payload = proposal.get("payload") or {}; goal = payload.get("goal") or {}
+    cur = conn.execute("""INSERT INTO experiments (proposal_id, campaign_name, campaign_id, source, started_on, window_days, primary_kpi, target, guardrail_metric, control_group_pct, kill_criteria, baseline_json, status)
+                          VALUES (?,?,?,?,?,?,?,?,?,?,?,?,'proposed')""",
+                       (proposal["id"], payload.get("name"), "", source, None, int(goal.get("measurement_window_days") or 7), goal.get("primary_kpi"), str(goal.get("target") or ""),
+                        goal.get("guardrail_metric"), float(goal.get("control_group_pct") or 0), goal.get("kill_criteria"), "{}"))
+    eid = cur.lastrowid; conn.commit(); conn.close()
+    return eid
+
+
 def register_from_proposal(proposal: Dict[str, Any], result: Dict[str, Any], source: str) -> Optional[int]:
     """Called after a create_campaign proposal executes."""
     if proposal.get("kind") != "create_campaign":
@@ -59,11 +77,16 @@ def register_from_proposal(proposal: Dict[str, Any], result: Dict[str, Any], sou
     except Exception:
         pass
     conn = get_db()
-    cur = conn.execute("""INSERT INTO experiments (proposal_id, campaign_name, campaign_id, source, started_on, window_days, primary_kpi, target, guardrail_metric, control_group_pct, kill_criteria, baseline_json)
-                          VALUES (?,?,?,?,?,?,?,?,?,?,?,?)""",
-                       (proposal["id"], payload.get("name"), campaign_id, source, date.today().isoformat(), int(goal.get("measurement_window_days") or 7), goal.get("primary_kpi"), str(goal.get("target") or ""),
-                        goal.get("guardrail_metric"), float(goal.get("control_group_pct") or 0), goal.get("kill_criteria"), json.dumps(baseline)))
-    eid = cur.lastrowid
+    ex = conn.execute("SELECT id FROM experiments WHERE proposal_id=?", (proposal["id"],)).fetchone()
+    if ex:
+        conn.execute("UPDATE experiments SET campaign_id=?, started_on=?, baseline_json=?, status='running', updated_at=CURRENT_TIMESTAMP WHERE id=?", (campaign_id, date.today().isoformat(), json.dumps(baseline), ex["id"]))
+        eid = ex["id"]
+    else:
+        cur = conn.execute("""INSERT INTO experiments (proposal_id, campaign_name, campaign_id, source, started_on, window_days, primary_kpi, target, guardrail_metric, control_group_pct, kill_criteria, baseline_json)
+                              VALUES (?,?,?,?,?,?,?,?,?,?,?,?)""",
+                           (proposal["id"], payload.get("name"), campaign_id, source, date.today().isoformat(), int(goal.get("measurement_window_days") or 7), goal.get("primary_kpi"), str(goal.get("target") or ""),
+                            goal.get("guardrail_metric"), float(goal.get("control_group_pct") or 0), goal.get("kill_criteria"), json.dumps(baseline)))
+        eid = cur.lastrowid
     conn.commit(); conn.close()
     return eid
 

@@ -333,6 +333,13 @@ def run(persist: bool = True, apply_improvements: bool = True) -> Dict[str, Any]
         except Exception:
             pass
     try:
+        from . import compliance_sweep as _cs
+        sw = _cs.latest() or _cs.sweep()
+        hi = [f for f in sw.get("findings", []) if f.get("severity") == "high"]; med = [f for f in sw.get("findings", []) if f.get("severity") == "medium"]
+        _chk(checks, "live_copy_compliant", "copy", not hi, "live campaign copy passes the India rules (venues, claims, ASCI words, direction, lures)", f"{len(hi)} high · {len(med)} medium across {sw.get('with_content', 0)} campaigns with content" + ("; " + "; ".join(f"{f['campaign']}: {f['rule']}" for f in hi[:3]) if hi else ""), "Analysis → Compliance sweep → fix the copy in MoEngage (or propose the edit)", warn=bool(med))
+    except Exception:
+        pass
+    try:
         from . import sop_india
         ir = sop_india.review(); rework = [x["id"] for x in ir["sops"] if x["status"] == "rework"]; needs = ir["counts"].get("needs edits", 0)
         _chk(checks, "sops_india_fit", "completeness", not rework, "every SOP is India-ready or only needs light edits (ASCI, TDS, DLT, Hinglish, derivatives posture)", f"rework: {', '.join(rework) or 'none'}; needs edits: {needs}; avg {ir['avg_score']}", "SOP Library → India fit → apply fixes; define the missing India SOPs", warn=bool(needs))

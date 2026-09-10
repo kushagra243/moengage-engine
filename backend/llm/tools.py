@@ -555,6 +555,37 @@ def onchain_vs_cex(force: bool = False) -> Dict[str, Any]:
     return onchain_cex.compare(force=force)
 
 
+def signal_catalog() -> Dict[str, Any]:
+    """Signal Bridge: which market/behaviour signals can fire MoEngage Business Events (regime flip, tier-0, asset move, new listing, funding crowding, OI flush, salary week, macro print T−24h, competitor surge on a pair we list), what is live right now, which rules are approved, today's fires and the last evaluation."""
+    from .. import signals
+    c = signals.catalog(); c["fires"] = c["fires"][:10]
+    return c
+
+
+def propose_signal_rule(signal_id: str, max_per_day: Optional[int] = None, rationale: str = "") -> Dict[str, Any]:
+    """Propose a standing rule (human approves once) so the engine fires the MoEngage business event automatically whenever the signal is detected, within the daily cap, quiet hours and regime policy."""
+    from .. import signals
+    return signals.propose_rule(signal_id, max_per_day, rationale=rationale, created_by="agent")
+
+
+def signal_fires(limit: int = 30) -> Dict[str, Any]:
+    """Ledger of business events the engine fired (or would have, in mock mode)."""
+    from .. import signals
+    return {"fires": signals.fires(limit)}
+
+
+def compliance_sweep(force: bool = False) -> Dict[str, Any]:
+    """Lint the copy of every live campaign against the India rules (venue names, banned claims, ASCI words, leverage lures, direction, price urgency, push length, missing disclaimer, onboarding incentives). Findings carry the fix."""
+    from .. import compliance_sweep as cs
+    return cs.sweep() if force else (cs.latest() or cs.sweep())
+
+
+def refresh_learnings() -> Dict[str, Any]:
+    """Recompile the our-learnings skill from the experiment ledger, readouts, deep dives, QA trend and India-fit review; then load it with skill('our-learnings')."""
+    from .. import learnings
+    return learnings.refresh()
+
+
 def sop_india_review(sop_id: Optional[str] = None) -> Dict[str, Any]:
     """India-fit review of SOPs against our own skills (ASCI VDA disclaimer and forbidden words, TDS/tax framing, derivatives education-only posture, DLT/WhatsApp windows, DND, Hinglish for mass cohorts, salary-week timing, no onboarding bonuses): score, flags with fixes, missing India SOPs."""
     from .. import sop_india
@@ -867,6 +898,11 @@ TOOL_SCHEMAS: List[Dict[str, Any]] = [
     _fn("competitor_benchmarks", "Category leaderboards (spot / perps / options / commodities_tokenised) across Indian and global venues with our gap multiple and pair-level targets to match. Internal.", {"category": {"type": "string", "enum": ["spot", "perps", "options", "commodities_tokenised"]}, "force": {"type": "boolean"}}),
     _fn("competitor_campaigns", "Competitor campaigns detected in the last N hours from announcements, blogs, news and App Store notes — type, impact, counter SOP; App Store ranks. Internal.", {"hours": {"type": "integer"}, "venue": STR, "force": {"type": "boolean"}}),
     _fn("onchain_vs_cex", "Hyperliquid vs centralised venues (volume, OI, users, rank, share), on-chain perps OI landscape, per-coin OI share and funding edges. Internal.", {"force": {"type": "boolean"}}),
+    _fn("signal_catalog", "Signal Bridge catalog: signals that can fire MoEngage business events, what is live now, approved rules, fires.", {}),
+    _fn("propose_signal_rule", "Propose a standing rule so a signal fires its MoEngage business event automatically (approval once; caps, quiet hours, regime policy enforced).", {"signal_id": STR, "max_per_day": {"type": "integer"}, "rationale": STR}, ["signal_id"]),
+    _fn("signal_fires", "Ledger of business events fired by the Signal Bridge.", {"limit": {"type": "integer"}}),
+    _fn("compliance_sweep", "Lint every live campaign's copy against the India rules; findings with fixes.", {"force": {"type": "boolean"}}),
+    _fn("refresh_learnings", "Recompile the our-learnings skill from our own readouts and reviews.", {}),
     _fn("sop_india_review", "India-fit review of SOPs by our compliance/copy/calendar skills: scores, flags, fixes, missing India SOPs.", {"sop_id": STR}),
     _fn("sop_india_fix", "Apply the deterministic India fixes to one SOP as a new version.", {"sop_id": STR}, ["sop_id"]),
     _fn("workspace_analysis", "Complete MoEngage programme analysis with the analyst narrative and ICE-ranked actions. Start here for programme-level questions.", {"force": {"type": "boolean"}}),
@@ -915,5 +951,5 @@ TOOLS: Dict[str, Callable[..., Dict[str, Any]]] = {
     "north_star": _safe(north_star), "set_north_star": _safe(set_north_star), "comms_limits": _safe(comms_limits), "set_comms_limits": _safe(set_comms_limits), "peace_index": _safe(peace_index),
     "guardrail_monitor": _safe(guardrail_monitor), "write_flight_plan": _safe(write_flight_plan), "flight_plans": _safe(flight_plans),
     "segment_study": _safe(segment_study), "define_nomenclature": _safe(define_nomenclature), "list_sops": _safe(list_sops), "sop_detail": _safe(sop_detail), "define_sop": _safe(define_sop), "run_sop": _safe(run_sop), "sop_runs": _safe(sop_runs), "channel_matrix": _safe(channel_matrix),
-    "competitor_intel": _safe(competitor_intel), "competitor_benchmarks": _safe(competitor_benchmarks), "competitor_campaigns": _safe(competitor_campaigns), "onchain_vs_cex": _safe(onchain_vs_cex), "sop_india_review": _safe(sop_india_review), "sop_india_fix": _safe(sop_india_fix), "workspace_analysis": _safe(workspace_analysis), "qa_report": _safe(qa_report), "verify_claims": _safe(verify_claims), "structural_audit": _safe(structural_audit), "money_flow": _safe(money_flow), "market_flash": _safe(market_flash), "campaign_from_alert": _safe(campaign_from_alert), "competitor_dossier": _safe(competitor_dossier), "pair_battle": _safe(pair_battle), "web3_trending": _safe(web3_trending), "product_cohorts": _safe(product_cohorts), "announcement_lenses": _safe(announcement_lenses), "request_data": _safe(request_data), "data_requests": _safe(data_requests),
+    "competitor_intel": _safe(competitor_intel), "competitor_benchmarks": _safe(competitor_benchmarks), "competitor_campaigns": _safe(competitor_campaigns), "onchain_vs_cex": _safe(onchain_vs_cex), "signal_catalog": _safe(signal_catalog), "propose_signal_rule": _safe(propose_signal_rule), "signal_fires": _safe(signal_fires), "compliance_sweep": _safe(compliance_sweep), "refresh_learnings": _safe(refresh_learnings), "sop_india_review": _safe(sop_india_review), "sop_india_fix": _safe(sop_india_fix), "workspace_analysis": _safe(workspace_analysis), "qa_report": _safe(qa_report), "verify_claims": _safe(verify_claims), "structural_audit": _safe(structural_audit), "money_flow": _safe(money_flow), "market_flash": _safe(market_flash), "campaign_from_alert": _safe(campaign_from_alert), "competitor_dossier": _safe(competitor_dossier), "pair_battle": _safe(pair_battle), "web3_trending": _safe(web3_trending), "product_cohorts": _safe(product_cohorts), "announcement_lenses": _safe(announcement_lenses), "request_data": _safe(request_data), "data_requests": _safe(data_requests),
 }

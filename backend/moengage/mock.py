@@ -31,20 +31,30 @@ def _todays_faults() -> Dict[str, Dict[str, Any]]:
         return {}
 
 
+MOCK_CONTENT = {
+    "cmp_001": {"title": "Weekend Flash Sale: 20% off trading fees", "body": "This weekend only — 20% off spot trading fees. Don't miss out, ends Sunday midnight.", "cta": "Trade now"},
+    "cmp_002": {"title": "Your order is waiting", "body": "You left a BTC order unfinished. Fees and 1% TDS are shown before you confirm.", "cta": "Review order"},
+    "cmp_003": {"subject": "Double points for VIP members this month", "body": "Your fee tier is 12% away from the next level. Points double on every trade this month. Crypto products and NFTs are unregulated and can be highly risky. There may be no regulatory recourse for any loss from such transactions.", "cta": "See your tier"},
+    "cmp_004": {"subject": "What changed since you last traded", "body": "Three things moved on your watchlist this month. Here are the facts, plus one tool: price alerts. Crypto products and NFTs are unregulated and can be highly risky. There may be no regulatory recourse for any loss from such transactions.", "cta": "Open watchlist"},
+    "cmp_005": {"title": "Price drop on your wishlist", "body": "SOL is 8% lower than when you added it. Set an alert so you don't have to watch the screen.", "cta": "Set alert"},
+    "cmp_006": {"title": "Welcome to CoinDCX", "body": "Your account is verified. Add money by UPI in 20 seconds; withdrawals are instant.", "cta": "Add money"},
+}
+
+
 def campaigns(jitter: bool = False) -> List[Dict[str, Any]]:
     base = [
         {"id": "cmp_001", "name": "Weekend Flash Sale 20% Off", "channel": "Push", "status": "Active", "target_segment": "All Active App Users",
-         "sent_count": 482100, "delivered_count": 453174, "delivery_rate": 94.0, "opened_count": 28450, "ctr": 6.27, "conversions": 3410, "conversion_rate": 1.2, "revenue_generated": 68200.0, "last_run": _ago(18)},
+         "sent_count": 482100, "delivered_count": 453174, "delivery_rate": 94.0, "opened_count": 28450, "ctr": 6.27, "conversions": 3410, "conversion_rate": 1.2, "revenue_generated": 68200.0, "last_run": _ago(18), "campaign_content": MOCK_CONTENT["cmp_001"]},
         {"id": "cmp_002", "name": "Cart Abandonment 1-Hour Reminder", "channel": "Push", "status": "Active", "target_segment": "Cart Abandoners (< 2h)",
-         "sent_count": 42100, "delivered_count": 40416, "delivery_rate": 96.0, "opened_count": 5210, "ctr": 12.89, "conversions": 1890, "conversion_rate": 4.68, "revenue_generated": 94500.0, "last_run": _ago(1)},
+         "sent_count": 42100, "delivered_count": 40416, "delivery_rate": 96.0, "opened_count": 5210, "ctr": 12.89, "conversions": 1890, "conversion_rate": 4.68, "revenue_generated": 94500.0, "last_run": _ago(1), "campaign_content": MOCK_CONTENT["cmp_002"]},
         {"id": "cmp_003", "name": "VIP Loyalty Club Double Points", "channel": "Email", "status": "Active", "target_segment": "HVT_Sep26",
-         "sent_count": 14200, "delivered_count": 13916, "delivery_rate": 98.0, "opened_count": 1244, "ctr": 8.94, "conversions": 717, "conversion_rate": 5.15, "revenue_generated": 141000.0, "last_run": _ago(30)},
+         "sent_count": 14200, "delivered_count": 13916, "delivery_rate": 98.0, "opened_count": 1244, "ctr": 8.94, "conversions": 717, "conversion_rate": 5.15, "revenue_generated": 141000.0, "last_run": _ago(30), "campaign_content": MOCK_CONTENT["cmp_003"]},
         {"id": "cmp_004", "name": "Reactivation: 30-Day Inactive Winback", "channel": "Email", "status": "Active", "target_segment": "Dormant_D60_LowProp_Sep26",
-         "sent_count": 182400, "delivered_count": 171456, "delivery_rate": 94.0, "opened_count": 2434, "ctr": 1.42, "conversions": 412, "conversion_rate": 0.24, "revenue_generated": 12400.0, "last_run": _ago(50)},
+         "sent_count": 182400, "delivered_count": 171456, "delivery_rate": 94.0, "opened_count": 2434, "ctr": 1.42, "conversions": 412, "conversion_rate": 0.24, "revenue_generated": 12400.0, "last_run": _ago(50), "campaign_content": MOCK_CONTENT["cmp_004"]},
         {"id": "cmp_005", "name": "New User Onboarding Guide", "channel": "In-App", "status": "Active", "target_segment": "FTD_NoTrade_Sep26",
-         "sent_count": 30500, "delivered_count": 30500, "delivery_rate": 100.0, "opened_count": 9600, "ctr": 31.47, "conversions": 9600, "conversion_rate": 31.47, "revenue_generated": 0.0, "last_run": _ago(3)},
+         "sent_count": 30500, "delivered_count": 30500, "delivery_rate": 100.0, "opened_count": 9600, "ctr": 31.47, "conversions": 9600, "conversion_rate": 31.47, "revenue_generated": 0.0, "last_run": _ago(3), "campaign_content": MOCK_CONTENT["cmp_005"]},
         {"id": "cmp_006", "name": "Price Drop Alert on Wishlist Items", "channel": "Push", "status": "Active", "target_segment": "Wishlist Users",
-         "sent_count": 66700, "delivered_count": 64699, "delivery_rate": 97.0, "opened_count": 10900, "ctr": 16.85, "conversions": 2380, "conversion_rate": 3.68, "revenue_generated": 91600.0, "last_run": _ago(7)},
+         "sent_count": 66700, "delivered_count": 64699, "delivery_rate": 97.0, "opened_count": 10900, "ctr": 16.85, "conversions": 2380, "conversion_rate": 3.68, "revenue_generated": 91600.0, "last_run": _ago(7), "campaign_content": MOCK_CONTENT["cmp_006"]},
     ]
     if jitter:
         for c in base:

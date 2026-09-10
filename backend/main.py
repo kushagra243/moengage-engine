@@ -1261,6 +1261,63 @@ def brain_analysis_run(request: Request):
     return workspace_analysis.report(force=True)
 
 
+class SignalProposePayload(BaseModel):
+    signal_id: str
+    max_per_day: Optional[int] = None
+    quiet_start: str = "22:00"
+    quiet_end: str = "08:00"
+    regimes: List[str] = []
+    rationale: str = ""
+
+
+class SignalEvalPayload(BaseModel):
+    dry_run: bool = True
+
+
+class SignalTogglePayload(BaseModel):
+    enabled: bool
+
+
+@app.get("/api/signals")
+def signals_catalog():
+    from . import signals
+    return signals.catalog()
+
+
+@app.post("/api/signals/evaluate")
+def signals_evaluate(payload: SignalEvalPayload, request: Request):
+    from . import signals
+    audit("signals.evaluate", {"dry_run": payload.dry_run}, actor=request_actor(request))
+    return signals.evaluate(dry_run=payload.dry_run)
+
+
+@app.post("/api/signals/propose")
+def signals_propose(payload: SignalProposePayload, request: Request):
+    from . import signals
+    r = signals.propose_rule(payload.signal_id, payload.max_per_day, payload.quiet_start, payload.quiet_end, payload.regimes, payload.rationale, created_by=request_actor(request))
+    if r.get("error"):
+        raise HTTPException(400, r["error"])
+    return r
+
+
+@app.post("/api/signals/rules/{signal_id}/toggle")
+def signals_toggle(signal_id: str, payload: SignalTogglePayload, request: Request):
+    from . import signals
+    return signals.set_enabled(signal_id, payload.enabled, actor=request_actor(request))
+
+
+@app.get("/api/brain/compliance")
+def brain_compliance(force: bool = False):
+    from . import compliance_sweep
+    return compliance_sweep.sweep() if force else (compliance_sweep.latest() or compliance_sweep.sweep())
+
+
+@app.post("/api/brain/learnings/refresh")
+def brain_learnings_refresh(request: Request):
+    from . import learnings
+    return learnings.refresh()
+
+
 @app.get("/api/brain/qa")
 def brain_qa(force: bool = False):
     from . import qa

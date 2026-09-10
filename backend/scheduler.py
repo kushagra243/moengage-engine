@@ -156,6 +156,16 @@ class DailyAutomationScheduler:
                     report["steps"].append("workspace_analysis")
                 except Exception as e:
                     report["workspace_analysis_error"] = redact(str(e))
+                try:
+                    from . import compliance_sweep as _cs
+                    _c = _cs.sweep(); report["compliance"] = _c["counts"]; report["steps"].append("compliance_sweep")
+                except Exception as e:
+                    report["compliance_error"] = redact(str(e))
+                try:
+                    from . import learnings as _ln
+                    report["learnings"] = _ln.refresh(); report["steps"].append("learnings")
+                except Exception as e:
+                    report["learnings_error"] = redact(str(e))
             except Exception as e:
                 report["qa_error"] = redact(str(e))
             if not report.get("executive_summary"):
@@ -190,8 +200,16 @@ class DailyAutomationScheduler:
     def _loop(self):
         last_minute = None
         last_intraday = time.time()
+        last_signals = 0.0
         while self.is_running:
             try:
+                if time.time() - last_signals >= 900:
+                    last_signals = time.time()
+                    try:
+                        from . import signals as _sig
+                        _sig.evaluate()
+                    except Exception as e:
+                        log.info("signal bridge evaluation failed: %s", redact(str(e))[:120])
                 enabled = get_setting("schedule_enabled", "true").lower() == "true"
                 sched = get_setting("schedule_time", "09:00").strip()
                 every_h = float(get_setting("refresh_interval_hours", "6") or 6)

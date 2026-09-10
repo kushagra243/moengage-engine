@@ -41,11 +41,14 @@ def _hl(body: Dict[str, Any], timeout: float = 15.0):
     return r.json()
 
 
+ETF = re.compile(r"^(SPY|QQQ|IWM|DIA|VTI|VOO|TLT|IEF|HYG|LQD|GLD|SLV|USO|UNG|ARKK|ARKW|SOXL|SOXS|TQQQ|SQQQ|UPRO|SPXU|SMH|XLF|XLE|XLK|XLV|XLI|XLU|EEM|EFA|FXI|KWEB|MCHI|EWY|KORU|EWJ|INDA|EPI|INDL|IBIT|ETHA|BITO|GBTC|ETHE|FBTC|ARKB|HODL|BITB|EZBC|BTCO|BRRR|MSTU|MSTX|CONL|NVDL|TSLL|YINN|YANG|VXX|UVXY|SVXY|TMF|TBT)$", re.I)
+
+
 def _asset_class(name: str) -> str:
     if COMMODITY.search(name):
         return "commodity"
-    if INDEX.search(name):
-        return "index"
+    if INDEX.search(name) or ETF.search(name):
+        return "index"          # index perps and ETF perps are one product for us (Index & ETF perps)
     if FX.search(name):
         return "fx"
     return "equity"

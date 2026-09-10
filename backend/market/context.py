@@ -166,7 +166,7 @@ def narrative(ctx: Dict[str, Any]) -> str:
     if ctx.get("equity_movers"):
         lines.append("HL equity perps: " + ", ".join(f"{m['name']} {m['chg_24h']:+.1f}%" for m in ctx["equity_movers"][:5]) + ".")
     if ctx.get("index_movers"):
-        lines.append("HL index perps: " + ", ".join(f"{m['name']} {m['chg_24h']:+.1f}%" for m in ctx["index_movers"][:4]) + ".")
+        lines.append("HL index & ETF perps: " + ", ".join(f"{m['name']} {m['chg_24h']:+.1f}%" for m in ctx["index_movers"][:4]) + ".")
     if ctx.get("commodity_movers"):
         lines.append("HL commodity perps: " + ", ".join(f"{m['name']} {m['chg_24h']:+.1f}%" for m in ctx["commodity_movers"][:5]) + ".")
     risk = ((ctx.get("news") or {}).get("risk_flags")) or []

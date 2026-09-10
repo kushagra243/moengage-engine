@@ -136,3 +136,11 @@ def test_market_moving_news_filters_and_tags():
     synth = [i for i in r["items"] if i.get("synthetic")]
     assert len(synth) == 1 and synth[0]["assets"] == ["SOL"] and "long liquidations likely" in synth[0]["title"] and "(OI -9%)" in synth[0]["title"]
     assert dict(r["by_driver"])["liquidations"] >= 2 and "SOL" in r["assets_in_focus"] and "GOLD" in r["assets_in_focus"]
+
+
+def test_etfs_classify_as_index_product():
+    from backend.market.exchanges import _asset_class
+    from backend.products import PRODUCTS
+    assert all(_asset_class(x) == "index" for x in ("SOXL", "EWY", "KORU", "QQQ", "IBIT", "SP500", "USTECH"))
+    assert _asset_class("NVDA") == "equity" and _asset_class("GOLD") == "commodity"
+    assert PRODUCTS["perps_indices"]["name"] == "Index & ETF perps" and "ETF" in PRODUCTS["perps_indices"]["codes"]

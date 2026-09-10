@@ -16,7 +16,7 @@ Pre-uploaded segment names are inspiration for new cohorts; propose new uploads 
 | SIP | continuity, DCA education, statements | ≤2/wk | market-timing, pause suggestions | spot alerts, earn |
 | Crypto perps | risk tools, funding/OI notes, fee tiers, macro briefs | ≤4 push/wk, 1 market push/day | size-up, leverage lure, P&L boards | tokenised (US hours/equity watchlist), commodities (education) |
 | US-stock perps | 24/7 access, after-hours facts, earnings-week risk notes | ≤3 push/wk around US hours | "trade earnings", forecasts, venue names | indices, commodities |
-| Index perps | macro calendar, hedging education | ≤2/wk | direction | US stocks |
+| Index & ETF perps (indices and ETFs on the liquidity venue: SP500, USTECH, SMALL2000, SOXL, EWY, IBIT …) | macro calendar, hedging education, ETF basics incl. 3× decay | ≤2/wk | direction, '3× returns' framing | US stocks, commodities |
 | Commodity perps | macro/geopolitics context | ≤2/wk | safe-haven claims, direction | indices |
 | Options | defined-risk education, expiry notes | ≤2/wk + expiry notes | strategy tips, "cheap premium" | perps risk tools |
 | Earn | variable-APR transparency, risks | ≤1 push/wk + statement | guaranteed, passive income | SIP |

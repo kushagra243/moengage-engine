@@ -196,7 +196,7 @@ def behaviour_reads(f: Dict[str, Any]) -> List[Dict[str, Any]]:
             reads.append({"read": "Leverage was flushed.", "evidence": f"perp OI {lev['oi_chg_1d_pct']:+.1f}% in a day", "traders_do": "liquidated users going quiet; risk of loss-dormancy", "confidence": "high"})
     now = (vs.get("now") or {}); wk = vs.get("week_ago")
     if wk and now:
-        for k, label in (("us_stocks", "US-stock perps"), ("commodities", "commodity perps"), ("indices", "index perps")):
+        for k, label in (("us_stocks", "US-stock perps"), ("commodities", "commodity perps"), ("indices", "index & ETF perps")):
             if now.get(k) is not None and wk.get(k) is not None and now[k] - wk[k] >= 2:
                 reads.append({"read": f"Attention is shifting to {label} on our venue.", "evidence": f"{label} {wk[k]}% → {now[k]}% of venue volume vs a week ago", "traders_do": "crypto traders trying tokenised markets, especially in US hours", "confidence": "medium"})
     elif now.get("us_stocks", 0) + now.get("commodities", 0) + now.get("indices", 0) >= 25:

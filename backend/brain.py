@@ -108,7 +108,12 @@ def state() -> Dict[str, Any]:
     ci = ctx.get("competitors") or {}
     brief = _brief(latest, an, ctx, pend, read)
     badges = {"exp": len(pend), "ideas": len(pend), "anom": bu.get("act_today", 0), "lab": sum(1 for a in (ci.get("actions") or []) if a.get("priority", 0) >= 80) or (1 if ctx.get("tier0") else 0)}
-    return {"bus": bus, "load": load, "pipeline": pipeline, "brief": brief, "autopilot": get_setting("autopilot_enabled", "true").lower() == "true", "badges": badges, "mode": mode,
+    try:
+        from . import refresher
+        _rs = refresher.status(); freshness = {"market_age_min": _rs.get("market_age_min"), "overdue": _rs.get("overdue"), "failing": _rs.get("failing"), "enabled": _rs.get("enabled"), "next": min((r["next_due_min"] for r in _rs.get("jobs", []) if not r["running"]), default=None)}
+    except Exception:
+        freshness = {}
+    return {"bus": bus, "load": load, "pipeline": pipeline, "brief": brief, "autopilot": get_setting("autopilot_enabled", "true").lower() == "true", "badges": badges, "mode": mode, "freshness": freshness,
             "north_star": guardrails.north_star(), "stats": _stats(mode, pend, exps, running, read, days, an, ctx, ci, ideas_new), "region": get_setting("moengage_region", ""), "generated_at": datetime.utcnow().isoformat()}
 
 

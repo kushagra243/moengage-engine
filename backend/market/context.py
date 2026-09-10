@@ -202,3 +202,52 @@ def market_news(category: Optional[str] = None, query: Optional[str] = None, lim
 
 def campaign_hooks(force: bool = False) -> Dict[str, Any]:
     return market_context(force=force)["hooks"]
+
+
+def patch_prices() -> Dict[str, Any]:
+    """Real-time layer: one call to the liquidity venue (mark price, previous-day price, 24h notional, OI, funding) patches prices,
+    24h change, volume and OI on the cached picture in place — no full rebuild, no news, no model. Runs every minute from the refresher."""
+    from .exchanges import _hl
+    _init()
+    conn = get_db()
+    r = conn.execute("SELECT id, snapshot_json FROM market_snapshots ORDER BY id DESC LIMIT 1").fetchone()
+    if not r:
+        conn.close(); return {"ok": False, "error": "no snapshot yet"}
+    ctx = json.loads(r["snapshot_json"])
+    meta, ctxs = _hl({"type": "metaAndAssetCtxs"})
+    live: Dict[str, Dict[str, Any]] = {}
+    for u, a in zip(meta.get("universe") or [], ctxs or []):
+        try:
+            px = float(a.get("markPx") or 0); prev = float(a.get("prevDayPx") or 0)
+            if px <= 0:
+                continue
+            live[u["name"]] = {"price": px, "chg_24h": round((px / prev - 1) * 100, 2) if prev else None, "vol_24h_usd": float(a.get("dayNtlVlm") or 0) or None, "oi_usd": (float(a.get("openInterest") or 0) * px) or None, "funding_apr_pct": round(float(a.get("funding") or 0) * 24 * 365 * 100, 1) if a.get("funding") is not None else None}
+        except Exception:
+            continue
+    patched = 0
+    for key in ("crypto_markets", "equities", "indices", "commodities", "macro", "crypto_movers", "equity_movers", "index_movers", "commodity_movers", "oi_movers"):
+        for row in ctx.get(key) or []:
+            l = live.get(str(row.get("symbol") or row.get("name") or "").upper()) or live.get(str(row.get("symbol") or ""))
+            if not l:
+                continue
+            for k in ("price", "chg_24h"):
+                if l.get(k) is not None:
+                    row[k] = l[k]
+            for k in ("vol_24h_usd", "oi_usd", "funding_apr_pct"):
+                if l.get(k) is not None and row.get(k) is not None:
+                    row[k] = l[k]
+            patched += 1
+    assets = (ctx.get("crypto") or {}).get("assets") or {}
+    for sym, a in assets.items():
+        l = live.get(sym)
+        if l:
+            a["price"] = l["price"]
+            if l.get("chg_24h") is not None:
+                a["chg_24h"] = l["chg_24h"]
+    if ctx.get("crypto_markets"):
+        ctx["crypto_movers"] = _movers(ctx["crypto_markets"])
+    ctx["prices_at"] = datetime.now(timezone.utc).isoformat()
+    ctx["prices_source"] = "liquidity venue mark prices (1-min ticker)"
+    conn.execute("UPDATE market_snapshots SET snapshot_json=? WHERE id=?", (json.dumps(ctx, default=str), r["id"]))
+    conn.commit(); conn.close()
+    return {"ok": True, "patched": patched, "live_symbols": len(live), "prices_at": ctx["prices_at"]}

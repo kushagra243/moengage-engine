@@ -167,3 +167,4 @@ body.text-lg .xcard .tt, body.text-lg .sub { font-size:14.5px; } body.text-lg .c
 .setf input:focus, .chatin textarea:focus { outline:none; border-color:var(--cyan); }
 .chatp { display:flex; flex-direction:column; min-height:60vh; } .chatlog { flex:1 1 auto; overflow:auto; max-height:62vh; padding:10px 14px; } .chatin { display:flex; gap:8px; padding:10px 14px; border-top:1px solid var(--line-soft); } .chatin textarea { flex:1 1 auto; resize:vertical; }
 .msg { padding:8px 0; border-bottom:1px solid var(--line-soft); font-size:13px; } .msg .who { font:600 10px/1 var(--display); letter-spacing:.18em; color:var(--text-mute); margin-bottom:4px; } .msg.user .who { color:var(--cyan-dim); } .msg.assistant .who { color:var(--green); }
+.fresh { display:flex; align-items:center; gap:8px; padding:0 14px; border-left:1px solid var(--line-soft); font-size:11px; } .fresh .k { font-size:10px; letter-spacing:.18em; color:var(--text-mute); } .fresh .v { font-weight:600; }

@@ -200,16 +200,15 @@ class DailyAutomationScheduler:
     def _loop(self):
         last_minute = None
         last_intraday = time.time()
-        last_signals = 0.0
         while self.is_running:
             try:
-                if time.time() - last_signals >= 900:
-                    last_signals = time.time()
-                    try:
-                        from . import signals as _sig
-                        _sig.evaluate()
-                    except Exception as e:
-                        log.info("signal bridge evaluation failed: %s", redact(str(e))[:120])
+                try:
+                    from . import refresher as _rf
+                    for _r in _rf.run_due():
+                        if not _r.get("ok"):
+                            log.info("refresh job %s failed: %s", _r.get("job"), _r.get("error"))
+                except Exception as e:
+                    log.info("refresh engine error: %s", redact(str(e))[:120])
                 enabled = get_setting("schedule_enabled", "true").lower() == "true"
                 sched = get_setting("schedule_time", "09:00").strip()
                 every_h = float(get_setting("refresh_interval_hours", "6") or 6)

@@ -1278,6 +1278,35 @@ class SignalTogglePayload(BaseModel):
     enabled: bool
 
 
+@app.get("/api/refresh/status")
+def refresh_status():
+    from . import refresher
+    return refresher.status()
+
+
+@app.get("/api/refresh/changes")
+def refresh_changes():
+    from . import refresher
+    return refresher.changes()
+
+
+@app.post("/api/refresh/run/{job}")
+def refresh_run(job: str, request: Request):
+    from . import refresher
+    audit("refresh.manual", {"job": job}, actor=request_actor(request))
+    r = refresher.run_job(job)
+    if not r.get("ok") and r.get("error", "").startswith("unknown job"):
+        raise HTTPException(404, r["error"])
+    return r
+
+
+@app.post("/api/refresh/run-all")
+def refresh_run_all(request: Request):
+    from . import refresher
+    audit("refresh.manual", {"job": "all"}, actor=request_actor(request))
+    return {"runs": [refresher.run_job(j["name"]) for j in refresher.JOBS]}
+
+
 @app.get("/api/signals")
 def signals_catalog():
     from . import signals

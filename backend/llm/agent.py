@@ -70,6 +70,7 @@ OPERATING DOCTRINE
 
 21. Improve before approval. Proposals are experiments awaiting approval; when the operator comments or asks for changes, read proposal_detail, then revise_proposal with the exact fields (copy variants, holdout, KPI, exclusions, schedule, audience) and a note — or comment_proposal with what you would change and why. Never create a duplicate proposal to fix one that exists.
 
+26. Plan, act, critique. For any non-trivial ask: one-line plan (goal → tools → checks), then execute, then a two-line self-critique (what could be wrong, what you did not verify). Work in the style of the specialist the task needs (analyst for numbers, copywriter for variants, compliance officer for review) and say which hat you wore.
 25. Our evidence first, then real time. Load skill('our-learnings') before citing any benchmark. Real-time delivery goes through the Signal Bridge (signal_catalog → propose_signal_rule): a MoEngage business event per approved signal, never a scheduled blast pretending to be real time. Live copy is swept nightly (compliance_sweep); fix findings before proposing more.
 24. India first. Every SOP and every proposal is judged for Indian traders by our own skills (sop_india_review): ASCI VDA disclaimer where the channel can carry it, no forbidden words, TDS/tax stated plainly, derivatives education-only, WhatsApp utility templates and DLT windows, DND respected, Hinglish for mass cohorts, salary-week timing for deposits, no onboarding bonuses. Fix flags (sop_india_fix) before running an SOP that scores under 85.
 23. Verify before you assert. Every figure in a reply must come from a tool result in this conversation (a QA line is appended when one does not); use verify_claims for numbers from memory, and qa_report to see which facts on the boards are failing and how to fix them. If a check fails because of code, propose the fix.
@@ -87,10 +88,18 @@ Today: {today}. Workspace region: {region}. Data mode: {mode}."""
 
 
 class MarketerAgent:
-    def __init__(self, client: Optional[LLMClient] = None, purpose: str = "chat"):
+    def __init__(self, client: Optional[LLMClient] = None, purpose: str = "chat", persona: Optional[str] = None):
         self.client = client or LLMClient()
         self.purpose = purpose
+        self.persona = persona
         self._seen_calls: Dict[str, str] = {}
+
+    def _tools(self) -> List[Dict[str, Any]]:
+        if not self.persona:
+            return TOOL_SCHEMAS
+        from .roster import allowed_tools
+        allow = set(allowed_tools(self.persona))
+        return [t for t in TOOL_SCHEMAS if ((t.get("function") or t).get("name")) in allow]
 
     def _system(self) -> str:
         from ..moengage import MoEngageClient
@@ -101,8 +110,12 @@ class MarketerAgent:
             g = prompt_block()
         except Exception:
             g = ""
-        return SYSTEM_PROMPT.format(today=datetime.now().strftime("%Y-%m-%d %H:%M IST"), region=get_setting("moengage_region", ""), mode=mode,
+        base = SYSTEM_PROMPT.format(today=datetime.now().strftime("%Y-%m-%d %H:%M IST"), region=get_setting("moengage_region", ""), mode=mode,
                                     skills=prompt_lines() or "- (none installed)", guidance=g)
+        if self.persona:
+            from .roster import system_block
+            base += system_block(self.persona)
+        return base
 
     def _run_tool(self, name: str, args: Dict[str, Any]) -> str:
         fn = TOOLS.get(name)
@@ -141,7 +154,7 @@ class MarketerAgent:
         rounds = int(get_setting("llm_max_rounds_autopilot" if self.purpose == "autopilot" else "llm_max_rounds", "6" if self.purpose == "autopilot" else str(MAX_ROUNDS)) or MAX_ROUNDS)
         self.client.purpose = self.purpose
         for _ in range(rounds):
-            resp = self.client.chat(messages, tools=TOOL_SCHEMAS)
+            resp = self.client.chat(messages, tools=self._tools())
             model = resp.get("model")
             for k in usage_total:
                 usage_total[k] += int((resp.get("usage") or {}).get(k) or 0)
@@ -170,7 +183,7 @@ class MarketerAgent:
         if persist:
             save_chat_message("assistant", final_text, tool_calls={"tools": [t["tool"] for t in trace], "model": model})
         audit("agent.chat", {"tools": [t["tool"] for t in trace], "model": model, "chars": len(final_text), "qa_unverified": len((qa_res or {}).get("unverified") or [])}, actor="agent")
-        return {"reply": final_text, "model": model, "tool_used": [t["tool"] for t in trace], "trace": trace, "usage": usage_total, "qa": qa_res}
+        return {"reply": final_text, "model": model, "tool_used": [t["tool"] for t in trace], "trace": trace, "usage": usage_total, "qa": qa_res, "persona": self.persona}
 
     def daily_brief(self, report: Dict[str, Any]) -> Dict[str, Any]:
         """Structured daily brief from snapshot/anomaly/market context. Returns dict with executive_summary, insights, actions, proposals."""

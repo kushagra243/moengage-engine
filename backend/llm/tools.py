@@ -555,6 +555,34 @@ def onchain_vs_cex(force: bool = False) -> Dict[str, Any]:
     return onchain_cex.compare(force=force)
 
 
+def agent_roster() -> Dict[str, Any]:
+    """The specialist agents available (strategist, analyst, copywriter, compliance officer, experimenter, market intel, segmentation, ops/QA, methodology scout): role, skills, tool rights, review checklist."""
+    from .roster import roster
+    return {"agents": [{k: a[k] for k in ("id", "name", "purpose", "skills", "writes", "checklist")} for a in roster()]}
+
+
+def council_review(proposal_id: int) -> Dict[str, Any]:
+    """Run the review council (compliance officer, experimentation agent, analyst) over a pending proposal; each verdict is recorded as a comment on it."""
+    from .roster import council_review as _cr
+    return _cr(int(proposal_id))
+
+
+def research_radar(limit: int = 20, tag: Optional[str] = None, refresh: bool = False) -> Dict[str, Any]:
+    """Methodology radar: newest techniques, platform releases, papers and case studies in lifecycle/CRM/growth marketing, scored for our context, each with why-it-matters and the experiment that would prove it here. Tags: incrementality, experimentation, personalisation, agentic, send_time, channel_*, activation, retention, compliance, crypto_india, journeys, copy, benchmarks."""
+    from .. import research
+    if refresh:
+        research.refresh()
+    r = research.radar(limit=limit, tag=tag)
+    r["items"] = [{k: i.get(k) for k in ("id", "title", "source", "published", "tags", "relevance", "why_it_matters", "experiment", "skill", "url")} for i in r["items"]]
+    return r
+
+
+def propose_skill_update(skill: str, section_title: str, text: str, source_url: str = "", rationale: str = "") -> Dict[str, Any]:
+    """Queue an addition to one of our skills (approval-gated): the method, when it applies to us (Indian crypto exchange on MoEngage), and the evidence that would prove it. Approve → appended to the skill file; the agent loads it next call."""
+    from .. import research
+    return research.propose_skill_update(skill, section_title, text, source_url, rationale, created_by="agent")
+
+
 def signal_catalog() -> Dict[str, Any]:
     """Signal Bridge: which market/behaviour signals can fire MoEngage Business Events (regime flip, tier-0, asset move, new listing, funding crowding, OI flush, salary week, macro print T−24h, competitor surge on a pair we list), what is live right now, which rules are approved, today's fires and the last evaluation."""
     from .. import signals
@@ -628,6 +656,17 @@ def structural_audit() -> Dict[str, Any]:
     """Which must-have lifecycle campaigns (from the CLM playbooks) are missing from the live programme: KYC rescue, deposit-failure recovery, funded→first trade, second trade 72h, own-asset alerts, weekly recap, fee-tier nudge, intent-based graduation, tokenised cross-sell, slipping vs own baseline, dormant by cause, liquidation recovery, funding nudges, stress mode, holdouts, broadcast cap, frequency caps, web3 safety, SIP nurture, WhatsApp utility, Cards, channel recovery, re-KYC, cohort refresh. Each gap carries ICE, tagline, segment, SOP, KPI, benchmark. These are the P0 recommendations."""
     from .. import structural
     return structural.audit()
+
+
+def market_moving_news(limit: int = 20, driver: Optional[str] = None) -> Dict[str, Any]:
+    """Only the headlines that can move the assets our users hold: tagged by driver (liquidations, macro, regulatory, security, listings, flows, protocol, earnings), the assets touched, impact and the so-what for CRM; includes liquidation cascades detected from our own price/OI data."""
+    from ..market import feed
+    from ..market.context import _latest
+    r = feed.market_moving_news(_latest(6 * 3600) or {}, limit=limit * 2)
+    if driver:
+        r["items"] = [i for i in r["items"] if driver in i["drivers"]]
+    r["items"] = r["items"][:limit]
+    return r
 
 
 def money_flow() -> Dict[str, Any]:
@@ -898,6 +937,10 @@ TOOL_SCHEMAS: List[Dict[str, Any]] = [
     _fn("competitor_benchmarks", "Category leaderboards (spot / perps / options / commodities_tokenised) across Indian and global venues with our gap multiple and pair-level targets to match. Internal.", {"category": {"type": "string", "enum": ["spot", "perps", "options", "commodities_tokenised"]}, "force": {"type": "boolean"}}),
     _fn("competitor_campaigns", "Competitor campaigns detected in the last N hours from announcements, blogs, news and App Store notes — type, impact, counter SOP; App Store ranks. Internal.", {"hours": {"type": "integer"}, "venue": STR, "force": {"type": "boolean"}}),
     _fn("onchain_vs_cex", "Hyperliquid vs centralised venues (volume, OI, users, rank, share), on-chain perps OI landscape, per-coin OI share and funding edges. Internal.", {"force": {"type": "boolean"}}),
+    _fn("agent_roster", "The specialist agents: roles, skills, tool rights, review checklists.", {}),
+    _fn("council_review", "Run the compliance / experimentation / analyst review council over a pending proposal; verdicts are recorded as comments.", {"proposal_id": {"type": "integer"}}, ["proposal_id"]),
+    _fn("research_radar", "Methodology radar: new techniques and releases scored for our context, with why-it-matters and the experiment to prove them.", {"limit": {"type": "integer"}, "tag": STR, "refresh": {"type": "boolean"}}),
+    _fn("propose_skill_update", "Queue an approval-gated addition to a skill (method, applicability to us, evidence to prove it).", {"skill": STR, "section_title": STR, "text": STR, "source_url": STR, "rationale": STR}, ["skill", "section_title", "text"]),
     _fn("signal_catalog", "Signal Bridge catalog: signals that can fire MoEngage business events, what is live now, approved rules, fires.", {}),
     _fn("propose_signal_rule", "Propose a standing rule so a signal fires its MoEngage business event automatically (approval once; caps, quiet hours, regime policy enforced).", {"signal_id": STR, "max_per_day": {"type": "integer"}, "rationale": STR}, ["signal_id"]),
     _fn("signal_fires", "Ledger of business events fired by the Signal Bridge.", {"limit": {"type": "integer"}}),
@@ -909,6 +952,7 @@ TOOL_SCHEMAS: List[Dict[str, Any]] = [
     _fn("qa_report", "Fact-check report over the boards (freshness, cross-source agreement, bounds, references, copy claims, sources, completeness) with fixes; safe improvements auto-applied.", {"force": {"type": "boolean"}}),
     _fn("verify_claims", "Verify numeric claims against live data before asserting them.", {"claims": {"type": "array", "items": OBJ}}, ["claims"]),
     _fn("structural_audit", "Structural misses in the CRM / funnel journey vs the CLM playbooks, ICE-ranked with tagline, segment, SOP, KPI, benchmark. These are P0; propose them first (run_sop or propose_campaign with ice + tagline).", {}),
+    _fn("market_moving_news", "Headlines filtered to what can move the assets we list (driver tags incl. liquidations, assets touched, so-what).", {"limit": {"type": "integer"}, "driver": STR}),
     _fn("money_flow", "Money flow + trader behaviour reads + prioritised recommendations (segment, SOP, KPI, avoid). Start here for 'what should we do today'.", {}),
     _fn("market_flash", "Breaking-now market flash with product lenses, biggest news, top OI assets and intel per product.", {"hours": {"type": "integer"}}),
     _fn("campaign_from_alert", "Queue an approval-gated campaign from a market alert via the product's SOP with compliant placeholder copy; dry_run first, then revise_proposal to improve copy.", {"product": STR, "headline": STR, "detail": STR, "sop_id": STR, "segment_name": STR, "dry_run": {"type": "boolean"}}, ["product", "headline"]),
@@ -951,5 +995,5 @@ TOOLS: Dict[str, Callable[..., Dict[str, Any]]] = {
     "north_star": _safe(north_star), "set_north_star": _safe(set_north_star), "comms_limits": _safe(comms_limits), "set_comms_limits": _safe(set_comms_limits), "peace_index": _safe(peace_index),
     "guardrail_monitor": _safe(guardrail_monitor), "write_flight_plan": _safe(write_flight_plan), "flight_plans": _safe(flight_plans),
     "segment_study": _safe(segment_study), "define_nomenclature": _safe(define_nomenclature), "list_sops": _safe(list_sops), "sop_detail": _safe(sop_detail), "define_sop": _safe(define_sop), "run_sop": _safe(run_sop), "sop_runs": _safe(sop_runs), "channel_matrix": _safe(channel_matrix),
-    "competitor_intel": _safe(competitor_intel), "competitor_benchmarks": _safe(competitor_benchmarks), "competitor_campaigns": _safe(competitor_campaigns), "onchain_vs_cex": _safe(onchain_vs_cex), "signal_catalog": _safe(signal_catalog), "propose_signal_rule": _safe(propose_signal_rule), "signal_fires": _safe(signal_fires), "compliance_sweep": _safe(compliance_sweep), "refresh_learnings": _safe(refresh_learnings), "sop_india_review": _safe(sop_india_review), "sop_india_fix": _safe(sop_india_fix), "workspace_analysis": _safe(workspace_analysis), "qa_report": _safe(qa_report), "verify_claims": _safe(verify_claims), "structural_audit": _safe(structural_audit), "money_flow": _safe(money_flow), "market_flash": _safe(market_flash), "campaign_from_alert": _safe(campaign_from_alert), "competitor_dossier": _safe(competitor_dossier), "pair_battle": _safe(pair_battle), "web3_trending": _safe(web3_trending), "product_cohorts": _safe(product_cohorts), "announcement_lenses": _safe(announcement_lenses), "request_data": _safe(request_data), "data_requests": _safe(data_requests),
+    "competitor_intel": _safe(competitor_intel), "competitor_benchmarks": _safe(competitor_benchmarks), "competitor_campaigns": _safe(competitor_campaigns), "onchain_vs_cex": _safe(onchain_vs_cex), "agent_roster": _safe(agent_roster), "council_review": _safe(council_review), "research_radar": _safe(research_radar), "propose_skill_update": _safe(propose_skill_update), "signal_catalog": _safe(signal_catalog), "propose_signal_rule": _safe(propose_signal_rule), "signal_fires": _safe(signal_fires), "compliance_sweep": _safe(compliance_sweep), "refresh_learnings": _safe(refresh_learnings), "sop_india_review": _safe(sop_india_review), "sop_india_fix": _safe(sop_india_fix), "workspace_analysis": _safe(workspace_analysis), "qa_report": _safe(qa_report), "verify_claims": _safe(verify_claims), "structural_audit": _safe(structural_audit), "market_moving_news": _safe(market_moving_news), "money_flow": _safe(money_flow), "market_flash": _safe(market_flash), "campaign_from_alert": _safe(campaign_from_alert), "competitor_dossier": _safe(competitor_dossier), "pair_battle": _safe(pair_battle), "web3_trending": _safe(web3_trending), "product_cohorts": _safe(product_cohorts), "announcement_lenses": _safe(announcement_lenses), "request_data": _safe(request_data), "data_requests": _safe(data_requests),
 }

@@ -116,6 +116,31 @@ def _j_housekeeping():
     return {"ideas": a, "proposals": b if isinstance(b, (int, dict)) else str(b)[:80]}
 
 
+def _j_research():
+    from . import research
+    r = research.refresh()
+    return {"added": r.get("added"), "seen": r.get("seen"), "errors": len(r.get("errors") or [])}
+
+
+def _j_council():
+    """Review council over pending campaign drafts that have not been reviewed yet (max 3 per run; bulk tier)."""
+    from . import approvals
+    from .llm.roster import council_review, council_summary
+    from .llm.provider import llm_settings
+    cfg = llm_settings()
+    if not (cfg["api_key"] or cfg["provider"] == "claude_cli"):
+        return {"skipped": "no model"}
+    done = []
+    for p in approvals.list_proposals(status="pending", limit=100):
+        if p["kind"] not in ("create_campaign", "create_flow", "signal_rule", "skill_update") or council_summary(p):
+            continue
+        r = council_review(p["id"])
+        done.append({"id": p["id"], "overall": r.get("overall")})
+        if len(done) >= 3:
+            break
+    return {"reviewed": done}
+
+
 def _j_compliance():
     from . import compliance_sweep
     return compliance_sweep.sweep().get("counts")
@@ -135,6 +160,8 @@ JOBS: List[Dict[str, Any]] = [
     {"name": "workspace", "minutes": 15, "fn": _j_workspace, "feeds": "Analysis module (facts every run; narrative when inputs change)"},
     {"name": "housekeeping", "minutes": 60, "fn": _j_housekeeping, "feeds": "Ideas board (expiry)"},
     {"name": "compliance", "minutes": 180, "fn": _j_compliance, "feeds": "Analysis → Compliance sweep · QA"},
+    {"name": "council", "minutes": 30, "fn": _j_council, "feeds": "Ideas → council verdicts on new drafts"},
+    {"name": "research", "minutes": 360, "fn": _j_research, "feeds": "Skills → Methodology radar"},
 ]
 
 
@@ -232,7 +259,7 @@ def run_due(max_jobs: int = 3) -> List[Dict[str, Any]]:
 
 
 VIEWS_OF = {"prices": ["lab", "brain"], "market_context": ["lab", "brain", "ideas"], "signals": ["engine"], "benchmarks": ["lab"], "campaign_intel": ["lab"], "onchain_cex": ["lab"], "money_flow": ["lab", "ideas"], "app_rankings": ["lab"],
-            "structural": ["ideas"], "qa": ["brain"], "workspace": ["analysis"], "housekeeping": ["ideas"], "compliance": ["analysis", "brain"]}
+            "structural": ["ideas"], "qa": ["brain"], "workspace": ["analysis"], "housekeeping": ["ideas"], "compliance": ["analysis", "brain"], "council": ["ideas"], "research": ["skills"]}
 
 
 def changes() -> Dict[str, Any]:

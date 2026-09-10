@@ -71,7 +71,14 @@ def _agent(tier_note: str):
     return MarketerAgent(purpose="autopilot")
 
 
+PERSONA_OF = {"self_heal": "ops", "stop_the_bleed": "strategist", "close_the_gap": "strategist", "major_event_broadcast": "strategist", "protect": "strategist", "ride_the_market": "intel", "compete": "intel", "study_new_cohorts": "cohorts", "monthly_flight_plans": "strategist", "close_structural_gaps": "strategist", "best_idea": "strategist"}
+
+
 def _run_mission(agent, mission: str, target: str, prompt: str) -> Dict[str, Any]:
+    try:
+        agent.persona = PERSONA_OF.get(mission)
+    except Exception:
+        pass
     before = {p["id"] for p in approvals.list_proposals(limit=300)}
     out = agent.chat(prompt, history=[], persist=False)
     after = {p["id"] for p in approvals.list_proposals(limit=300)}

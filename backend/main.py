@@ -1283,6 +1283,7 @@ class DirectiveAct(BaseModel):
 
 class AskPayload(BaseModel):
     message: str
+    agent: Optional[str] = None
 
 
 @app.get("/api/brain/state")
@@ -1484,6 +1485,17 @@ def brain_structural():
     return structural.audit()
 
 
+@app.get("/api/market/moving-news")
+def market_moving_news_route(limit: int = 25, driver: Optional[str] = None):
+    from .market import feed
+    from .market.context import _latest
+    r = feed.market_moving_news(_latest(6 * 3600) or {}, limit=limit * 2)
+    if driver:
+        r["items"] = [i for i in r["items"] if driver in i["drivers"]]
+    r["items"] = r["items"][:limit]
+    return r
+
+
 @app.get("/api/market/moneyflow")
 def market_moneyflow():
     from .market import moneyflow
@@ -1505,7 +1517,55 @@ def brain_cycle_run(request: Request):
 
 @app.post("/api/brain/ask")
 def brain_ask(payload: AskPayload):
-    return agent_chat(ChatPayload(message=payload.message))
+    msg = payload.message.strip()
+    if not msg:
+        raise HTTPException(400, "Empty message")
+    cfg = llm_settings()
+    if not cfg["api_key"] and cfg["provider"] != "claude_cli":
+        return agent_chat(ChatPayload(message=msg))
+    try:
+        return MarketerAgent(persona=payload.agent or None).chat(msg)
+    except LLMError as e:
+        raise HTTPException(502, str(e))
+
+
+@app.get("/api/agents")
+def agents_roster():
+    from .llm.roster import roster
+    return {"agents": roster(), "default": "strategist", "council": ["compliance", "experimenter", "analyst"]}
+
+
+@app.post("/api/approvals/{pid}/council")
+def approvals_council(pid: int, request: Request):
+    from .llm.roster import council_review
+    audit("council.review", {"id": pid}, actor=request_actor(request))
+    r = council_review(pid)
+    if r.get("error"):
+        raise HTTPException(400, r["error"])
+    return r
+
+
+class ResearchStatusPayload(BaseModel):
+    status: str
+    note: str = ""
+
+
+@app.get("/api/research")
+def research_radar_route(refresh: bool = False, limit: int = 30, status: Optional[str] = "new", tag: Optional[str] = None):
+    from . import research
+    out = {}
+    if refresh:
+        out["refresh"] = research.refresh()
+    return {**research.radar(limit=limit, status=status or None, tag=tag), **out}
+
+
+@app.post("/api/research/{item_id}/status")
+def research_status(item_id: int, payload: ResearchStatusPayload, request: Request):
+    from . import research
+    r = research.set_status(item_id, payload.status, payload.note, actor=request_actor(request))
+    if r.get("error"):
+        raise HTTPException(400, r["error"])
+    return r
 
 
 @app.get("/api/devagent/status")

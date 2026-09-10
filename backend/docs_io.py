@@ -236,8 +236,9 @@ def experiment_markdown(p: Dict[str, Any], machine_block: bool = True) -> str:
         lines += ["## Schedule", _kv("date", sch.get("date")), _kv("time_ist", sch.get("time_ist")), _kv("condition", sch.get("condition")), ""]
     else:
         lines += ["## Payload", "```json", json.dumps(pl, indent=1, default=str)[:6000], "```", ""]
-    if p.get("comments"):
-        lines += ["## Comments"] + [f"- {c.get('actor') or c.get('author') or ''} ({str(c.get('created_at') or '')[:16]}): {c.get('text')}" for c in p["comments"][:12]] + [""]
+    comments = p.get("comments") or [r for r in (p.get("revisions") or []) if isinstance(r, dict) and r.get("type") == "comment"]
+    if comments:
+        lines += ["## Comments"] + [f"- {c.get('actor') or c.get('author') or ''} ({str(c.get('created_at') or c.get('at') or '')[:16]}): {c.get('text')}" for c in comments[:12]] + [""]
     if machine_block:
         lines += ["", "<!-- machine block · do not edit -->", f"<!-- moe-experiment-json: {json.dumps({'id': p.get('id'), 'kind': p.get('kind'), 'payload': pl, 'rationale': p.get('rationale')}, default=str)} -->", ""]
     return "\n".join(lines)

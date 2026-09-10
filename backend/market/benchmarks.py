@@ -8,7 +8,8 @@ open interest, markets, fees, traffic) for every venue; direct public tickers
 for pair-level numbers (Binance futures, OKX swaps, Bitget futures, Bybit
 linear/options, Deribit options, Binance options, Delta Exchange India).
 Our own figures: CoinDCX spot from CMC (team rule); perps and tokenised markets
-from the liquidity venue as a *reference* (labelled); options unknown until the
+from the liquidity venue as a *reference* (labelled); options = Bybit options
+liquidity as the reference (labelled); previously unknown until the
 team shares a source. Every output row says where the number came from.
 """
 from __future__ import annotations
@@ -159,7 +160,12 @@ def compute(force: bool = False) -> Dict[str, Any]:
             cats["commodities_tokenised"]["hyperliquid"] = dict(cats["commodities_tokenised"]["coindcx"], source="hyperliquid builder dexes")
         except Exception as e:
             errors.append("liquidity venue: " + redact(str(e))[:80])
-        cats["options"].setdefault("coindcx", {"vol_24h_usd": None, "oi_usd": None, "markets": None, "source": "no free source for our options volume yet — team to provide", "unknown": True})
+        # options: our crypto options are served through Bybit's options liquidity, so its figures are the reference for us (labelled; never named in copy)
+        by = cats["options"].get("bybit")
+        if by and (by.get("vol_24h_usd") or by.get("oi_usd")):
+            cats["options"]["coindcx"] = {**{k: by.get(k) for k in ("vol_24h_usd", "oi_usd", "markets", "pairs", "top_pairs") if k in by}, "source": "options liquidity venue (reference — not our own volume)", "reference": True}
+        else:
+            cats["options"].setdefault("coindcx", {"vol_24h_usd": None, "oi_usd": None, "markets": None, "source": "options liquidity venue figures unavailable this run", "unknown": True})
         # persist a daily row per venue/category for trends
         try:
             conn = get_db(); day = datetime.utcnow().strftime("%Y-%m-%d")

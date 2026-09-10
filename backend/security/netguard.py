@@ -95,6 +95,7 @@ class GuardedSession(requests.Session):
 
 # ── scope definitions ─────────────────────────────────────────────────────────
 MOENGAGE_HOSTS = ["*.moengage.com"]
+RESEARCH_HOSTS = ["www.moengage.com", "news.google.com", "www.braze.com", "iterable.com", "www.klaviyo.com", "cxl.com", "growthhackers.com", "www.reforge.com", "export.arxiv.org", "arxiv.org"]   # methodology radar (RSS/Atom + arXiv API), read-only
 MARKET_HOSTS = [
     "api.hyperliquid.xyz", "api.coingecko.com", "api.binance.com", "fapi.binance.com", "www.okx.com", "api.coindcx.com", "api.coincap.io", "rest.coincap.io",
     "query1.finance.yahoo.com", "query2.finance.yahoo.com", "stooq.com",
@@ -140,6 +141,11 @@ def guarded_session(scope: str, extra_hosts: Optional[Iterable[str]] = None, fre
         hosts = _llm_hosts()
         # always rebuilt: base_url may change in settings
         return GuardedSession(scope, hosts, allow_http_loopback=True, default_timeout=120.0)
+    if scope == "research":
+        hosts = list(RESEARCH_HOSTS) + list(extra_hosts or [])
+        if fresh or scope not in _sessions:
+            _sessions[scope] = GuardedSession(scope, hosts, allow_http_loopback=False, default_timeout=20.0)
+        return _sessions[scope]
     if scope == "market":
         hosts = list(MARKET_HOSTS) + list(extra_hosts or [])
         if fresh or scope not in _sessions:

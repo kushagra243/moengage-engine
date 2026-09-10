@@ -114,3 +114,25 @@ def test_competitor_surges_ignore_option_contracts():
     from backend.market import competitors
     src = open(competitors.__file__, encoding="utf-8").read()
     assert 'p.get("product") == "option"' in src
+
+
+def test_market_moving_news_filters_and_tags():
+    from backend.market import feed
+    ctx = {"crypto_markets": [{"symbol": "BTC", "oi_usd": 3e9, "vol_24h_usd": 4e9, "chg_24h": 0.3}, {"symbol": "SOL", "oi_usd": 5e8, "vol_24h_usd": 8e8, "chg_24h": -13.0}, {"symbol": "TINY", "oi_usd": 1e6, "vol_24h_usd": 6e7, "chg_24h": 40.0}, {"symbol": "XYZ", "oi_usd": 1e6, "vol_24h_usd": 5e6, "chg_24h": 1.0}],
+           "commodities": [{"symbol": "GOLD", "chg_24h": 1.0}], "equities": [{"symbol": "NVDA", "chg_24h": 2.0}], "oi_movers": [{"symbol": "SOL", "oi_chg_pct": -9.0}],
+           "news": {"top": {"crypto": [{"title": "Over $600 million in longs liquidated as Bitcoin slips below support", "link": "u1", "published": None, "sentiment": "risk", "source": "S"},
+                                       {"title": "Local bakery opens second branch", "link": "u2", "published": None, "sentiment": "neutral", "source": "S"}],
+                            "macro": [{"title": "Fed holds rates, signals cut in December", "link": "u3", "published": None, "sentiment": "neutral", "source": "S"}],
+                            "stocks": [{"title": "Nvidia earnings beat estimates, guidance raised", "link": "u4", "published": None, "sentiment": "positive", "source": "S"}],
+                            "commodities": [{"title": "Gold hits record as dollar weakens", "link": "u5", "published": None, "sentiment": "positive", "source": "S"}]}}}
+    r = feed.market_moving_news(ctx, 20)
+    titles = {i["title"]: i for i in r["items"]}
+    assert not any("bakery" in t for t in titles)
+    liq = next(v for t, v in titles.items() if "liquidated" in t)
+    assert "liquidations" in liq["drivers"] and liq["assets"] == ["BTC"] and liq["impact"] == "high" and "margin buffer" in liq["so_what"]
+    fed = next(v for t, v in titles.items() if t.startswith("Fed")); assert "macro" in fed["drivers"] and fed["assets"] == ["broad market"]
+    nv = next(v for t, v in titles.items() if t.startswith("Nvidia")); assert "earnings" in nv["drivers"] and nv["assets"] == ["NVDA"]
+    gold = next(v for t, v in titles.items() if t.startswith("Gold")); assert gold["assets"] == ["GOLD"]
+    synth = [i for i in r["items"] if i.get("synthetic")]
+    assert len(synth) == 1 and synth[0]["assets"] == ["SOL"] and "long liquidations likely" in synth[0]["title"] and "(OI -9%)" in synth[0]["title"]
+    assert dict(r["by_driver"])["liquidations"] >= 2 and "SOL" in r["assets_in_focus"] and "GOLD" in r["assets_in_focus"]

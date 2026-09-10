@@ -15,7 +15,7 @@ from typing import Any, Callable, Dict, List, Optional
 from .database import get_db
 from .security import audit, redact
 
-KINDS = ("create_segment", "create_campaign", "create_flow", "pause_campaign", "resume_campaign", "update_segment", "custom_segment_upload", "code_change", "signal_rule")
+KINDS = ("create_segment", "create_campaign", "create_flow", "pause_campaign", "resume_campaign", "update_segment", "custom_segment_upload", "code_change", "signal_rule", "skill_update")
 
 _executors: Dict[str, Dict[str, Callable[..., Dict[str, Any]]]] = {}
 

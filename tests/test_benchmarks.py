@@ -26,7 +26,7 @@ def test_category_benchmarks_from_fixtures(monkeypatch):
     pair_targets = [t for t in perps["targets"] if t.get("pair")]
     assert pair_targets and pair_targets[0]["pair"] == "BTC" and pair_targets[0]["multiple"] > 10
     assert any(t.get("to_match", "").startswith("India leader") for t in perps["targets"])
-    opts = cats["options"]; assert opts["leader"]["venue"] == "deribit" and opts["india_leader"]["venue"] == "delta" and opts["ours"]["unknown"] is True and opts["targets"] == []
+    opts = cats["options"]; assert opts["leader"]["venue"] == "deribit" and opts["india_leader"]["venue"] == "delta" and opts["ours"]["reference"] is True and opts["ours"]["vol_24h_usd"] == next(v for v in opts["venues"] if v["venue"] == "bybit")["vol_24h_usd"] and any(t.get("to_match", "").startswith("India leader") for t in opts["targets"])
     rwa = cats["commodities_tokenised"]; assert {v["venue"] for v in rwa["venues"]} >= {"okx", "bybit", "bitget", "binance", "coindcx"} and rwa["ours"]["reference"]
     from backend.llm.tools import TOOLS
     assert "competitor_benchmarks" in TOOLS

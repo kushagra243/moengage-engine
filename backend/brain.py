@@ -367,7 +367,12 @@ def experiments_board(filter_: str = "all") -> Dict[str, Any]:
         pl = p.get("payload") or {}
         goal = pl.get("goal") or {}
         metric = (f"holdout {goal.get('control_group_pct')}% · {goal.get('primary_kpi')}" if goal else p.get("kind", ""))
-        card = {"id": p["id"], "title": p["title"], "tag": p.get("category") or p["kind"], "product": p.get("product"), "note": (p.get("rationale") or "")[:140], "metric": metric, "created_at": p.get("created_at"),
+        try:
+            from .llm.roster import council_summary
+            council = council_summary(p)
+        except Exception:
+            council = None
+        card = {"id": p["id"], "title": p["title"], "tag": p.get("category") or p["kind"], "product": p.get("product"), "note": (p.get("rationale") or "")[:140], "metric": metric, "created_at": p.get("created_at"), "council": council,
                 "ice": ice_mod.from_payload(pl, p.get("created_by") or "agent") if p["kind"] in ("create_campaign", "create_flow", "create_segment") else None,
                 "tagline": (pl.get("ice") or {}).get("tagline") or (ice_mod.tagline(pl.get("name") or p["title"], goal.get("primary_kpi") or "", pl.get("target_segment") or "") if goal else None)}
         st = p["status"]; pv = p.get("preview") or {}
@@ -647,7 +652,7 @@ def lab_view() -> Dict[str, Any]:
     except Exception:
         globals_ = []
     return {"generated_at": ctx.get("generated_at"), "situation": {"regime": (ctx.get("hooks") or {}).get("regime"), "tier0": ctx.get("tier0"), "flash": feed.flash(ctx)[:10], "risk_appetite": (L["flow"] or {}).get("risk_appetite")},
-            "flow": L["flow"], "reads": L["reads"], "recommendations": L["recommendations"], "events": {"news": feed.biggest_news(ctx, 10), "calendar": [e for e in (ctx.get("calendar") or []) if e.get("impact") == "High"][:8], "risk_flags": ((ctx.get("news") or {}).get("risk_flags") or [])[:6]},
+            "flow": L["flow"], "reads": L["reads"], "recommendations": L["recommendations"], "events": {"news": feed.biggest_news(ctx, 10), "market_moving": feed.market_moving_news(ctx, 25), "calendar": [e for e in (ctx.get("calendar") or []) if e.get("impact") == "High"][:8], "risk_flags": ((ctx.get("news") or {}).get("risk_flags") or [])[:6]},
             "rivals": {"major": majors, "minor": minors, "global": globals_, "moves": it.get("moves", [])[:12], "campaigns": it.get("campaigns", [])[:12], "apps": it.get("apps", {}), "actions": it.get("actions", [])[:8], "sov": it.get("sov", [])},
             "benchmarks": bench_summary, "hl_vs_cex": ocx, "market": {k: mv.get(k) for k in ("tiles", "hooks", "regime", "narrative", "top_oi", "by_category", "by_product")},
             "note": "internal intelligence from free public sources; venue data is never named in user copy"}

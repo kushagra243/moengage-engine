@@ -12,7 +12,7 @@ from typing import Any, Dict, List, Optional
 
 from fastapi import FastAPI, HTTPException, Request, UploadFile, File, Form
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import RedirectResponse, FileResponse, HTMLResponse, JSONResponse
+from fastapi.responses import RedirectResponse, FileResponse, HTMLResponse, JSONResponse, Response
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
@@ -998,6 +998,124 @@ def market_pair_battle(symbol: str):
 def sops_product_matrix():
     from . import sops
     return sops.product_cohort_matrix()
+
+
+def _download(data: bytes, filename: str, media: str) -> Response:
+    return Response(content=data, media_type=media, headers={"Content-Disposition": f'attachment; filename="{filename}"', "Cache-Control": "no-store"})
+
+
+@app.get("/api/sops/export")
+def sops_export(format: str = "md", id: Optional[str] = None):
+    """One SOP (id) as md / docx / json, or the whole library as zip / csv / json / md."""
+    from . import docs_io, sops, sop_india
+    if id:
+        sop = sops.get_sop(id)
+        if not sop:
+            raise HTTPException(404, "unknown SOP")
+        md = docs_io.sop_markdown(sop)
+        if format == "docx":
+            return _download(docs_io.markdown_to_docx(md, sop["name"]), f"{id}.docx", "application/vnd.openxmlformats-officedocument.wordprocessingml.document")
+        if format == "json":
+            return _download(json.dumps({k: v for k, v in sop.items() if k not in ("framework_ok", "framework_problems", "steps_count", "active", "updated_at")}, indent=1, default=str).encode(), f"{id}.json", "application/json")
+        return _download(md.encode("utf-8"), f"{id}.md", "text/markdown; charset=utf-8")
+    all_sops = [sops.get_sop(x["id"]) for x in sops.list_sops()]
+    try:
+        india = sop_india.review()
+    except Exception:
+        india = None
+    stamp = datetime.now().strftime("%Y%m%d")
+    if format == "zip":
+        return _download(docs_io.sop_bundle_zip(all_sops, india), f"sop-library-{stamp}.zip", "application/zip")
+    if format == "csv":
+        return _download(docs_io.sop_index_csv(all_sops, india).encode("utf-8"), f"sop-index-{stamp}.csv", "text/csv; charset=utf-8")
+    if format == "json":
+        return _download(json.dumps(all_sops, indent=1, default=str).encode(), f"sop-library-{stamp}.json", "application/json")
+    return _download("\n\n---\n\n".join(docs_io.sop_markdown(x, machine_block=False) for x in all_sops).encode("utf-8"), f"sop-library-{stamp}.md", "text/markdown; charset=utf-8")
+
+
+@app.post("/api/sops/import")
+async def sops_import(request: Request, file: UploadFile = File(...), apply: bool = False):
+    """Upload an edited SOP (.md / .docx / .json): preview the diff and checks; apply=true saves a new version."""
+    from . import docs_io, sops, sop_india
+    data = await file.read()
+    if len(data) > 5 * 1024 * 1024:
+        raise HTTPException(413, "file too large")
+    try:
+        spec, fmt = docs_io.parse_upload(file.filename or "upload.md", data, kind="sop")
+    except Exception as e:
+        raise HTTPException(400, f"could not parse the document: {redact(str(e))[:160]}")
+    if not spec.get("id") and not spec.get("name"):
+        raise HTTPException(400, "no SOP found in the document (expected '# SOP: <name>' and an id line, or a JSON spec)")
+    current = sops.get_sop(spec.get("id") or "") if spec.get("id") else None
+    base = {k: v for k, v in (current or {}).items() if k not in ("framework_ok", "framework_problems", "steps_count", "active", "updated_at")}
+    merged = {**base, **{k: v for k, v in spec.items() if v is not None}}
+    for k in ("checks", "source"):
+        merged.setdefault(k, base.get(k))
+    changes = docs_io.diff(base, merged) if current else [{"path": "(new SOP)", "from": None, "to": merged.get("name")}]
+    chk = sops.sop_check(merged)
+    fit_before = sop_india.review_one(current)["score"] if current else None
+    fit_after = sop_india.review_one(merged)["score"] if chk["ok"] else None
+    out = {"format": fmt, "id": merged.get("id"), "name": merged.get("name"), "current_version": (current or {}).get("version"), "changes": changes[:80], "change_count": len(changes), "framework": chk, "india_fit": {"before": fit_before, "after": fit_after}, "applied": False}
+    if apply:
+        if not chk["ok"]:
+            raise HTTPException(400, "framework check failed: " + "; ".join(chk["problems"]))
+        if not changes:
+            return {**out, "note": "no changes detected; nothing saved"}
+        res = sops.define_sop(merged, author=f"upload:{request_actor(request)}")
+        if not res.get("ok"):
+            raise HTTPException(400, "; ".join(res.get("problems") or ["could not save"]))
+        audit("sop.import", {"id": merged.get("id"), "version": res.get("version"), "changes": len(changes), "format": fmt}, actor=request_actor(request))
+        out.update({"applied": True, "version": res.get("version"), "warnings": res.get("warnings")})
+    return out
+
+
+@app.get("/api/experiments/{pid}/export")
+def experiment_export(pid: int, format: str = "md"):
+    from . import docs_io, approvals
+    p = approvals.get_proposal(pid)
+    if not p:
+        raise HTTPException(404, "proposal not found")
+    md = docs_io.experiment_markdown(p)
+    if format == "docx":
+        return _download(docs_io.markdown_to_docx(md, p.get("title", f"experiment-{pid}")), f"experiment-{pid}.docx", "application/vnd.openxmlformats-officedocument.wordprocessingml.document")
+    if format == "json":
+        return _download(json.dumps(p, indent=1, default=str).encode(), f"experiment-{pid}.json", "application/json")
+    return _download(md.encode("utf-8"), f"experiment-{pid}.md", "text/markdown; charset=utf-8")
+
+
+@app.post("/api/experiments/{pid}/import")
+async def experiment_import(pid: int, request: Request, file: UploadFile = File(...), apply: bool = False):
+    """Upload an edited experiment document: preview the payload diff; apply=true records the revision on the pending proposal (still needs approval)."""
+    from . import docs_io, approvals
+    p = approvals.get_proposal(pid)
+    if not p:
+        raise HTTPException(404, "proposal not found")
+    data = await file.read()
+    try:
+        parsed, fmt = docs_io.parse_upload(file.filename or "upload.md", data, kind="experiment")
+    except Exception as e:
+        raise HTTPException(400, f"could not parse the document: {redact(str(e))[:160]}")
+    if fmt == "json":
+        parsed = {"id": parsed.get("id"), "changes": {"payload": parsed.get("payload") or parsed, "rationale": parsed.get("rationale")}}
+    if parsed.get("id") and int(parsed["id"]) != pid:
+        raise HTTPException(400, f"the document is experiment #{parsed['id']}, not #{pid}")
+    changes = parsed.get("changes") or {}
+    new_payload = changes.get("payload") or {}
+    d = docs_io.diff(p.get("payload") or {}, {**(p.get("payload") or {}), **new_payload}) if new_payload else []
+    if changes.get("rationale") and changes["rationale"] != (p.get("rationale") or ""):
+        d.append({"path": "rationale", "from": (p.get("rationale") or "")[:120], "to": changes["rationale"][:120]})
+    out = {"format": fmt, "id": pid, "status": p.get("status"), "changes": d[:80], "change_count": len(d), "applied": False}
+    if apply:
+        if not d:
+            return {**out, "note": "no changes detected"}
+        try:
+            r = approvals.update_payload(pid, new_payload, actor=f"upload:{request_actor(request)}", note=f"revision uploaded as {fmt}", replace=False)
+        except (approvals.ApprovalError, ValueError) as e:
+            raise HTTPException(400, str(e))
+        if changes.get("rationale"):
+            approvals.add_comment(pid, "Rationale from the uploaded document: " + changes["rationale"][:1500], actor=f"upload:{request_actor(request)}")
+        out.update({"applied": True, "proposal": {k: r.get(k) for k in ("id", "status", "preview") if isinstance(r, dict)}})
+    return out
 
 
 @app.get("/api/sops/india-fit")

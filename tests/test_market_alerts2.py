@@ -1,0 +1,351 @@
+"""
+Market Alerts 2.0 — every BRD rule, the privacy guarantees and the pilot gate.
+
+Governance and signal helpers are pure, so the BRD is checked rule by rule without network or database.
+"""
+import json
+import os
+from datetime import datetime, timedelta, timezone
+
+import pytest
+
+IST = timezone(timedelta(hours=5, minutes=30))
+
+
+def _cfg(**over):
+    from backend.alerts2 import rules
+    import copy
+    c = copy.deepcopy(rules.DEFAULTS)
+    c.update(over)
+    return c
+
+
+def _sig(**over):
+    base = {"prices": {"BTC": 78100.0, "ETH": 3120.0, "SOL": 160.0, "DOGE": 0.2}, "chg_24h": {"BTC": 1.0, "ETH": 6.2, "SOL": -7.5, "XRP": 9.0},
+            "moves": {}, "ath_atl": {}, "ath_week_blocked": [], "milestones": {}, "milestone_day_first": {}, "most_traded": {},
+            "whales": [], "futures_listed": ["BTC", "ETH", "SOL", "DOGE"], "regime": "chop",
+            "listed": {"futures": ["BTC", "ETH", "SOL", "DOGE"], "us_futures": ["TSLA"], "options": ["BTC", "ETH"], "spot": ["BTC", "ETH", "SOL", "DOGE", "XRP"]}}
+    base.update(over)
+    return base
+
+
+def _user(**over):
+    u = {"user_id": "u1", "uid_hash": "abc", "products": ["futures"], "positions": [], "spot_holdings": [], "watchlist": [], "traded": [],
+         "futures_screen_views_7d": 0, "futures_ever": True, "profitable_trades": [], "country": "IN",
+         "flags": {"push_disabled": False, "dnd": False, "liquidated_14d": False}, "holdout": False}
+    u.update(over)
+    return u
+
+
+def _decide(user, sig, ledger=None, gates=None, cfg=None):
+    from backend.alerts2 import governance as g
+    cfg = cfg or _cfg(); ledger = ledger or g.empty_ledger()
+    cands = g.build_candidates(user, sig, ledger, cfg)
+    return g.decide(user, cands, ledger, gates or {"quiet": False, "stress": False, "exposure_age_min": 5}, cfg)
+
+
+def _sends(decisions):
+    return [d for d in decisions if d["decision"] in ("send", "holdout")]
+
+
+# ── Relevance · PnL (BRD 3.1) ─────────────────────────────────────────────────
+def test_pnl_fires_at_5pct_and_ignores_smaller_moves():
+    pos = lambda pnl: {"token": "BTC", "product": "futures", "side": "long", "entry_price": 70000, "leverage": 5, "pnl_pct": pnl, "key": "BTC|futures|long"}
+    assert not _sends(_decide(_user(positions=[pos(4.9)]), _sig()))
+    s = _sends(_decide(_user(positions=[pos(-5.0)]), _sig()))
+    assert len(s) == 1 and s[0]["theme"] == "pnl" and s[0]["slot"] == "baseline" and s[0]["direction"] == "down"
+
+
+def test_pnl_computed_from_entry_side_and_leverage_when_the_app_does_not_send_it():
+    from backend.alerts2.governance import position_pnl
+    assert position_pnl({"entry_price": 100, "side": "long", "leverage": 5}, 102) == 10.0
+    assert position_pnl({"entry_price": 100, "side": "short", "leverage": 2}, 103) == -6.0
+    assert position_pnl({"pnl_pct": 7.5, "entry_price": 1}, 999) == 7.5
+
+
+def test_pnl_extra_needs_a_further_10_points_from_the_last_alert_on_that_position():
+    from backend.alerts2 import governance as g
+    p = lambda pnl: [{"token": "BTC", "product": "futures", "side": "long", "pnl_pct": pnl, "key": "K"}]
+    lg = g.empty_ledger(); lg["today"]["relevance"]["baseline"] = 1; lg["pnl_last"]["K"] = 6.0
+    d = _decide(_user(positions=p(15.9)), _sig(), lg)
+    assert not _sends(d), "9.9 points is not a breach"
+    d = _decide(_user(positions=p(16.0)), _sig(), lg)
+    assert [x["slot"] for x in _sends(d)] == ["extra"]
+
+
+def test_same_position_does_not_realert_next_day_without_a_10_point_move():
+    from backend.alerts2 import governance as g
+    lg = g.empty_ledger(); lg["pnl_last"]["K"] = 6.0                       # alerted yesterday at +6
+    d = _decide(_user(positions=[{"token": "BTC", "product": "futures", "pnl_pct": 8.0, "key": "K"}]), _sig(), lg)
+    assert not _sends(d)
+
+
+# ── Relevance · price movement (BRD 3.2) ──────────────────────────────────────
+def test_price_movement_priority_active_before_traded_and_futures_before_spot():
+    sig = _sig(moves={"SOL|spot": {"z": 5.0, "ret_pct": 3.0}, "DOGE|futures": {"z": 2.1, "ret_pct": 1.0}, "ETH|futures": {"z": 2.2, "ret_pct": -1.2}})
+    u = _user(products=["futures", "spot"], spot_holdings=[{"token": "SOL", "auc_inr": 10}], traded=["DOGE", "ETH"])
+    s = _sends(_decide(u, sig))
+    assert s[0]["token"] == "SOL", "active holding outranks traded tokens even with a bigger Z elsewhere"
+    u2 = _user(products=["futures", "spot"], traded=["SOL", "ETH"])
+    sig2 = _sig(moves={"SOL|spot": {"z": 6.0, "ret_pct": 3.0}, "ETH|futures": {"z": 2.1, "ret_pct": 1.0}})
+    assert _sends(_decide(u2, sig2))[0]["product"] == "futures", "same relation: Futures beats Spot"
+
+
+def test_price_movement_breach_at_twice_the_threshold():
+    from backend.alerts2 import governance as g
+    lg = g.empty_ledger(); lg["today"]["relevance"]["baseline"] = 1
+    u = _user(traded=["ETH"])
+    assert not _sends(_decide(u, _sig(moves={"ETH|futures": {"z": 3.9, "ret_pct": 2}}), lg))
+    d = _decide(u, _sig(moves={"ETH|futures": {"z": 4.0, "ret_pct": 2}}), lg)
+    assert [x["slot"] for x in _sends(d)] == ["extra"]
+    assert any(x["reason"] == "no_breach" for x in _decide(u, _sig(moves={"ETH|futures": {"z": 3.0, "ret_pct": 2}}), lg))
+
+
+def test_pnl_outranks_price_movement_inside_relevance():
+    u = _user(positions=[{"token": "BTC", "product": "futures", "pnl_pct": 6, "key": "K"}], traded=["ETH"])
+    s = _sends(_decide(u, _sig(moves={"ETH|futures": {"z": 9, "ret_pct": 4}})))
+    assert [x["theme"] for x in s] == ["pnl"]
+
+
+# ── caps and anchor (BRD 6) ───────────────────────────────────────────────────
+def test_category_cap_is_one_baseline_plus_one_breach_extra():
+    from backend.alerts2 import governance as g
+    lg = g.empty_ledger(); lg["today"]["relevance"] = {"baseline": 1, "extra": 1}
+    d = _decide(_user(traded=["ETH"]), _sig(moves={"ETH|futures": {"z": 9, "ret_pct": 5}}), lg)
+    assert not _sends(d) and d[0]["reason"] == "category_cap"
+
+
+def test_four_alerts_a_day_only_when_both_categories_breach():
+    from backend.alerts2 import governance as g
+    cfg = _cfg(); lg = g.empty_ledger(); total = 0
+    u = _user(products=["futures"], traded=["ETH"])
+    runs = [
+        _sig(moves={"ETH|futures": {"z": 2.5, "ret_pct": 1}}, milestones={"BTC": {"direction": "up", "level": 78000, "price": 78050}}),
+        _sig(moves={"ETH|futures": {"z": 4.5, "ret_pct": 3}}, milestones={"BTC": {"direction": "up", "level": 80000, "price": 80020}}, milestone_day_first={"BTC": 78000}),
+        _sig(moves={"ETH|futures": {"z": 6.0, "ret_pct": 5}}, milestones={"BTC": {"direction": "up", "level": 83000, "price": 83010}}, milestone_day_first={"BTC": 78000}),
+    ]
+    slots = []
+    for sig in runs:
+        cands = g.build_candidates(u, sig, lg, cfg)
+        d = g.decide(u, cands, lg, {"quiet": False, "stress": False, "exposure_age_min": 1}, cfg)
+        s = _sends(d); total += len(s); slots += [(x["category"], x["slot"]) for x in s]
+        assert len({x["category"] for x in s}) == len(s), "never two alerts of one category in the same run"
+        lg = g.apply_to_ledger(lg, d)
+    assert total == 4 and sorted(slots) == sorted([("relevance", "baseline"), ("discovery", "baseline"), ("relevance", "extra"), ("discovery", "extra")])
+
+
+def test_relevance_is_the_anchor_when_nothing_else_triggers():
+    s = _sends(_decide(_user(traded=["ETH"]), _sig(moves={"ETH|futures": {"z": 2.4, "ret_pct": 1}})))
+    assert len(s) == 1 and s[0]["category"] == "relevance"
+
+
+# ── Discovery (BRD 4) ─────────────────────────────────────────────────────────
+def test_milestone_extra_needs_a_further_2000_btc_and_caps_at_two():
+    from backend.alerts2 import governance as g
+    lg = g.empty_ledger(); lg["today"]["discovery"]["baseline"] = 1; lg["milestone_today"] = 1
+    near = _sig(milestones={"BTC": {"direction": "up", "level": 79000, "price": 79010}}, milestone_day_first={"BTC": 78000})
+    assert not _sends(_decide(_user(), near, lg))
+    far = _sig(milestones={"BTC": {"direction": "up", "level": 80000, "price": 80010}}, milestone_day_first={"BTC": 78000})
+    assert [x["slot"] for x in _sends(_decide(_user(), far, lg))] == ["extra"]
+    lg["milestone_today"] = 2; lg["today"]["discovery"]["extra"] = 0
+    assert not _sends(_decide(_user(), far, lg)), "max 2 milestone alerts a day"
+
+
+def test_ath_atl_weekly_token_cap_blocks_with_a_reason():
+    d = _decide(_user(), _sig(ath_atl={"ETH": "ath"}, ath_week_blocked=["ETH"]))
+    assert not _sends(d) and d[0]["reason"] == "ath_weekly_token_cap"
+
+
+def test_whale_beats_most_traded_and_price_trending_beats_volume():
+    sig = _sig(whales=[{"token": "DOGE", "product": "futures", "side": "buy", "size_usd": 3e6}], most_traded={"futures": "DOGE"})
+    assert _sends(_decide(_user(), sig))[0]["alert_type"] == "whale"
+    sig2 = _sig(whales=[{"token": "DOGE", "product": "futures", "side": "buy", "size_usd": 3e6}], ath_atl={"ETH": "ath"})
+    assert _sends(_decide(_user(), sig2))[0]["alert_type"] == "ath"
+
+
+def test_volume_trending_skips_spot_only_users_and_excluded_majors():
+    from backend.alerts2.signals import most_traded
+    rows = [{"symbol": "BTC", "vol_24h_usd": 9e9}, {"symbol": "ETH", "vol_24h_usd": 5e9}, {"symbol": "SOL", "vol_24h_usd": 3e9}, {"symbol": "HYPE", "vol_24h_usd": 1e9}]
+    assert most_traded(rows, ["BTC", "ETH", "SOL"]) == "HYPE"
+    sig = _sig(most_traded={"futures": "HYPE", "spot": "HYPE"}, whales=[{"token": "ETH", "product": "futures", "side": "sell", "size_usd": 1e6}])
+    spot_user = _user(products=["spot"], futures_ever=False)
+    assert not [d for d in _sends(_decide(spot_user, sig)) if d["theme"] == "volume_trending"]
+    assert not [d for d in _sends(_decide(_user(), _sig(most_traded={"futures": "BTC"}))) if d["alert_type"] == "most_traded"]
+
+
+# ── Moments of Truth (BRD 5) ──────────────────────────────────────────────────
+def test_cross_sell_pure_spot_futures_viewer_highest_auc_and_outside_the_cap():
+    from backend.alerts2 import governance as g
+    u = _user(products=["spot"], futures_ever=False, futures_screen_views_7d=1,
+              spot_holdings=[{"token": "ETH", "auc_inr": 5000}, {"token": "SOL", "auc_inr": 9000}, {"token": "XRP", "auc_inr": 99999}])
+    lg = g.empty_ledger(); lg["today"] = {"relevance": {"baseline": 1, "extra": 1}, "discovery": {"baseline": 1, "extra": 1}}
+    s = [d for d in _sends(_decide(u, _sig(), lg)) if d["theme"] == "cross_sell"]
+    assert len(s) == 1 and s[0]["token"] == "SOL" and s[0]["direction"] == "down", "XRP is not futures-listed; SOL has the higher AUC"
+    assert not [d for d in _sends(_decide({**u, "futures_screen_views_7d": 0}, _sig())) if d["theme"] == "cross_sell"]
+    assert not [d for d in _sends(_decide({**u, "products": ["spot", "futures"]}, _sig())) if d["theme"] == "cross_sell"]
+    lg2 = g.empty_ledger(); lg2["cross_sell_recent"] = True
+    assert [d["reason"] for d in _decide(u, _sig(), lg2) if d["theme"] == "cross_sell"] == ["cross_sell_monthly_cap"]
+
+
+def test_referral_realised_futures_first_then_spot_once_in_a_lifetime():
+    from backend.alerts2 import governance as g
+    trades = [{"kind": "unrealized_spot", "token": "SOL", "profit_pct": 30, "volume_inr": 5000}, {"kind": "realized_futures", "token": "BTC", "profit_pct": 10, "volume_inr": 1000}]
+    s = [d for d in _sends(_decide(_user(profitable_trades=trades), _sig())) if d["theme"] == "referral"]
+    assert len(s) == 1 and s[0]["trigger"] == "realized_futures" and s[0]["token"] == "BTC"
+    small = [{"kind": "realized_futures", "token": "BTC", "profit_pct": 9.9, "volume_inr": 50000}, {"kind": "unrealized_spot", "token": "SOL", "profit_pct": 12, "volume_inr": 999}]
+    assert not [d for d in _sends(_decide(_user(profitable_trades=small), _sig())) if d["theme"] == "referral"]
+    lg = g.empty_ledger(); lg["referral_ever"] = True
+    assert [d["reason"] for d in _decide(_user(profitable_trades=trades), _sig(), lg) if d["theme"] == "referral"] == ["referral_lifetime_cap"]
+
+
+# ── gates ─────────────────────────────────────────────────────────────────────
+def test_holdout_is_decided_and_capped_but_never_sent():
+    from backend.alerts2 import governance as g
+    u = _user(traded=["ETH"], holdout=True)
+    d = _decide(u, _sig(moves={"ETH|futures": {"z": 3, "ret_pct": 2}}))
+    assert [x["decision"] for x in d] == ["holdout"]
+    lg = g.apply_to_ledger(g.empty_ledger(), d)
+    assert lg["today"]["relevance"]["baseline"] == 1, "holdout consumes the cap like treatment, so the comparison is fair"
+
+
+def test_quiet_hours_stress_liquidation_push_off_and_stale_file():
+    base = _user(positions=[{"token": "BTC", "product": "futures", "pnl_pct": 7, "key": "K"}], traded=["ETH"])
+    sig = _sig(moves={"ETH|futures": {"z": 3, "ret_pct": 2}}, ath_atl={"ETH": "ath"})
+    assert {d["reason"] for d in _decide(base, sig, gates={"quiet": True, "stress": False, "exposure_age_min": 1})} == {"quiet_hours"}
+    stress = _decide(base, sig, gates={"quiet": False, "stress": True, "exposure_age_min": 1})
+    assert [d["theme"] for d in _sends(stress)] == ["pnl"] and any(d["reason"] == "stress_regime" for d in stress)
+    liq = _decide({**base, "flags": {"liquidated_14d": True}}, sig)
+    assert any(d["reason"] == "liquidated_14d" and d["category"] == "discovery" for d in liq) and _sends(liq)[0]["theme"] == "pnl"
+    assert {d["reason"] for d in _decide({**base, "flags": {"push_disabled": True}}, sig)} == {"push_disabled"}
+    stale = _decide(base, sig, gates={"quiet": False, "stress": False, "exposure_age_min": 90})
+    assert any(d["theme"] == "pnl" and d["reason"] == "stale_exposure" for d in stale)
+    assert [d["theme"] for d in _sends(stale) if d["category"] == "relevance"] == ["price_movement"], "stale positions pause PnL only"
+
+
+# ── signal helpers ────────────────────────────────────────────────────────────
+def test_zscore_ath_atl_and_milestones():
+    from backend.alerts2.signals import zscore, ath_atl, milestone_cross
+    flat = [100 * (1 + 0.001 * ((i % 5) - 2)) for i in range(60)]
+    spike = flat + [flat[-1] * 1.08]
+    assert zscore(flat[:10], 168) is None
+    z = zscore(spike, 168)
+    assert z and z["z"] > 10 and z["ret_pct"] == pytest.approx(8.0, abs=0.01)
+    daily = [{"h": 100 + i, "l": 50 + i, "c": 75} for i in range(40)]
+    assert ath_atl(daily, 140) == "ath" and ath_atl(daily, 49) == "atl" and ath_atl(daily, 100) is None and ath_atl(daily[:10], 999) is None
+    assert milestone_cross(77950, 78010, 1000) == {"direction": "up", "level": 78000, "price": 78010}
+    assert milestone_cross(80500, 77100, 1000)["level"] == 78000, "a big drop reports the furthest level crossed"
+    assert milestone_cross(3210, 3390, 200) is None and milestone_cross(3390, 3401, 200)["level"] == 3400
+    assert milestone_cross(None, 78010, 1000) is None
+
+
+# ── copy ──────────────────────────────────────────────────────────────────────
+def test_brd_cross_sell_copy_is_blocked_and_default_copy_passes():
+    from backend.alerts2 import rules
+    lint = rules.lint_all()
+    assert lint["blocking"] == []
+    brd = {b["key"]: {f["rule"] for f in b["findings"]} for b in lint["brd_reference"]}
+    assert {"hypothetical_returns", "leverage_multiple"} <= brd["cross_sell:up"]
+    assert "implied_safety" in brd["cross_sell:down"]
+    assert rules.render("pnl:up", {"token": "BTC", "product": "futures", "pnl": 6.25})["body"].startswith("Your BTC Futures position is at +6.2%")
+
+
+def test_shared_live_copy_sweep_now_catches_single_digit_leverage():
+    from backend.llm.tools import LEVERAGE_LURE
+    assert LEVERAGE_LURE.search("profit at 5x leverage") and not LEVERAGE_LURE.search("learn how leverage works")
+
+
+# ── cohort privacy ────────────────────────────────────────────────────────────
+def test_cohort_rejects_personal_data_in_columns_or_values():
+    from backend.alerts2 import cohort
+    ok = json.dumps({"users": [{"user_id": "moe_1", "products": ["spot"]}]}).encode()
+    assert cohort.parse("c.json", ok)["users"]
+    for bad in ({"users": [{"user_id": "moe_1", "email": "x@y.com"}]},
+                {"users": [{"user_id": "moe_1", "notes": "call +91 98765 43210"}]},
+                {"users": [{"user_id": "9876543210"}]},
+                {"users": [{"user_id": "moe_1", "full_name": "A B"}]},
+                {"users": [{"user_id": "moe_1", "kyc": "ABCDE1234F"}]}):
+        with pytest.raises(cohort.CohortError):
+            cohort.parse("c.json", json.dumps(bad).encode())
+
+
+def test_cohort_csv_compact_format_and_hashing():
+    from backend.alerts2 import cohort
+    csv_text = ("user_id,products,watchlist,traded_tokens,positions,spot_holdings,futures_screen_views_7d,profitable_trades,liquidated_14d\n"
+                "moe_a,futures|spot,SOL|DOGE,BTC,BTC:futures:long:70000:5:12.5,ETH:40000:3000,3,realized_futures:BTC:14:25000,false\n")
+    users, whales, notes = cohort.normalise(cohort.parse("c.csv", csv_text.encode()))
+    u = users[0]
+    assert u["positions"][0] == {"token": "BTC", "product": "futures", "side": "long", "entry_price": 70000.0, "leverage": 5.0, "pnl_pct": 12.5, "key": "BTC|futures|long"}
+    assert u["spot_holdings"][0]["auc_inr"] == 40000.0 and u["watchlist"] == ["DOGE", "SOL"] and u["profitable_trades"][0]["kind"] == "realized_futures"
+    h = cohort.hash_id("moe_a")
+    assert h == cohort.hash_id("moe_a") and "moe_a" not in h and len(h) == 24
+    assert 0 <= cohort.holdout_bucket(h) < 100
+
+
+# ── end to end: dry run, pilot gate, live in mock mode ────────────────────────
+def _upload(ids=("moe_live_1", "moe_live_2", "moe_live_3", "moe_live_4", "moe_live_5")):
+    from backend.alerts2 import cohort
+    users = [{"user_id": i, "products": ["futures"], "futures_ever": True, "traded_tokens": ["ETH"],
+              "positions": [{"token": "BTC", "product": "futures", "side": "long", "pnl_pct": 8.0}]} for i in ids]
+    return cohort.save("pilot.json", json.dumps({"cohort_name": "MA2_test", "users": users}).encode(), actor="test")
+
+
+def test_dry_run_live_gate_pilot_approval_and_mock_delivery():
+    from backend.alerts2 import service, rules
+    from backend import approvals
+    from backend.database import get_db, set_setting
+    set_setting("mock_mode", "true"); set_setting("ma2_config_json", json.dumps({"holdout_pct": 20}))
+    service.register()
+    _upload()
+    now = datetime(2026, 9, 15, 11, 0, tzinfo=IST)
+    sig = _sig(moves={"ETH|futures": {"z": 2.6, "ret_pct": 1.5}})
+
+    dry = service.run("dry_run", now=now, signals_override=sig)
+    assert dry["ok"] and dry["would_send"] + dry["holdout"] == 5, "PnL at +8% for each of five users"
+    conn = get_db(); assert conn.execute("SELECT COUNT(*) n FROM ma2_ledger").fetchone()["n"] == 0; conn.close()
+
+    assert not service.run("live", now=now, signals_override=sig)["ok"], "no approved pilot, no live run"
+
+    p = service.propose_pilot("MA2_test", holdout_pct=20, days=7, created_by="test")
+    approvals.approve_and_execute(p["proposal_id"], decided_by="lead")
+    assert service.pilot_live(now)["live"]
+
+    live = service.run("live", now=now, signals_override=sig)
+    assert live["ok"] and live["delivery"] == "mock" and live["sent"] + live["holdout"] == 5
+    conn = get_db()
+    rows = [dict(r) for r in conn.execute("SELECT uid_hash, theme, slot, status FROM ma2_ledger").fetchall()]
+    dump = json.dumps([dict(r) for r in conn.execute("SELECT * FROM ma2_ledger").fetchall()] + [dict(r) for r in conn.execute("SELECT summary_json FROM ma2_runs").fetchall()])
+    conn.close()
+    assert all(r["theme"] == "pnl" and r["slot"] == "baseline" and r["status"] in ("recorded_mock", "holdout") for r in rows)
+    assert "moe_live_" not in dump, "raw customer ids never reach the ledger or run records"
+
+    again = service.run("live", now=now + timedelta(minutes=15), signals_override=sig)
+    assert again["sent"] + again["holdout"] == 0, "the same PnL and a sub-breach move do not stack a second alert"
+    assert service.today_distribution(now)["max_per_user"] <= 4
+
+    service.set_kill(True, actor="test")
+    assert not service.run("live", now=now, signals_override=sig)["ok"]
+    service.set_kill(False, actor="test")
+
+    _upload(("moe_live_1", "moe_new_9"))
+    r = service.run("live", now=now, signals_override=sig)
+    assert not r["ok"] and "membership changed" in r["error"]
+
+
+def test_pilot_approval_blocked_by_non_compliant_copy_and_tools_hide_user_rows():
+    from backend.alerts2 import service
+    from backend.llm import tools
+    from backend import approvals
+    from backend.database import set_setting
+    service.register()
+    _upload(("moe_c_1", "moe_c_2"))
+    set_setting("ma2_templates_json", json.dumps({"cross_sell:up": {"title": "Up 5%", "body": "You could have made 25% profit at 5x leverage"}}))
+    try:
+        with pytest.raises(Exception):
+            service.propose_pilot("blocked", themes=["cross_sell"], created_by="test")
+    finally:
+        set_setting("ma2_templates_json", "{}")
+    st = tools.market_alerts_status()
+    assert "samples" not in json.dumps(st.get("last_run") or {}) and "moe_c_" not in json.dumps(st)
+    rules = tools.market_alerts_rules()
+    assert rules["assumptions"] and any("Z-score" in a["topic"] for a in rules["assumptions"])
+    assert approvals._executors.get("ma2_pilot") and "ma2_pilot" in approvals.KINDS

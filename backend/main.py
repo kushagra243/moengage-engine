@@ -68,9 +68,9 @@ if _migrated:
 register_executors()
 from . import devagent as _devagent
 _devagent.register()
-for _mod in ("signals", "research", "sop_improve", "sop_requests"):     # approval executors: signal_rule, skill_update, sop_change, sop_new
+for _mod in ("signals", "research", "sop_improve", "sop_requests", "alerts2.service"):     # approval executors: signal_rule, skill_update, sop_change, sop_new, ma2_pilot
     try:
-        __import__(f"backend.{_mod}", fromlist=[_mod]).register()
+        __import__("importlib").import_module(f"backend.{_mod}").register()
     except Exception as _e:
         logging.getLogger("moengage").warning("executor %s not registered: %s", _mod, _e)
 # demo mode: make sure there is history to look at
@@ -1624,6 +1624,97 @@ def signals_propose(payload: SignalProposePayload, request: Request):
 def signals_toggle(signal_id: str, payload: SignalTogglePayload, request: Request):
     from . import signals
     return signals.set_enabled(signal_id, payload.enabled, actor=request_actor(request))
+
+
+# ── Market Alerts 2.0 ───────────────────────────────────────────────────────────
+class Ma2RunPayload(BaseModel):
+    mode: str = "dry_run"
+
+class Ma2PilotPayload(BaseModel):
+    name: str = ""
+    holdout_pct: Optional[int] = None
+    days: int = 14
+    themes: Optional[List[str]] = None
+    note: str = ""
+
+class Ma2KillPayload(BaseModel):
+    on: bool = True
+
+class Ma2TemplatesPayload(BaseModel):
+    templates: Dict[str, Dict[str, str]]
+
+
+@app.get("/api/alerts2")
+def alerts2_status():
+    from .alerts2 import service
+    return service.status()
+
+
+@app.get("/api/alerts2/runs/{run_id}")
+def alerts2_run_detail(run_id: int):
+    from .alerts2 import service
+    d = service.run_detail(run_id)
+    if not d:
+        raise HTTPException(404, "no such run")
+    return d
+
+
+@app.post("/api/alerts2/run")
+def alerts2_run(payload: Ma2RunPayload, request: Request):
+    from .alerts2 import service
+    if payload.mode not in ("dry_run", "live"):
+        raise HTTPException(400, "mode must be dry_run or live")
+    r = service.run(payload.mode, actor=request_actor(request))
+    if not r.get("ok"):
+        raise HTTPException(400, r.get("error") or "run failed")
+    return r
+
+
+@app.post("/api/alerts2/cohort")
+async def alerts2_cohort(request: Request, file: UploadFile = File(...), name: str = ""):
+    """Upload the pilot cohort (JSON or CSV). Opaque MoEngage customer ids and exposure only; personal data is rejected."""
+    from .alerts2 import cohort
+    data = await file.read()
+    if len(data) > 50 * 1024 * 1024:
+        raise HTTPException(413, "file too large (50 MB max)")
+    try:
+        return cohort.save(file.filename or "cohort.json", data, name=name, actor=request_actor(request))
+    except cohort.CohortError as e:
+        raise HTTPException(400, str(e))
+
+
+@app.get("/api/alerts2/cohort/sample")
+def alerts2_cohort_sample():
+    from .alerts2 import samples
+    return samples.cohort_template()
+
+
+@app.post("/api/alerts2/pilot/propose")
+def alerts2_pilot_propose(payload: Ma2PilotPayload, request: Request):
+    from .alerts2 import service
+    r = service.propose_pilot(payload.name, payload.holdout_pct, payload.days, payload.themes, payload.note, created_by=request_actor(request))
+    if r.get("error"):
+        raise HTTPException(400, r["error"])
+    return r
+
+
+@app.post("/api/alerts2/kill")
+def alerts2_kill(payload: Ma2KillPayload, request: Request):
+    from .alerts2 import service
+    return service.set_kill(payload.on, actor=request_actor(request))
+
+
+@app.post("/api/alerts2/templates")
+def alerts2_templates(payload: Ma2TemplatesPayload, request: Request):
+    from .alerts2 import rules
+    tpls = rules.templates()
+    for k, v in payload.templates.items():
+        if k in tpls:
+            tpls[k].update({kk: str(vv)[:300] for kk, vv in v.items() if kk in ("title", "body")})
+    lint = rules.lint_all(tpls)
+    set_setting("ma2_templates_json", json.dumps({k: {"title": v["title"], "body": v["body"]} for k, v in tpls.items()}))
+    audit("ma2.templates_saved", {"keys": list(payload.templates), "blocking": lint["blocking"]}, actor=request_actor(request))
+    return lint
 
 
 @app.get("/api/brain/compliance")

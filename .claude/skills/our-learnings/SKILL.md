@@ -3,7 +3,7 @@ name: our-learnings
 description: What CoinDCX's own MoEngage programme has taught us so far — experiment readouts (wins, losses, flat), lessons recorded by the brain, deep-dive verdicts per campaign, channel health in our data, QA trend and India-fit status. Cite this BEFORE any generic benchmark; regenerated automatically by the daily cycle (backend/learnings.py).
 ---
 
-# Our learnings (auto-compiled 2026-09-15 03:30 UTC)
+# Our learnings (auto-compiled 2026-09-15 11:39 UTC)
 
 Numbers below come from the mock workspace and are illustrative. Source workspace: mock. 0 experiments read out, 1 running.
 
@@ -39,16 +39,16 @@ Numbers below come from the mock workspace and are illustrative. Source workspac
 - CLM_Dormant_MarketReturn_Recap (reactivation_rate_14d, day 6 of 14)
 
 ## Quality trend (QA score)
+- 2026-09-15 score 89 (1 fail / 6 warn)
+- 2026-09-15 score 83 (1 fail / 8 warn)
+- 2026-09-15 score 81 (1 fail / 8 warn)
+- 2026-09-15 score 81 (1 fail / 8 warn)
 - 2026-09-15 score 90 (0 fail / 7 warn)
-- 2026-09-15 score 92 (0 fail / 6 warn)
-- 2026-09-15 score 85 (1 fail / 7 warn)
-- 2026-09-15 score 83 (1 fail / 7 warn)
-- 2026-09-13 score 89 (1 fail / 6 warn)
-- 2026-09-13 score 86 (1 fail / 7 warn)
-- 2026-09-13 score 89 (1 fail / 6 warn)
+- 2026-09-15 score 90 (0 fail / 7 warn)
+- 2026-09-15 score 90 (0 fail / 7 warn)
 
 ## India fit of the SOP library
-- 35 india-ready · 23 need edits · 0 rework · avg 89.1
+- 36 india-ready · 23 need edits · 0 rework · avg 89.3
 - most common flags: hinglish_variant ×15, tds_transparency ×11, derivatives_banned_angles ×11, onboarding_ban_bonus ×7, push_promo ×6
 
 ## How to use this skill

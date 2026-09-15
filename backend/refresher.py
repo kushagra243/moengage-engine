@@ -56,6 +56,12 @@ def _j_market_context():
     return {"assets": len(c.get("crypto_markets") or []), "regime": ((c.get("crypto") or {}).get("regime") or {}).get("label"), "tier0": bool(c.get("tier0"))}
 
 
+def _j_market_alerts():
+    from .alerts2 import service
+    r = service.scheduled_tick()
+    return {k: r.get(k) for k in ("ok", "skipped", "run_id", "sent", "holdout", "suppressed", "failed", "delivery", "error")}
+
+
 def _j_signals():
     from . import signals
     r = signals.evaluate()
@@ -156,6 +162,7 @@ JOBS: List[Dict[str, Any]] = [
     {"name": "prices", "minutes": 1, "fn": _j_prices, "feeds": "Brain Lab prices · movers · OI · funding (real time)"},
     {"name": "market_context", "minutes": 10, "fn": _j_market_context, "feeds": "Brain Lab · Brain · signals (full picture incl. news, listings, competitors)"},
     {"name": "signals", "minutes": 5, "fn": _j_signals, "feeds": "Signal Bridge → MoEngage business events"},
+    {"name": "market_alerts", "minutes": 15, "fn": _j_market_alerts, "feeds": "Market Alerts 2.0 live pilot (runs only while a pilot is approved and the kill switch is off)"},
     {"name": "benchmarks", "minutes": 15, "fn": _j_benchmarks, "feeds": "Brain Lab → Comparison"},
     {"name": "campaign_intel", "minutes": 15, "fn": _j_campaign_intel, "feeds": "Brain Lab → Competitors (their campaigns)"},
     {"name": "onchain_cex", "minutes": 15, "fn": _j_onchain_cex, "feeds": "Brain Lab → On-chain vs CEX"},
@@ -266,7 +273,7 @@ def run_due(max_jobs: int = 3) -> List[Dict[str, Any]]:
 
 
 VIEWS_OF = {"prices": ["lab", "brain"], "market_context": ["lab", "brain", "ideas"], "signals": ["engine"], "benchmarks": ["lab"], "campaign_intel": ["lab"], "onchain_cex": ["lab"], "money_flow": ["lab", "ideas"], "app_rankings": ["lab"],
-            "structural": ["ideas"], "qa": ["brain"], "workspace": ["analysis"], "housekeeping": ["ideas"], "compliance": ["analysis", "brain"], "council": ["ideas"], "research": ["skills"], "data_gaps": ["engine"]}
+            "structural": ["ideas"], "qa": ["brain"], "workspace": ["analysis"], "housekeeping": ["ideas"], "compliance": ["analysis", "brain"], "council": ["ideas"], "research": ["skills"], "data_gaps": ["engine"], "market_alerts": ["alerts"]}
 
 
 def changes() -> Dict[str, Any]:

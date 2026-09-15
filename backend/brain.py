@@ -117,6 +117,14 @@ def state() -> Dict[str, Any]:
             "north_star": guardrails.north_star(), "stats": _stats(mode, pend, exps, running, read, days, an, ctx, ci, ideas_new), "region": get_setting("moengage_region", ""), "generated_at": datetime.utcnow().isoformat()}
 
 
+def _alerts_stats() -> List[Dict[str, Any]]:
+    try:
+        from .alerts2 import service
+        return service.header_stats()
+    except Exception:
+        return []
+
+
 def _stats(mode, pend, exps, running, read, days, an, ctx, ci, ideas_new) -> Dict[str, List[Dict[str, Any]]]:
     bu = an.get("by_urgency", {}) if isinstance(an, dict) else {}
     hooks = (ctx.get("hooks") or {}); regime = hooks.get("regime") or "unknown"
@@ -196,6 +204,7 @@ def _stats(mode, pend, exps, running, read, days, an, ctx, ci, ideas_new) -> Dic
                 {"k": "TIER-0", "v": "ARMED" if ctx.get("tier0") else "none", "sub": (ctx.get("tier0") or {}).get("kind", "no major event").replace("_", " "), "c": "#ff5c9e" if ctx.get("tier0") else "#4dffa8"},
                 {"k": "RIVAL ACTIONS", "v": str(len(acts)), "sub": f"{len(surges)} surges on pairs we list" if surges else "no surges", "c": "#ff5c9e" if any(a.get('priority', 0) >= 80 for a in acts) else "#6fe3ff"},
                 {"k": "LAST SYNC", "v": _ago(ctx.get("generated_at")), "sub": "auto every 15 min", "c": "#eaf7fc"}],
+        "alerts": _alerts_stats(),
         "atlas": [{"k": "COHORT FAMILIES", "v": str(len(fams)), "sub": f"{n_segs} segments decoded", "c": "#eaf7fc"}, {"k": "COVERAGE", "v": fam_cov, "sub": "families with a campaign", "c": "#4dffa8"},
                   {"k": "PEACE", "v": peace_v, "sub": "too much / in band / too little", "c": "#ff5c9e" if peace_counts.get("too_much") else "#4dffa8"}, {"k": "LIMITS", "v": f"≤{guardrails.limits().get('total_per_week')}/wk", "sub": "per user, regime-adjusted", "c": "#6fe3ff"}, {"k": "NORTH STAR", "v": "set", "sub": guardrails.north_star()[:60], "c": "#eaf7fc"}],
         "market": [{"k": "REGIME", "v": regime.replace("_", " ").upper(), "sub": f"BTC {((ctx.get('crypto') or {}).get('assets') or {}).get('BTC', {}).get('chg_24h', '—')}% 24h", "c": reg_c},

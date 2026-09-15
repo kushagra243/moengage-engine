@@ -234,7 +234,7 @@ def experiment_plan(baseline_rate_pct: float, min_detectable_lift_pct_points: fl
 DERIVATIVE_WORDS = re.compile(r"\b(perp|perps|perpetual|futures|leverage|\d+x|margin|short|long)\b", re.I)
 BANNED_COPY = re.compile(r"\b(guaranteed|will (rise|pump|moon|double)|buy now|sell now|can'?t lose|risk[- ]free|100%|to the moon|last chance( to buy)?|don'?t miss|passive income|earn while you sleep|safe (bet|investment)|sure ?shot|get in early|listing pump|moon|pump)\b", re.I)
 VENUE_WORDS = re.compile(r"\b(hyperliquid|binance|bybit|okx|coinbase|kraken|kucoin|bitget|gate\.io|mexc|coinswitch|wazirx|zebpay|mudrex|delta exchange|zerodha|groww|upstox|robinhood|etoro)\b", re.I)
-LEVERAGE_LURE = re.compile(r"\bup to \d+x\b|\b\d{2,3}x leverage\b", re.I)
+LEVERAGE_LURE = re.compile(r"\bup to \d+x\b|\b\d{1,3}(\.\d+)?x leverage\b", re.I)     # single-digit multiples are lures too ("5x leverage")
 STANDARD_SUPPRESSIONS = ("liquidat", "loss-dormant", "kyc", "dnd", "unsub", "ticket")
 
 
@@ -623,6 +623,47 @@ def data_gaps(sync: bool = False, min_severity: str = "medium") -> Dict[str, Any
         out = {**dg.detect(), "synced": out["synced"]}
     out["items"] = [i for i in out["items"] if not i["requested"] and i["status"] != "not needed yet"][:25]
     return out
+
+
+def _ma2_compact(run: Optional[Dict[str, Any]]) -> Optional[Dict[str, Any]]:
+    if not run:
+        return None
+    summ = dict(run.get("summary") or {})
+    summ.pop("samples", None)                                    # never hand user-level decisions to the model, hashed or not
+    return {k: run.get(k) for k in ("run_id", "id", "mode", "delivery", "users", "holdout_users", "sent", "would_send", "holdout", "suppressed", "failed", "ms", "started_at")} | {"summary": summ, "errors": (run.get("errors") or [])[:5]}
+
+
+def market_alerts_status() -> Dict[str, Any]:
+    """Market Alerts 2.0: pilot state (live or why not), kill switch, cohort size and product mix, today's alerts-per-user distribution from the cap ledger, the last run's aggregates, copy compliance and the MoEngage setup checklist. Aggregates only."""
+    from ..alerts2 import service
+    st = service.status()
+    cohort = st.get("cohort") or {}
+    return {"live": st["live"], "why_not_live": st["why_not_live"], "pilot": st["pilot"], "kill_switch": st["kill_switch"], "mock_mode": st["mock_mode"],
+            "cohort": {k: cohort.get(k) for k in ("name", "uploaded_at", "age_min", "members_digest", "whales")} | {"summary": cohort.get("summary")} if cohort else None,
+            "today": st["today"], "last_run": _ma2_compact(st.get("last_run")), "copy_blocking": st["copy"]["blocking"],
+            "brd_copy_findings": [{"key": b["key"], "rules": [f["rule"] for f in b["findings"]]} for b in st["copy"]["brd_reference"]], "setup": st["setup"]}
+
+
+def market_alerts_rules() -> Dict[str, Any]:
+    """The Market Alerts 2.0 BRD as the engine enforces it: thresholds, caps, priority orders, themes, and every assumption made where the BRD is silent."""
+    from ..alerts2 import rules
+    v = rules.rules_view()
+    return {"caps": v["caps"], "config": v["config"], "assumptions": v["assumptions"], "themes": v["themes"]}
+
+
+def market_alerts_dry_run() -> Dict[str, Any]:
+    """Decide Market Alerts 2.0 for every pilot cohort user against live market signals without sending anything: what would send per theme, holdout, suppression reasons, signals over threshold. Aggregates only."""
+    from ..alerts2 import service
+    r = service.run("dry_run", actor="agent")
+    if not r.get("ok"):
+        return {"error": r.get("error")}
+    return _ma2_compact(r)
+
+
+def market_alerts_propose_pilot(name: str = "", holdout_pct: Optional[int] = None, days: int = 14, themes: Optional[List[str]] = None, note: str = "") -> Dict[str, Any]:
+    """Queue the Market Alerts 2.0 live pilot for the uploaded cohort as an approval (kind ma2_pilot). Nothing sends until a human approves it."""
+    from ..alerts2 import service
+    return service.propose_pilot(name, holdout_pct, days, themes, note, created_by="agent")
 
 
 def sop_catalog(product: Optional[str] = None) -> Dict[str, Any]:
@@ -1028,6 +1069,11 @@ TOOL_SCHEMAS: List[Dict[str, Any]] = [
     _fn("signal_fires", "Ledger of business events fired by the Signal Bridge.", {"limit": {"type": "integer"}}),
     _fn("compliance_sweep", "Lint every live campaign's copy against the India rules; findings with fixes.", {"force": {"type": "boolean"}}),
     _fn("refresh_learnings", "Recompile the our-learnings skill from our own readouts and reviews.", {}),
+    _fn("market_alerts_status", "Market Alerts 2.0 pilot state, cohort mix, today's alerts-per-user from the cap ledger, last run aggregates, copy compliance, MoEngage setup."),
+    _fn("market_alerts_rules", "The Market Alerts 2.0 BRD as enforced: thresholds, caps, priorities, themes and the assumptions where the BRD is silent."),
+    _fn("market_alerts_dry_run", "Dry-run Market Alerts 2.0 for the pilot cohort against live signals: would-send per theme, holdout, suppression reasons. Sends nothing."),
+    _fn("market_alerts_propose_pilot", "Queue the Market Alerts 2.0 live pilot for the uploaded cohort as an approval. Nothing sends until a human approves.",
+        {"name": STR, "holdout_pct": {"type": "integer"}, "days": {"type": "integer"}, "themes": {"type": "array", "items": STR}, "note": STR}),
     _fn("data_gaps", "What data is missing to run and measure campaigns (events, attributes, cohorts, capabilities) with what each unblocks; sync=true files them as data requests.", {"sync": {"type": "boolean"}, "min_severity": STR}),
     _fn("sop_catalog", "What CLM runs for each product: SOPs, stage coverage, gaps, lens, cadence, never-list, and a brief any team can read.", {"product": STR}),
     _fn("sop_teams", "Which team owns and reviews which SOPs, and the process segments each is on the hook for.", {}),
@@ -1088,5 +1134,5 @@ TOOLS: Dict[str, Callable[..., Dict[str, Any]]] = {
     "north_star": _safe(north_star), "set_north_star": _safe(set_north_star), "comms_limits": _safe(comms_limits), "set_comms_limits": _safe(set_comms_limits), "peace_index": _safe(peace_index),
     "guardrail_monitor": _safe(guardrail_monitor), "write_flight_plan": _safe(write_flight_plan), "flight_plans": _safe(flight_plans),
     "segment_study": _safe(segment_study), "define_nomenclature": _safe(define_nomenclature), "list_sops": _safe(list_sops), "sop_detail": _safe(sop_detail), "define_sop": _safe(define_sop), "run_sop": _safe(run_sop), "sop_runs": _safe(sop_runs), "channel_matrix": _safe(channel_matrix),
-    "competitor_intel": _safe(competitor_intel), "competitor_benchmarks": _safe(competitor_benchmarks), "competitor_campaigns": _safe(competitor_campaigns), "onchain_vs_cex": _safe(onchain_vs_cex), "agent_roster": _safe(agent_roster), "council_review": _safe(council_review), "research_radar": _safe(research_radar), "propose_skill_update": _safe(propose_skill_update), "signal_catalog": _safe(signal_catalog), "propose_signal_rule": _safe(propose_signal_rule), "signal_fires": _safe(signal_fires), "compliance_sweep": _safe(compliance_sweep), "refresh_learnings": _safe(refresh_learnings), "data_gaps": _safe(data_gaps), "sop_catalog": _safe(sop_catalog), "sop_teams": _safe(sop_teams), "request_sop": _safe(request_sop), "draft_sop": _safe(draft_sop), "sop_requests": _safe(sop_requests), "sop_improvements": _safe(sop_improvements), "propose_sop_change": _safe(propose_sop_change), "ask_sops": _safe(ask_sops), "sop_ownership": _safe(sop_ownership), "sop_knowledge_gaps": _safe(sop_knowledge_gaps), "sop_india_review": _safe(sop_india_review), "sop_india_fix": _safe(sop_india_fix), "workspace_analysis": _safe(workspace_analysis), "qa_report": _safe(qa_report), "verify_claims": _safe(verify_claims), "structural_audit": _safe(structural_audit), "market_moving_news": _safe(market_moving_news), "money_flow": _safe(money_flow), "market_flash": _safe(market_flash), "campaign_from_alert": _safe(campaign_from_alert), "competitor_dossier": _safe(competitor_dossier), "pair_battle": _safe(pair_battle), "web3_trending": _safe(web3_trending), "product_cohorts": _safe(product_cohorts), "announcement_lenses": _safe(announcement_lenses), "request_data": _safe(request_data), "data_requests": _safe(data_requests),
+    "competitor_intel": _safe(competitor_intel), "competitor_benchmarks": _safe(competitor_benchmarks), "competitor_campaigns": _safe(competitor_campaigns), "onchain_vs_cex": _safe(onchain_vs_cex), "agent_roster": _safe(agent_roster), "council_review": _safe(council_review), "research_radar": _safe(research_radar), "propose_skill_update": _safe(propose_skill_update), "signal_catalog": _safe(signal_catalog), "propose_signal_rule": _safe(propose_signal_rule), "signal_fires": _safe(signal_fires), "compliance_sweep": _safe(compliance_sweep), "refresh_learnings": _safe(refresh_learnings), "data_gaps": _safe(data_gaps), "market_alerts_status": _safe(market_alerts_status), "market_alerts_rules": _safe(market_alerts_rules), "market_alerts_dry_run": _safe(market_alerts_dry_run), "market_alerts_propose_pilot": _safe(market_alerts_propose_pilot), "sop_catalog": _safe(sop_catalog), "sop_teams": _safe(sop_teams), "request_sop": _safe(request_sop), "draft_sop": _safe(draft_sop), "sop_requests": _safe(sop_requests), "sop_improvements": _safe(sop_improvements), "propose_sop_change": _safe(propose_sop_change), "ask_sops": _safe(ask_sops), "sop_ownership": _safe(sop_ownership), "sop_knowledge_gaps": _safe(sop_knowledge_gaps), "sop_india_review": _safe(sop_india_review), "sop_india_fix": _safe(sop_india_fix), "workspace_analysis": _safe(workspace_analysis), "qa_report": _safe(qa_report), "verify_claims": _safe(verify_claims), "structural_audit": _safe(structural_audit), "market_moving_news": _safe(market_moving_news), "money_flow": _safe(money_flow), "market_flash": _safe(market_flash), "campaign_from_alert": _safe(campaign_from_alert), "competitor_dossier": _safe(competitor_dossier), "pair_battle": _safe(pair_battle), "web3_trending": _safe(web3_trending), "product_cohorts": _safe(product_cohorts), "announcement_lenses": _safe(announcement_lenses), "request_data": _safe(request_data), "data_requests": _safe(data_requests),
 }

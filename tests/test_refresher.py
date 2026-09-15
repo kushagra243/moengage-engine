@@ -55,3 +55,30 @@ def test_patch_prices_updates_snapshot_in_place(monkeypatch):
     from backend import refresher
     ch = refresher.changes()
     assert "prices" in ch["jobs"] and "lab" in ch["jobs"]["prices"]["views"]
+
+
+def test_patch_prices_handles_the_real_snapshot_shape_and_bad_replies(monkeypatch):
+    """oi_movers is {surge: [...], drop: [...], compared_to, pairs_compared}, not a list. Iterating it yielded its keys
+    as strings and the price job failed every minute with "'str' object has no attribute 'get'"."""
+    import json
+    from backend.market import context as cm, exchanges
+    from backend.database import get_db
+    cm._init(); conn = get_db()
+    ctx = {"hooks": {"regime": "chop"}, "crypto": {"assets": {"BTC": {"price": 1.0, "chg_24h": 0.0}}},
+           "crypto_markets": [{"symbol": "BTC", "price": 1.0, "chg_24h": 0.0}, "stray string row"],
+           "oi_movers": {"surge": [{"symbol": "BTC", "oi_usd": 5.0, "oi_chg_pct": 82.2, "price_chg_pct": -1.0}], "drop": [],
+                         "compared_to": "2026-09-14T09:00:00", "pairs_compared": 89}}
+    conn.execute("INSERT INTO market_snapshots (regime, snapshot_json) VALUES (?, ?)", ("chop", json.dumps(ctx))); conn.commit(); conn.close()
+    reply = [{"universe": [{"name": "BTC"}]}, [{"markPx": "78000", "prevDayPx": "76000", "dayNtlVlm": "3.7e9", "openInterest": "37000", "funding": "0.0000125"}]]
+    monkeypatch.setattr(exchanges, "_hl", lambda body, timeout=15.0: reply)            # a list, the way the venue really answers
+    r = cm.patch_prices()
+    assert r["ok"] and r["patched"] >= 2
+    latest = cm._latest(3600)
+    mover = latest["oi_movers"]["surge"][0]
+    assert mover["oi_usd"] == 37000 * 78000 and "price" not in mover and "chg_24h" not in mover, "OI mover rows keep their own fields"
+    assert latest["oi_movers"]["pairs_compared"] == 89
+
+    for bad in ("not json", {"meta": {}}, None, [{"universe": []}]):
+        monkeypatch.setattr(exchanges, "_hl", lambda body, timeout=15.0, b=bad: b)
+        out = cm.patch_prices()
+        assert out["ok"] is False and "unexpected venue reply" in out["error"], f"a bad reply must fail clearly, not crash: {bad!r}"

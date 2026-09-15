@@ -43,7 +43,7 @@ def _lst(key: str, default: str) -> List[str]:
 
 
 def _movers(rows: List[Dict[str, Any]], n: int = 6) -> List[Dict[str, Any]]:
-    rows = [r for r in rows if r.get("chg_24h") is not None]
+    rows = [r for r in rows or [] if isinstance(r, dict) and r.get("chg_24h") is not None]
     return sorted(rows, key=lambda r: abs(r["chg_24h"]), reverse=True)[:n]
 
 
@@ -204,6 +204,16 @@ def campaign_hooks(force: bool = False) -> Dict[str, Any]:
     return market_context(force=force)["hooks"]
 
 
+def _section_rows(v: Any) -> List[Dict[str, Any]]:
+    """Snapshot sections are lists of rows, except oi_movers, which is {surge: [...], drop: [...], compared_to, pairs_compared}.
+    Iterating that dict yielded its keys as strings — the cause of "'str' object has no attribute 'get'" every minute."""
+    if isinstance(v, dict):
+        return [row for lst in v.values() if isinstance(lst, list) for row in lst if isinstance(row, dict)]
+    if isinstance(v, list):
+        return [row for row in v if isinstance(row, dict)]
+    return []
+
+
 def patch_prices() -> Dict[str, Any]:
     """Real-time layer: one call to the liquidity venue (mark price, previous-day price, 24h notional, OI, funding) patches prices,
     24h change, volume and OI on the cached picture in place — no full rebuild, no news, no model. Runs every minute from the refresher."""
@@ -214,9 +224,21 @@ def patch_prices() -> Dict[str, Any]:
     if not r:
         conn.close(); return {"ok": False, "error": "no snapshot yet"}
     ctx = json.loads(r["snapshot_json"])
-    meta, ctxs = _hl({"type": "metaAndAssetCtxs"})
+    res = _hl({"type": "metaAndAssetCtxs"})
+    if isinstance(res, str):
+        try:
+            res = json.loads(res)
+        except Exception:
+            res = None
+    # the venue answers [meta, assetCtxs]; anything else is a bad reply, not a reason to crash every minute
+    if not (isinstance(res, (list, tuple)) and len(res) >= 2 and isinstance(res[0], dict) and isinstance(res[1], list)):
+        conn.close()
+        return {"ok": False, "error": f"unexpected venue reply shape: {type(res).__name__}"}
+    meta, ctxs = res[0], res[1]
     live: Dict[str, Dict[str, Any]] = {}
     for u, a in zip(meta.get("universe") or [], ctxs or []):
+        if not isinstance(u, dict) or not isinstance(a, dict):
+            continue
         try:
             px = float(a.get("markPx") or 0); prev = float(a.get("prevDayPx") or 0)
             if px <= 0:
@@ -226,21 +248,21 @@ def patch_prices() -> Dict[str, Any]:
             continue
     patched = 0
     for key in ("crypto_markets", "equities", "indices", "commodities", "macro", "crypto_movers", "equity_movers", "index_movers", "commodity_movers", "oi_movers"):
-        for row in ctx.get(key) or []:
+        for row in _section_rows(ctx.get(key)):
             l = live.get(str(row.get("symbol") or row.get("name") or "").upper()) or live.get(str(row.get("symbol") or ""))
             if not l:
                 continue
             for k in ("price", "chg_24h"):
-                if l.get(k) is not None:
+                if l.get(k) is not None and (k in row or key != "oi_movers"):     # OI mover rows carry their own fields; never add ones they do not have
                     row[k] = l[k]
             for k in ("vol_24h_usd", "oi_usd", "funding_apr_pct"):
                 if l.get(k) is not None and row.get(k) is not None:
                     row[k] = l[k]
             patched += 1
     assets = (ctx.get("crypto") or {}).get("assets") or {}
-    for sym, a in assets.items():
+    for sym, a in (assets.items() if isinstance(assets, dict) else []):
         l = live.get(sym)
-        if l:
+        if l and isinstance(a, dict):
             a["price"] = l["price"]
             if l.get("chg_24h") is not None:
                 a["chg_24h"] = l["chg_24h"]

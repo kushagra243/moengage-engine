@@ -179,22 +179,54 @@ def coingecko_trending() -> List[Dict[str, Any]]:
     return cached("cg_trending", fetch, 1800) or []
 
 
+def _hl_candles(symbol: str, interval: str, limit: int) -> Optional[List[Dict[str, float]]]:
+    """Daily/4h/1h candles from the liquidity venue. Covers perps that no spot exchange lists (HYPE, PONS…)."""
+    iv = {"1d": "1d", "4h": "4h", "1h": "1h"}.get(interval, "1d")
+    secs = {"1d": 86400, "4h": 14400, "1h": 3600}[iv]
+    start = int((time.time() - secs * min(limit, 5000)) * 1000)
+    s = guarded_session("market")
+    r = s.post("https://api.hyperliquid.xyz/info", json={"type": "candleSnapshot", "req": {"coin": symbol, "interval": iv, "startTime": start}},
+               timeout=15, headers={"User-Agent": UA, "Content-Type": "application/json"})
+    if r.status_code == 429:
+        raise SourceDown("hyperliquid rate limited")
+    r.raise_for_status()
+    raw = r.json()
+    if not isinstance(raw, list) or not raw:
+        return None
+    return [{"t": int(c["t"]) / 1000, "o": float(c["o"]), "h": float(c["h"]), "l": float(c["l"]), "c": float(c["c"]), "v": float(c["v"])}
+            for c in raw[-limit:] if isinstance(c, dict)]
+
+
 def klines(symbol: str, interval: str = "1d", limit: int = 365) -> List[Dict[str, float]]:
+    """Spot candles first, then the liquidity venue, then OKX.
+    A 400 from Binance means the pair is not listed there, so its mirrors are not tried (they only help when a region is
+    blocked), and a symbol nobody lists is cached as empty for the TTL instead of being retried on every market build."""
     def fetch():
         for base in ("https://api.binance.com", "https://data-api.binance.vision", "https://api.binance.us"):
             try:
                 raw = _json(base + "/api/v3/klines", {"symbol": f"{symbol}USDT", "interval": interval, "limit": limit})
                 return [{"t": r[0] / 1000, "o": float(r[1]), "h": float(r[2]), "l": float(r[3]), "c": float(r[4]), "v": float(r[5])} for r in raw]
             except Exception as e:
+                code = getattr(getattr(e, "response", None), "status_code", None)
+                if code == 400:
+                    break                                      # not listed on Binance spot: the mirrors list the same pairs
                 log.info("klines failed %s %s: %s", base, symbol, redact(str(e)))
+        try:
+            rows = _hl_candles(symbol, interval, limit)
+            if rows:
+                return rows
+        except Exception as e:
+            log.info("liquidity-venue candles failed %s: %s", symbol, redact(str(e)))
         try:
             bar = {"1d": "1D", "4h": "4H", "1h": "1H"}.get(interval, "1D")
             raw = _json("https://www.okx.com/api/v5/market/candles", {"instId": f"{symbol}-USDT", "bar": bar, "limit": min(limit, 300)})
             rows = raw.get("data", [])[::-1]
-            return [{"t": int(r[0]) / 1000, "o": float(r[1]), "h": float(r[2]), "l": float(r[3]), "c": float(r[4]), "v": float(r[5])} for r in rows]
+            if rows:
+                return [{"t": int(r[0]) / 1000, "o": float(r[1]), "h": float(r[2]), "l": float(r[3]), "c": float(r[4]), "v": float(r[5])} for r in rows]
         except Exception as e:
             log.info("okx klines failed %s: %s", symbol, redact(str(e)))
-        return None
+        log.info("no candles for %s on any source; cached as empty until the next refresh window", symbol)
+        return []
     return cached(f"kl_{symbol}_{interval}_{limit}", fetch) or []
 
 

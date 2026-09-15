@@ -25,12 +25,12 @@ FEEDS: Dict[str, List[Dict[str, str]]] = {
         {"name": "Cointelegraph", "url": "https://cointelegraph.com/rss"},
         {"name": "The Block", "url": "https://www.theblock.co/rss.xml"},
         {"name": "Decrypt", "url": "https://decrypt.co/feed"},
-        {"name": "Bloomberg Crypto", "url": "https://feeds.bloomberg.com/crypto/news.rss"},
+        {"name": "Bloomberg Crypto", "url": "https://www.bloomberg.com/feeds/crypto/news.rss"},
     ],
     "stocks": [
         {"name": "CNBC Markets", "url": "https://www.cnbc.com/id/20910258/device/rss/rss.html"},
         {"name": "WSJ Markets", "url": "https://feeds.content.dowjones.io/public/rss/RSSMarketsMain"},
-        {"name": "Bloomberg Markets", "url": "https://feeds.bloomberg.com/markets/news.rss"},
+        {"name": "Bloomberg Markets", "url": "https://www.bloomberg.com/feeds/markets/news.rss"},
         {"name": "ET Markets", "url": "https://economictimes.indiatimes.com/markets/rssfeeds/1977021501.cms"},
         {"name": "LiveMint Markets", "url": "https://www.livemint.com/rss/markets"},
         {"name": "Business Standard Markets", "url": "https://www.business-standard.com/rss/markets-106.rss"},
@@ -40,7 +40,7 @@ FEEDS: Dict[str, List[Dict[str, str]]] = {
         {"name": "Google News: gold oil commodities", "url": "https://news.google.com/rss/search?q=(gold+OR+crude+oil+OR+silver+OR+commodities)+prices+when:1d&hl=en-IN&gl=IN&ceid=IN:en"},
     ],
     "macro": [
-        {"name": "Bloomberg Economics", "url": "https://feeds.bloomberg.com/economics/news.rss"},
+        {"name": "Bloomberg Economics", "url": "https://www.bloomberg.com/feeds/economics/news.rss"},
         {"name": "Google News: Fed RBI inflation", "url": "https://news.google.com/rss/search?q=(Federal+Reserve+OR+RBI+OR+inflation+OR+CPI+OR+FOMC)+when:1d&hl=en-IN&gl=IN&ceid=IN:en"},
     ],
     "regulatory": [

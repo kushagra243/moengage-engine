@@ -103,7 +103,7 @@ MARKET_HOSTS = [
     "news.google.com", "feeds.feedburner.com", "www.coindesk.com", "coindesk.com",
     "cointelegraph.com", "www.theblock.co", "decrypt.co", "www.cnbc.com", "search.cnbc.com",
     "feeds.marketwatch.com", "feeds.content.dowjones.io", "www.investing.com", "economictimes.indiatimes.com",
-    "www.moneycontrol.com", "feeds.a.dj.com", "finance.yahoo.com", "feeds.bloomberg.com",
+    "www.moneycontrol.com", "feeds.a.dj.com", "finance.yahoo.com", "www.bloomberg.com",          # public RSS moved from feeds.bloomberg.com (301) to www.bloomberg.com/feeds/…
     "www.alphavantage.co", "finnhub.io", "newsapi.org", "cryptopanic.com", "api.polygon.io",
     "www.ft.com", "data-api.binance.vision", "api.binance.us", "api.coinpaprika.com", "cdn.cboe.com", "www.nseindia.com", "fred.stlouisfed.org",
     "api.frankfurter.app", "open.er-api.com", "production.dataviz.cnn.io", "www.livemint.com", "www.business-standard.com", "www.sec.gov", "www.sebi.gov.in", "www.rbi.org.in",

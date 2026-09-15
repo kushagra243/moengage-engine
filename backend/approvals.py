@@ -15,7 +15,7 @@ from typing import Any, Callable, Dict, List, Optional
 from .database import get_db
 from .security import audit, redact
 
-KINDS = ("create_segment", "create_campaign", "create_flow", "pause_campaign", "resume_campaign", "update_segment", "custom_segment_upload", "code_change", "signal_rule", "skill_update")
+KINDS = ("create_segment", "create_campaign", "create_flow", "pause_campaign", "resume_campaign", "update_segment", "custom_segment_upload", "code_change", "signal_rule", "skill_update", "sop_change", "sop_new")
 
 _executors: Dict[str, Dict[str, Callable[..., Dict[str, Any]]]] = {}
 
@@ -280,6 +280,12 @@ def approve_and_execute(pid: int, decided_by: str = "user", note: str = "") -> D
     ex = _executors.get(p["kind"])
     if not ex:
         raise ApprovalError(f"no executor registered for kind {p['kind']}")
+    try:                                  # re-check the payload at decision time; a proposal that cannot run stays pending
+        ex["validate"]({**p["payload"], "_approving": True})
+    except ApprovalError:
+        raise
+    except Exception as e:
+        raise ApprovalError(redact(str(e)))
     conn = get_db()
     conn.execute("UPDATE proposals SET status='approved', decided_at=CURRENT_TIMESTAMP, decided_by=?, decision_note=? WHERE id=?", (decided_by, note[:1000], pid))
     conn.commit(); conn.close()

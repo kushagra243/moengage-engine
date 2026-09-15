@@ -400,6 +400,47 @@ LIBRARY += [
          [_st(0, "email", "Your SIP this month: units, average cost, next date", "Own numbers; DCA education; disclaimer.", "09:00"), _st(10, "in-app", "Markets fell this week: what it means for a recurring buyer (education)", "Education, no advice; only in trending_down/high_vol_down.", "13:00", "regime trending_down or high_volatility_down"),
           _st(20, "push", "Next SIP tomorrow — balance check", "Utility; deposit link if balance short.", "10:30", "balance < next SIP amount")],
          30, "monthly", 1, 20, "sip_continuation_rate_90d", "+2 pp vs holdout", "sip_pause_rate", 90, ["sip_pause_rate treated > holdout"], ["Salary-week alignment", "Annual SIP statement in April"], banned=("market_timing", "pause_suggestion", "asset_recommendation")),
+    _sop("sop_asset_selection", "Which assets we talk about this week (spot · perps · options · web3)", "market", "activated_habitual",
+         "Pick the small set of assets each product may use in campaigns this week from exposure, liquidity and confirmed facts — so airtime follows what our users actually hold and trade, not what moved loudest.",
+         "(internal) the CRM, content and market-ops teams who choose assets for every asset-led campaign", "*",
+         [_st(0, "in-app", "(internal) Build the universe and apply the hard gates",
+              "No user message. Keep only assets we list and can deep-link, tradable in the user's jurisdiction, with market data fresher than 60 minutes and 24h volume above the liquidity floor "
+              "(CMC for spot reference, our own book for everything else). Drop anything whose move traces to an unconfirmed exploit or regulatory report until two independent sources agree. "
+              "Market data is reference only: no venue or competitor is ever named in the shortlist or in the copy it feeds.", "09:00"),
+          _st(0, "in-app", "(internal) Rank by our users' exposure, not by the size of the move",
+              "No user message. Score each asset: users holding or watching it (60%), our 24h volume and open interest (25%), size of the confirmed move (15%). "
+              "An asset nobody here owns does not get airtime because it is up. Cap the shortlist at 3 assets per product and 6 across the platform for the week; one asset message per user per day.", "09:30"),
+          _st(0, "in-app", "(internal) Spot and SIP lens: fact plus a tool",
+              "No user message. Spot picks must carry a tool CTA (price alert, watchlist, recurring buy) and the user's own relevance. New listings get one factual announcement with what it is and the fee/TDS line. "
+              "No price targets, no forecast, no urgency framing. An asset falling hard is service framing only.", "10:00", "product in (spot, sip)"),
+          _st(0, "in-app", "(internal) Perps lens: funding and open interest decide, education carries it",
+              "No user message. Rank crypto and tokenised perps by our open interest and funding state. Crowded funding, an OI flush or a liquidation cascade means risk and education framing only — never an invitation to add leverage, never direction. "
+              "Anchor sends to the funding windows and, for tokenised equities and index & ETF perps, to US market hours in IST. Exclude anyone liquidated in the last 14 days.", "10:30", "product in (perps_crypto, perps_us_stocks, perps_indices, perps_commodities)"),
+          _st(0, "in-app", "(internal) Options lens: liquid underlyings and the expiry calendar only",
+              "No user message. Only underlyings with liquid expiries on the options liquidity we route to, and only expiry-week education: what expiry does to a position, how to close or roll. "
+              "No strategy tips, no premium-is-cheap angle, no direction, no payoff screenshots. Excluded for UK and US residents.", "11:00", "product = options"),
+          _st(0, "in-app", "(internal) Web3 lens: trending is unverified, so it is safety copy or nothing",
+              "No user message. Trending tokens from the public on-chain feeds are unverified data and must be labelled that way. At most one web3 asset a week, education and safety framing only "
+              "(contract risk, slippage, token approvals), never a buy CTA and never a price. Drop any token whose pool is younger than 7 days or whose liquidity is below the web3 floor.", "11:30", "product = web3"),
+          _st(1, "in-app", "(internal) Publish the shortlist and hand it to the campaign SOPs",
+              "No user message. Record the week's assets with the trigger, the product, the SOP that will carry them and the evidence behind each pick. "
+              "Anything not on the list needs a written exception from market ops before it can be used in copy.", "09:00"),
+          _st(7, "in-app", "(internal) Review: what earned its airtime",
+              "No user message. Compare engagement and the downstream action per asset against the previous week, retire the assets that underperformed twice running, and write the lesson to the feed.", "16:00")],
+         7, "weekly", 0, 20, "shortlist_adherence_pct", "≥ 90% of asset-led campaigns use an asset from the week's shortlist",
+         "notification_disable_rate", 14,
+         ["an asset on the list is found to be illiquid or delisted → pull it and every campaign using it the same day",
+          "notification_disable_rate > 0.3% in a week → halve the shortlist the following week",
+          "regime = capitulation or high_volatility_down → spot and perps picks switch to service framing only",
+          "peace index breached → no asset-led sends until it recovers"],
+         ["Test exposure-weighted picks against move-weighted picks on the same week",
+          "Regional-language variants for the top spot pick",
+          "One asset per product per week (tighter cap) vs three, on engagement per send",
+          "Hold a control week with no asset-led sends to measure the true lift of the shortlist"],
+         exclusions=STANDARD_EXCLUSIONS + ["internal selection procedure: this SOP messages nobody, the exclusions bind every campaign it feeds"],
+         min_reach=0, disclaimer=("email", "whatsapp", "in-app", "push_landing"),
+         banned=("forecast", "direction", "price_urgency", "leverage_upsell", "size_up", "first_futures_trade", "cheap_premium", "strategy_tip", "venue_names", "unverified_token_promo"),
+         extra_checks=("liquidity_floor", "jurisdiction_map", "two_source_confirmation", "shortlist_cap")),
 ]
 
 def init_sop_tables() -> None:
@@ -429,11 +470,20 @@ def list_sops(include_inactive: bool = False) -> List[Dict[str, Any]]:
     return out
 
 
+def _enrich(r: Dict[str, Any]) -> Dict[str, Any]:
+    spec = json.loads(r.pop("spec_json") or "{}")
+    chk = sop_check(spec)
+    return {**spec, "id": r["id"], "source": r["source"], "version": r["version"], "active": r["active"], "updated_at": r["updated_at"],
+            "framework_ok": chk["ok"], "framework_problems": chk["problems"], "steps_count": len(spec.get("steps") or [])}
+
+
 def get_sop(sop_id: str) -> Optional[Dict[str, Any]]:
-    for s in list_sops(include_inactive=True):
-        if s["id"] == sop_id:
-            return s
-    return None
+    """One row by id. Never scan the library for this: the whole library is framework-checked on every read."""
+    init_sop_tables()
+    conn = get_db()
+    row = conn.execute("SELECT * FROM sops WHERE id=?", (sop_id,)).fetchone()
+    conn.close()
+    return _enrich(dict(row)) if row else None
 
 
 # ── framework ──────────────────────────────────────────────────────────────────

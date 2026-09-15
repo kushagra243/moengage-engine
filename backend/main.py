@@ -67,6 +67,11 @@ if _migrated:
 register_executors()
 from . import devagent as _devagent
 _devagent.register()
+for _mod in ("signals", "research", "sop_improve", "sop_requests"):     # approval executors: signal_rule, skill_update, sop_change, sop_new
+    try:
+        __import__(f"backend.{_mod}", fromlist=[_mod]).register()
+    except Exception as _e:
+        logging.getLogger("moengage").warning("executor %s not registered: %s", _mod, _e)
 # demo mode: make sure there is history to look at
 try:
     if get_setting("mock_mode", "true").lower() == "true" and snapshot_count("mock") < 7:
@@ -888,6 +893,22 @@ class DataRequestStatus(BaseModel):
     note: str = ""
 
 
+@app.get("/api/data-gaps")
+def data_gaps_list():
+    from . import data_gaps
+    return data_gaps.detect()
+
+
+class DataGapSyncPayload(BaseModel):
+    min_severity: str = "medium"
+
+
+@app.post("/api/data-gaps/sync")
+def data_gaps_sync(payload: DataGapSyncPayload, request: Request):
+    from . import data_gaps
+    return data_gaps.sync(payload.min_severity, actor=request_actor(request))
+
+
 @app.get("/api/data-requests")
 def data_requests_list(status: Optional[str] = None):
     from . import datarequests
@@ -1116,6 +1137,108 @@ async def experiment_import(pid: int, request: Request, file: UploadFile = File(
             approvals.add_comment(pid, "Rationale from the uploaded document: " + changes["rationale"][:1500], actor=f"upload:{request_actor(request)}")
         out.update({"applied": True, "proposal": {k: r.get(k) for k in ("id", "status", "preview") if isinstance(r, dict)}})
     return out
+
+
+class SopRequestPayload(BaseModel):
+    title: str
+    need: str
+    product: str = "all"
+    team: str = ""
+    transition: str = ""
+    situation: str = ""
+
+
+class SopSignoffPayload(BaseModel):
+    verdict: str = "approve"
+    note: str = ""
+
+
+@app.get("/api/sops/catalog")
+def sops_catalog(product: Optional[str] = None):
+    from . import sop_catalog
+    return sop_catalog.by_product(product)
+
+
+@app.get("/api/sops/teams")
+def sops_teams():
+    from . import sop_catalog
+    return sop_catalog.by_team()
+
+
+@app.get("/api/sops/coverage-gaps")
+def sops_coverage_gaps():
+    from . import sop_catalog
+    return sop_catalog.gaps()
+
+
+@app.get("/api/sops/requests")
+def sops_requests_list(status: Optional[str] = None):
+    from . import sop_requests
+    return {"requests": sop_requests.list_requests(status), "peers_required": sop_requests.peers_required(), "suggestions": sop_requests.suggest()["suggestions"][:12]}
+
+
+@app.post("/api/sops/requests")
+def sops_requests_create(payload: SopRequestPayload, request: Request):
+    from . import sop_requests
+    r = sop_requests.create(payload.title, payload.need, payload.product, payload.team, payload.transition, payload.situation, requested_by=request_actor(request))
+    if r.get("error"):
+        raise HTTPException(400, r["error"])
+    return r
+
+
+@app.post("/api/sops/requests/{rid}/draft")
+def sops_requests_draft(rid: int, request: Request):
+    from . import sop_requests
+    r = sop_requests.draft(rid, actor=request_actor(request))
+    if r.get("error"):
+        raise HTTPException(400, r["error"])
+    return r
+
+
+@app.post("/api/sops/requests/{rid}/signoff")
+def sops_requests_signoff(rid: int, payload: SopSignoffPayload, request: Request):
+    from . import sop_requests
+    r = sop_requests.signoff(rid, actor=request_actor(request), verdict=payload.verdict, note=payload.note)
+    if r.get("error"):
+        raise HTTPException(400, r["error"])
+    return r
+
+
+class SopImprovePayload(BaseModel):
+    rec_ids: Optional[List[str]] = None
+    note: str = ""
+
+
+@app.get("/api/sops/improve")
+def sops_improve_backlog():
+    from . import sop_improve
+    return sop_improve.review()
+
+
+@app.get("/api/sops/{sop_id}/improve")
+def sops_improve_one(sop_id: str):
+    from . import sop_improve, sops
+    if not sops.get_sop(sop_id):
+        raise HTTPException(404, "unknown SOP")
+    return sop_improve.review(sop_id)["sops"][0]
+
+
+@app.post("/api/sops/{sop_id}/improve/apply")
+def sops_improve_apply(sop_id: str, payload: SopImprovePayload, request: Request):
+    from . import sop_improve
+    r = sop_improve.apply(sop_id, payload.rec_ids, actor=request_actor(request))
+    if not r.get("ok"):
+        raise HTTPException(400, r.get("error") or "could not apply")
+    return r
+
+
+@app.post("/api/sops/{sop_id}/improve/propose")
+def sops_improve_propose(sop_id: str, payload: SopImprovePayload, request: Request):
+    from . import sop_improve
+    r = sop_improve.propose(sop_id, payload.rec_ids, payload.note, created_by=request_actor(request))
+    if r.get("error"):
+        raise HTTPException(400, r["error"])
+    return r
 
 
 class SopAskPayload(BaseModel):

@@ -140,6 +140,17 @@ def _library_docs() -> List[Dict[str, Any]]:
     for owner, info in (d.get("by_owner") or {}).items():
         out.append(_doc("ownership", "by_owner", "Who owns which SOPs", owner, f"{owner} is the primary owner of {info['count']} SOPs: {', '.join(info['sops'])}."))
     try:
+        from . import sop_catalog as cat
+        for pr in (cat.by_product() or {}).get("products", []):
+            out.append(_doc("catalog", "product_" + pr["product"], f"What CLM does for {pr['name']}", "brief",
+                            pr["brief"] + f" SOPs: {', '.join(s['name'] for s in pr['sops'][:10])}. Coverage {pr['coverage_pct']}% of the lifecycle ladder."))
+        for t in (cat.by_team() or {}).get("teams", []):
+            if t["owns_count"] or t["reviews_count"]:
+                out.append(_doc("catalog", "team_" + t["key"], f"What {t['role']} owns", "team",
+                                f"{t['role']} ({t.get('person') or 'no person set'}) {t['does']}. Owns {t['owns_count']} SOPs: {', '.join(x['name'] for x in t['owns'][:8])}. Reviews {t['reviews_count']}. On the hook for segments: {', '.join(t['segments']) or 'none'}."))
+    except Exception:
+        pass
+    try:
         from .skills import list_skills, read_skill
         for s in list_skills():
             body = (read_skill(s["name"], max_chars=6000) or {}).get("content") or ""

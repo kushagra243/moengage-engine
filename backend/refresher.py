@@ -132,13 +132,19 @@ def _j_council():
         return {"skipped": "no model"}
     done = []
     for p in approvals.list_proposals(status="pending", limit=100):
-        if p["kind"] not in ("create_campaign", "create_flow", "signal_rule", "skill_update") or council_summary(p):
+        if p["kind"] not in ("create_campaign", "create_flow", "signal_rule", "skill_update", "sop_new", "sop_change") or council_summary(p):
             continue
         r = council_review(p["id"])
         done.append({"id": p["id"], "overall": r.get("overall")})
         if len(done) >= 3:
             break
     return {"reviewed": done}
+
+
+def _j_data_gaps():
+    from . import data_gaps
+    d = data_gaps.detect()
+    return {"outstanding": d["outstanding"], "high": d["counts"].get("high"), "requested": d["requested"]}
 
 
 def _j_compliance():
@@ -159,6 +165,7 @@ JOBS: List[Dict[str, Any]] = [
     {"name": "qa", "minutes": 30, "fn": _j_qa, "feeds": "Brain → QA panel"},
     {"name": "workspace", "minutes": 15, "fn": _j_workspace, "feeds": "Analysis module (facts every run; narrative when inputs change)"},
     {"name": "housekeeping", "minutes": 60, "fn": _j_housekeeping, "feeds": "Ideas board (expiry)"},
+    {"name": "data_gaps", "minutes": 120, "fn": _j_data_gaps, "feeds": "Engine → data we need"},
     {"name": "compliance", "minutes": 180, "fn": _j_compliance, "feeds": "Analysis → Compliance sweep · QA"},
     {"name": "council", "minutes": 30, "fn": _j_council, "feeds": "Ideas → council verdicts on new drafts"},
     {"name": "research", "minutes": 360, "fn": _j_research, "feeds": "Skills → Methodology radar"},
@@ -259,7 +266,7 @@ def run_due(max_jobs: int = 3) -> List[Dict[str, Any]]:
 
 
 VIEWS_OF = {"prices": ["lab", "brain"], "market_context": ["lab", "brain", "ideas"], "signals": ["engine"], "benchmarks": ["lab"], "campaign_intel": ["lab"], "onchain_cex": ["lab"], "money_flow": ["lab", "ideas"], "app_rankings": ["lab"],
-            "structural": ["ideas"], "qa": ["brain"], "workspace": ["analysis"], "housekeeping": ["ideas"], "compliance": ["analysis", "brain"], "council": ["ideas"], "research": ["skills"]}
+            "structural": ["ideas"], "qa": ["brain"], "workspace": ["analysis"], "housekeeping": ["ideas"], "compliance": ["analysis", "brain"], "council": ["ideas"], "research": ["skills"], "data_gaps": ["engine"]}
 
 
 def changes() -> Dict[str, Any]:

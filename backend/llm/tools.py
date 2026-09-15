@@ -614,6 +614,66 @@ def refresh_learnings() -> Dict[str, Any]:
     return learnings.refresh()
 
 
+def data_gaps(sync: bool = False, min_severity: str = "medium") -> Dict[str, Any]:
+    """What data we are missing to run and measure campaigns: events, user attributes, cohorts and platform capabilities, each with why it matters, what it unblocks and whether it has been asked for. sync=true files the outstanding ones as data requests."""
+    from .. import data_gaps as dg
+    out = dg.detect()
+    if sync:
+        out["synced"] = dg.sync(min_severity, actor="agent")
+        out = {**dg.detect(), "synced": out["synced"]}
+    out["items"] = [i for i in out["items"] if not i["requested"] and i["status"] != "not needed yet"][:25]
+    return out
+
+
+def sop_catalog(product: Optional[str] = None) -> Dict[str, Any]:
+    """What CLM runs for each product (spot, SIP, crypto perps, US-stock / index & ETF / commodity perps, options, earn, web3): the SOPs that touch it, which lifecycle stages are covered, which are not, the product lens, cadence and never-list, and a plain-English brief any team can read."""
+    from .. import sop_catalog as cat
+    r = cat.by_product(product)
+    if not product:
+        r["products"] = [{k: p[k] for k in ("product", "name", "coverage_pct", "own_sops", "shared_sops", "brief", "missing")} for p in r["products"]]
+    return r
+
+
+def sop_teams() -> Dict[str, Any]:
+    """Which team owns and reviews which SOPs, and the process segments each is on the hook for."""
+    from .. import sop_catalog as cat
+    return cat.by_team()
+
+
+def request_sop(title: str, need: str, product: str = "all", transition: str = "", situation: str = "", team: str = "") -> Dict[str, Any]:
+    """Raise a request for an SOP that does not exist yet (any team can). It is drafted by draft_sop and needs peer sign-off before it enters the library."""
+    from .. import sop_requests
+    return sop_requests.create(title, need, product, team, transition, situation, requested_by="agent")
+
+
+def draft_sop(request_id: int) -> Dict[str, Any]:
+    """Draft the requested SOP framework-complete (product lens, India rules, holdout, kill rules) and queue it as a `sop_new` proposal that peers sign off before it is written into the library."""
+    from .. import sop_requests
+    return sop_requests.draft(int(request_id), actor="agent")
+
+
+def sop_requests(status: Optional[str] = None) -> Dict[str, Any]:
+    """Open requests for new SOPs, their sign-offs, and suggestions worth raising (uncovered product × stage cells, unanswered questions)."""
+    from .. import sop_requests as sr
+    return {"requests": sr.list_requests(status), "peers_required": sr.peers_required(), "suggestions": sr.suggest()["suggestions"][:10]}
+
+
+def sop_improvements(sop_id: Optional[str] = None) -> Dict[str, Any]:
+    """Recommended changes to our SOPs, from our own runs and readouts, the cohort registry, comms limits, the playbook ranges and the methodology radar: each with the exact field to change, the current and proposed value, why, the evidence and an ICE score. One SOP or the whole library ranked by how much work it needs."""
+    from .. import sop_improve
+    r = sop_improve.review(sop_id)
+    if not sop_id:
+        r["sops"] = [{"sop_id": x["sop_id"], "name": x["name"], "score": x["score"], "status": x["status"], "counts": x["counts"],
+                      "top": [{"rule": y["rule"], "title": y["title"], "severity": y["severity"], "auto": y["auto"]} for y in x["recommendations"][:3]]} for x in r["sops"]][:20]
+    return r
+
+
+def propose_sop_change(sop_id: str, rec_ids: Optional[List[str]] = None, note: str = "") -> Dict[str, Any]:
+    """Queue the recommended SOP edits as an approval-gated `sop_change` proposal with a diff preview. Approving writes a new framework-checked SOP version."""
+    from .. import sop_improve
+    return sop_improve.propose(sop_id, rec_ids, note, created_by="agent")
+
+
 def ask_sops(question: str) -> Dict[str, Any]:
     """Ask our own SOP library a plain-English question and get a cited answer: process walkthroughs, inter-team dependencies, who owns the next step, who to contact when blocked, limits, exclusions, KPIs. Use this before describing any internal process — it is grounded in the library, not memory."""
     from .. import sopqa
@@ -968,6 +1028,14 @@ TOOL_SCHEMAS: List[Dict[str, Any]] = [
     _fn("signal_fires", "Ledger of business events fired by the Signal Bridge.", {"limit": {"type": "integer"}}),
     _fn("compliance_sweep", "Lint every live campaign's copy against the India rules; findings with fixes.", {"force": {"type": "boolean"}}),
     _fn("refresh_learnings", "Recompile the our-learnings skill from our own readouts and reviews.", {}),
+    _fn("data_gaps", "What data is missing to run and measure campaigns (events, attributes, cohorts, capabilities) with what each unblocks; sync=true files them as data requests.", {"sync": {"type": "boolean"}, "min_severity": STR}),
+    _fn("sop_catalog", "What CLM runs for each product: SOPs, stage coverage, gaps, lens, cadence, never-list, and a brief any team can read.", {"product": STR}),
+    _fn("sop_teams", "Which team owns and reviews which SOPs, and the process segments each is on the hook for.", {}),
+    _fn("request_sop", "Raise a request for an SOP that does not exist yet (peer sign-off required before it enters the library).", {"title": STR, "need": STR, "product": STR, "transition": STR, "situation": STR, "team": STR}, ["title", "need"]),
+    _fn("draft_sop", "Draft a requested SOP framework-complete and queue it for peer sign-off and approval.", {"request_id": {"type": "integer"}}, ["request_id"]),
+    _fn("sop_requests", "Open SOP requests, their sign-offs and suggestions worth raising.", {"status": STR}),
+    _fn("sop_improvements", "Recommended changes to our SOPs (field, current → proposed, why, evidence, ICE). One SOP or the whole library.", {"sop_id": STR}),
+    _fn("propose_sop_change", "Queue recommended SOP edits as an approval-gated change with a diff preview.", {"sop_id": STR, "rec_ids": {"type": "array", "items": STR}, "note": STR}, ["sop_id"]),
     _fn("ask_sops", "Ask the SOP library a plain-English question; returns a cited answer from our own SOPs (process, ownership, escalation, limits).", {"question": STR}, ["question"]),
     _fn("sop_ownership", "Owners, hand-offs, process segments and the escalation ladder for one SOP.", {"sop_id": STR}, ["sop_id"]),
     _fn("sop_knowledge_gaps", "Questions the SOP library could not answer — SOPs worth writing.", {"limit": {"type": "integer"}}),
@@ -1020,5 +1088,5 @@ TOOLS: Dict[str, Callable[..., Dict[str, Any]]] = {
     "north_star": _safe(north_star), "set_north_star": _safe(set_north_star), "comms_limits": _safe(comms_limits), "set_comms_limits": _safe(set_comms_limits), "peace_index": _safe(peace_index),
     "guardrail_monitor": _safe(guardrail_monitor), "write_flight_plan": _safe(write_flight_plan), "flight_plans": _safe(flight_plans),
     "segment_study": _safe(segment_study), "define_nomenclature": _safe(define_nomenclature), "list_sops": _safe(list_sops), "sop_detail": _safe(sop_detail), "define_sop": _safe(define_sop), "run_sop": _safe(run_sop), "sop_runs": _safe(sop_runs), "channel_matrix": _safe(channel_matrix),
-    "competitor_intel": _safe(competitor_intel), "competitor_benchmarks": _safe(competitor_benchmarks), "competitor_campaigns": _safe(competitor_campaigns), "onchain_vs_cex": _safe(onchain_vs_cex), "agent_roster": _safe(agent_roster), "council_review": _safe(council_review), "research_radar": _safe(research_radar), "propose_skill_update": _safe(propose_skill_update), "signal_catalog": _safe(signal_catalog), "propose_signal_rule": _safe(propose_signal_rule), "signal_fires": _safe(signal_fires), "compliance_sweep": _safe(compliance_sweep), "refresh_learnings": _safe(refresh_learnings), "ask_sops": _safe(ask_sops), "sop_ownership": _safe(sop_ownership), "sop_knowledge_gaps": _safe(sop_knowledge_gaps), "sop_india_review": _safe(sop_india_review), "sop_india_fix": _safe(sop_india_fix), "workspace_analysis": _safe(workspace_analysis), "qa_report": _safe(qa_report), "verify_claims": _safe(verify_claims), "structural_audit": _safe(structural_audit), "market_moving_news": _safe(market_moving_news), "money_flow": _safe(money_flow), "market_flash": _safe(market_flash), "campaign_from_alert": _safe(campaign_from_alert), "competitor_dossier": _safe(competitor_dossier), "pair_battle": _safe(pair_battle), "web3_trending": _safe(web3_trending), "product_cohorts": _safe(product_cohorts), "announcement_lenses": _safe(announcement_lenses), "request_data": _safe(request_data), "data_requests": _safe(data_requests),
+    "competitor_intel": _safe(competitor_intel), "competitor_benchmarks": _safe(competitor_benchmarks), "competitor_campaigns": _safe(competitor_campaigns), "onchain_vs_cex": _safe(onchain_vs_cex), "agent_roster": _safe(agent_roster), "council_review": _safe(council_review), "research_radar": _safe(research_radar), "propose_skill_update": _safe(propose_skill_update), "signal_catalog": _safe(signal_catalog), "propose_signal_rule": _safe(propose_signal_rule), "signal_fires": _safe(signal_fires), "compliance_sweep": _safe(compliance_sweep), "refresh_learnings": _safe(refresh_learnings), "data_gaps": _safe(data_gaps), "sop_catalog": _safe(sop_catalog), "sop_teams": _safe(sop_teams), "request_sop": _safe(request_sop), "draft_sop": _safe(draft_sop), "sop_requests": _safe(sop_requests), "sop_improvements": _safe(sop_improvements), "propose_sop_change": _safe(propose_sop_change), "ask_sops": _safe(ask_sops), "sop_ownership": _safe(sop_ownership), "sop_knowledge_gaps": _safe(sop_knowledge_gaps), "sop_india_review": _safe(sop_india_review), "sop_india_fix": _safe(sop_india_fix), "workspace_analysis": _safe(workspace_analysis), "qa_report": _safe(qa_report), "verify_claims": _safe(verify_claims), "structural_audit": _safe(structural_audit), "market_moving_news": _safe(market_moving_news), "money_flow": _safe(money_flow), "market_flash": _safe(market_flash), "campaign_from_alert": _safe(campaign_from_alert), "competitor_dossier": _safe(competitor_dossier), "pair_battle": _safe(pair_battle), "web3_trending": _safe(web3_trending), "product_cohorts": _safe(product_cohorts), "announcement_lenses": _safe(announcement_lenses), "request_data": _safe(request_data), "data_requests": _safe(data_requests),
 }

@@ -7,6 +7,7 @@ import json
 import logging
 import os
 import re
+import uuid
 from datetime import datetime
 from typing import Any, Dict, List, Optional
 
@@ -1780,10 +1781,28 @@ def automation_history():
 
 
 # ── static frontend with token injection ───────────────────────────────────────
+def build_id() -> str:
+    """The commit this process is running. Lets `./cli.py update` prove a reload actually took."""
+    global _BUILD_ID
+    if _BUILD_ID is None:
+        root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+        try:
+            import subprocess
+            r = subprocess.run(["git", "rev-parse", "--short", "HEAD"], cwd=root, capture_output=True, text=True, timeout=5)
+            _BUILD_ID = (r.stdout or "").strip() or "unknown"
+        except Exception:
+            _BUILD_ID = "unknown"
+    return _BUILD_ID
+
+
+_BUILD_ID: Optional[str] = None
+BOOT_ID = uuid.uuid4().hex[:8]            # changes on every (re)start, including an in-place SIGHUP reload
+
+
 def _index_html(name: str = os.path.join("terminal", "index.html")) -> str:
     with open(os.path.join(FRONTEND_DIR, name), encoding="utf-8") as f:
         html = f.read()
-    tag = f'<meta name="local-token" content="{local_token}">'
+    tag = f'<meta name="local-token" content="{local_token}"><meta name="build" content="{build_id()}"><meta name="boot" content="{BOOT_ID}">'
     return html.replace("<head>", "<head>" + tag, 1) if "<head>" in html else tag + html
 
 

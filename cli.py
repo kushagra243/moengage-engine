@@ -244,6 +244,107 @@ def cmd_selfheal(a):
         print("tests:", "passed" if r["tests"]["passed"] else "FAILED"); print(r["tests"]["tail"][-600:])
 
 
+def _port_open(port):
+    import socket as _s
+    with _s.socket(_s.AF_INET, _s.SOCK_STREAM) as c:
+        c.settimeout(1.5)
+        return c.connect_ex(("127.0.0.1", port)) == 0
+
+
+def _build_of(port):
+    """(commit, boot id) the running engine is serving, read from the shell it hands the browser.
+    (None, None) means it is not serving one — either it is down, or it predates the build stamp."""
+    import re, urllib.request
+    try:
+        with urllib.request.urlopen(f"http://127.0.0.1:{port}/", timeout=5) as r:
+            html = r.read(4096).decode("utf-8", "ignore")
+        b = re.search(r'name="build" content="([^"]+)"', html)
+        k = re.search(r'name="boot" content="([^"]+)"', html)
+        return (b.group(1) if b else None), (k.group(1) if k else None)
+    except Exception:
+        return None, None
+
+
+def _engine_pids():
+    import subprocess as _sp
+    return [int(x) for x in _sp.run(["pgrep", "-f", "start.py"], capture_output=True, text=True).stdout.split() if int(x) != os.getpid()]
+
+
+def _restart_detached(root, port, pids):
+    """Used only when the running engine is too old to reload itself. Nothing under data/ is touched,
+    so the MoEngage keys, the model key and every setting come back with it."""
+    import signal as _sig, subprocess as _sp, time as _t
+    for pid in pids:
+        try:
+            os.kill(pid, _sig.SIGTERM)
+        except ProcessLookupError:
+            pass
+    for _ in range(20):
+        if not _port_open(port):
+            break
+        _t.sleep(0.5)
+    logs = os.path.join(root, "data", "logs")
+    os.makedirs(logs, exist_ok=True)
+    out = open(os.path.join(logs, "engine.log"), "a")
+    vpy = os.path.join(root, ".venv", "bin", "python")
+    _sp.Popen([vpy if os.path.exists(vpy) else sys.executable, os.path.join(root, "start.py")], cwd=root,
+              stdout=out, stderr=out, start_new_session=True, env={**os.environ, "PORT": str(port)})
+    for _ in range(40):
+        _t.sleep(1)
+        if _port_open(port):
+            return True
+    return False
+
+
+def cmd_update(a):
+    """Pull the latest code and apply it to the running engine. Settings and keys live in data/ and are never touched."""
+    import signal as _sig, subprocess as _sp, time as _t
+    root = os.path.dirname(os.path.abspath(__file__))
+    port = int(a.port or os.environ.get("PORT", "8080"))
+    before_head = _sp.run(["git", "rev-parse", "--short", "HEAD"], cwd=root, capture_output=True, text=True).stdout.strip()
+    running = _port_open(port)
+    before_run, before_boot = _build_of(port) if running else (None, None)
+    if not a.no_pull:
+        r = _sp.run(["git", "pull", "--rebase", "--autostash", "origin", a.branch], cwd=root, capture_output=True, text=True)
+        print((r.stdout or "").strip() or (r.stderr or "").strip())
+        if r.returncode != 0:
+            print("[!] pull failed — nothing changed and the engine is still serving the old code"); return
+    head = _sp.run(["git", "rev-parse", "--short", "HEAD"], cwd=root, capture_output=True, text=True).stdout.strip()
+    if head != before_head:
+        print(_sp.run(["git", "log", "--oneline", f"{before_head}..{head}"], cwd=root, capture_output=True, text=True).stdout.strip() or f"{before_head} → {head}")
+    elif not a.no_pull:
+        print(f"already up to date at {head}")
+    chk = _sp.run([sys.executable, "-c", "import sys; sys.path.insert(0, %r); import backend.main" % root], cwd=root,
+                  capture_output=True, text=True, env={**os.environ, "MOE_IMPORT_CHECK": "1"})
+    if chk.returncode != 0:
+        print("[!] the new code does not import — the running engine was left alone:\n" + chk.stderr[-800:]); return
+    pids = _engine_pids()
+    if not running or not pids:
+        print("engine is not running · start it with: .venv/bin/python start.py"); return
+    if before_run is None:
+        # too old to have the in-place reload; SIGHUP would kill it, so stop and start it instead
+        print("the running engine predates the in-place reload, so it is being stopped and started once.")
+        ok = _restart_detached(root, port, pids)
+        if ok:
+            print(f"engine back up on http://127.0.0.1:{port} · keys and settings live in data/agent.db and came back with it")
+            print("from now on `./cli.py update` reloads in place, with no stop at all.")
+        else:
+            print("[!] it did not come back — start it by hand: .venv/bin/python start.py (see data/logs/engine.log)")
+        return
+    for pid in pids:
+        try:
+            os.kill(pid, _sig.SIGHUP)
+        except ProcessLookupError:
+            pass
+    for _ in range(30):
+        _t.sleep(1)
+        now, boot = _build_of(port)
+        if boot and boot != before_boot:                       # a new boot id proves the process actually reloaded
+            print(f"reloaded in place · pid {pids[0]} now serving {now} · nothing restarted, keys and settings untouched")
+            return
+    print(f"[!] the reload did not land within 30s — check data/logs/engine.log; it is still serving {before_run} (boot {before_boot})")
+
+
 def cmd_audit_log(a):
     from backend.security.audit import tail, verify_chain
     _print({"chain": verify_chain(), "entries": tail(a.n)})
@@ -271,6 +372,9 @@ def main():
     sp.add_parser("housekeeping", help="expire stale ideas/proposals, archive past flight plans").set_defaults(fn=cmd_housekeeping)
     s = sp.add_parser("selfheal", help="engine health: report | rollback (revert last agent merge)"); s.add_argument("action", nargs="?", default="report", choices=["report", "rollback"]); s.add_argument("--tests", action="store_true"); s.set_defaults(fn=cmd_selfheal)
     s = sp.add_parser("audit-log"); s.add_argument("-n", type=int, default=30); s.set_defaults(fn=cmd_audit_log)
+    s = sp.add_parser("update", help="pull the latest code and reload the running engine in place (keys and settings untouched)")
+    s.add_argument("--branch", default="main"); s.add_argument("--port"); s.add_argument("--no-pull", action="store_true", help="reload what is already checked out")
+    s.set_defaults(fn=cmd_update)
     s = sp.add_parser("growth", help="growth feed: refresh | list | set"); s.add_argument("action", choices=["refresh", "list", "set"]); s.add_argument("id", nargs="?", type=int); s.add_argument("--status"); s.add_argument("--llm", action="store_true"); s.add_argument("-n", type=int, default=5); s.set_defaults(fn=cmd_growth)
     s = sp.add_parser("service", help="persistent background service (launchd): install | uninstall | status"); s.add_argument("action", choices=["install", "uninstall", "status"]); s.add_argument("--port"); s.add_argument("--allowed-hosts", help="comma list of proxy hostnames allowed in the Host header, e.g. engine.tailnet.ts.net"); s.set_defaults(fn=cmd_service)
     a = p.parse_args()

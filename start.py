@@ -2,6 +2,7 @@
 """Cross-platform launcher: creates .venv (Python >= 3.10), installs deps, runs on 127.0.0.1 only."""
 import os
 import shutil
+import signal
 import socket
 import subprocess
 import sys
@@ -27,6 +28,20 @@ def find_python():
 def port_free(port):
     with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
         return s.connect_ex(("127.0.0.1", port)) != 0
+
+
+def _install_reload_signal():
+    """SIGHUP replaces this process with a fresh one on the same port, so `git pull` can be applied
+    without anyone touching the terminal. Settings, keys and data/ are on disk and are never involved."""
+    if not hasattr(signal, "SIGHUP"):
+        return
+
+    def _reload(signum, frame):
+        print("[*] SIGHUP: reloading the engine in place (settings and keys untouched)", flush=True)
+        os.chdir(ROOT)
+        os.execv(VPY, [VPY, os.path.join(ROOT, "start.py")])
+
+    signal.signal(signal.SIGHUP, _reload)
 
 
 def main():
@@ -66,6 +81,7 @@ def main():
         if chk.returncode != 0:
             sys.exit(1)
     import uvicorn
+    _install_reload_signal()
     port = int(os.environ.get("PORT", "8080"))
     while not port_free(port):
         port += 1

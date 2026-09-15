@@ -3,7 +3,7 @@ name: our-learnings
 description: What CoinDCX's own MoEngage programme has taught us so far — experiment readouts (wins, losses, flat), lessons recorded by the brain, deep-dive verdicts per campaign, channel health in our data, QA trend and India-fit status. Cite this BEFORE any generic benchmark; regenerated automatically by the daily cycle (backend/learnings.py).
 ---
 
-# Our learnings (auto-compiled 2026-09-10 03:30 UTC)
+# Our learnings (auto-compiled 2026-09-15 02:40 UTC)
 
 Numbers below come from the mock workspace and are illustrative. Source workspace: mock. 0 experiments read out, 1 running.
 
@@ -20,10 +20,10 @@ Numbers below come from the mock workspace and are illustrative. Source workspac
 - none yet
 
 ## Deep-dive verdicts (per campaign)
-- **VIP Loyalty Club Double Points**: VIP Loyalty Club Double Points: click rate 8.9% vs usual 9.2% (-0.3 pp) — No dominant driver → Hold
-- **New User Onboarding Guide**: New User Onboarding Guide: click rate 31.5% vs usual 32.1% (-0.6 pp) — No dominant driver → Hold
-- **Cart Abandonment 1-Hour Reminder**: Cart Abandonment 1-Hour Reminder: click rate 12.9% vs usual 13.0% (-0.2 pp) — No dominant driver → Hold
-- **Price Drop Alert on Wishlist Items**: Price Drop Alert on Wishlist Items: attributed revenue $91,600 vs usual $95,567 (-4%) — No dominant driver → Hold
+- **VIP Loyalty Club Double Points**: VIP Loyalty Club Double Points: click rate 8.9% vs usual 9.2% (-0.2 pp) — No dominant driver → Hold
+- **New User Onboarding Guide**: New User Onboarding Guide: click rate 31.5% vs usual 31.8% (-0.3 pp) — No dominant driver → Hold
+- **Cart Abandonment 1-Hour Reminder**: Cart Abandonment 1-Hour Reminder: conversion rate 4.7% vs usual 4.7% (-0.1 pp) — No dominant driver → Hold
+- **Price Drop Alert on Wishlist Items**: Price Drop Alert on Wishlist Items: attributed revenue $91,600 vs usual $95,952 (-5%) — No dominant driver → Hold
 - **Reactivation: 30-Day Inactive Winback**: Reactivation: 30-Day Inactive Winback: click rate 1.4% vs usual 1.5% (-0.0 pp) — No dominant driver → Hold
 - **Weekend Flash Sale 20% Off**: Weekend Flash Sale 20% Off: click rate 6.3% vs usual 6.5% (-0.2 pp) — No dominant driver → Hold
 
@@ -36,16 +36,16 @@ Numbers below come from the mock workspace and are illustrative. Source workspac
 - uncovered transitions: Verified → Funded, Funded → Activated, Slipping → recovered
 
 ## Running now
-- CLM_Dormant_MarketReturn_Recap (reactivation_rate_14d, day 1 of 14)
+- CLM_Dormant_MarketReturn_Recap (reactivation_rate_14d, day 6 of 14)
 
 ## Quality trend (QA score)
-- 2026-09-10 score 89 (1 fail / 6 warn)
-- 2026-09-10 score 90 (1 fail / 5 warn)
-- 2026-09-10 score 90 (1 fail / 5 warn)
-- 2026-09-10 score 90 (1 fail / 5 warn)
-- 2026-09-10 score 92 (0 fail / 6 warn)
-- 2026-09-09 score 86 (2 fail / 6 warn)
-- 2026-09-09 score 88 (2 fail / 4 warn)
+- 2026-09-15 score 83 (1 fail / 7 warn)
+- 2026-09-13 score 89 (1 fail / 6 warn)
+- 2026-09-13 score 86 (1 fail / 7 warn)
+- 2026-09-13 score 89 (1 fail / 6 warn)
+- 2026-09-12 score 83 (2 fail / 7 warn)
+- 2026-09-12 score 88 (1 fail / 7 warn)
+- 2026-09-11 score 88 (1 fail / 7 warn)
 
 ## India fit of the SOP library
 - 35 india-ready · 23 need edits · 0 rework · avg 89.0

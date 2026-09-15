@@ -1118,6 +1118,54 @@ async def experiment_import(pid: int, request: Request, file: UploadFile = File(
     return out
 
 
+class SopAskPayload(BaseModel):
+    question: str
+    force: bool = False
+
+
+@app.post("/api/sops/ask")
+def sops_ask(payload: SopAskPayload, request: Request):
+    """Plain-English question → cited answer from our own SOP library. Private, local, read-only."""
+    from . import sopqa
+    r = sopqa.ask(payload.question, actor=request_actor(request), force=payload.force)
+    if r.get("error"):
+        raise HTTPException(400, r["error"])
+    return r
+
+
+@app.get("/api/sops/ask/history")
+def sops_ask_history(limit: int = 20):
+    from . import sopqa
+    return {"history": sopqa.history(limit), "quota": sopqa.quota()}
+
+
+@app.get("/api/sops/ask/gaps")
+def sops_ask_gaps(limit: int = 20):
+    from . import sopqa
+    return sopqa.gaps(limit)
+
+
+@app.get("/api/sops/knowledge")
+def sops_knowledge():
+    from . import sopqa
+    return sopqa.topics()
+
+
+@app.get("/api/sops/ownership")
+def sops_ownership_directory():
+    from . import sop_ownership
+    return sop_ownership.directory()
+
+
+@app.get("/api/sops/{sop_id}/ownership")
+def sops_ownership(sop_id: str):
+    from . import sop_ownership, sops
+    sop = sops.get_sop(sop_id)
+    if not sop:
+        raise HTTPException(404, "unknown SOP")
+    return sop_ownership.walkthrough(sop)
+
+
 @app.get("/api/sops/india-fit")
 def sops_india_fit(sop_id: Optional[str] = None):
     from . import sop_india

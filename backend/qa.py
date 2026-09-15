@@ -333,6 +333,15 @@ def run(persist: bool = True, apply_improvements: bool = True) -> Dict[str, Any]
         except Exception:
             pass
     try:
+        from . import sopqa as _sq
+        g = _sq.gaps(5)
+        if g["questions_total"] >= 5:
+            _chk(checks, "sop_library_answers", "completeness", g["answer_rate"] >= 70, "the SOP library answers the questions the team asks (≥ 70%)",
+                 f"{g['answer_rate']}% of {g['questions_total']} questions answered; open gaps: " + ("; ".join(x["question"][:60] for x in g["gaps"][:3]) or "none"),
+                 "write the missing SOPs (SOP Library → the gap list) or add the section to the skill that should cover it", warn=g["answer_rate"] >= 50)
+    except Exception:
+        pass
+    try:
         from . import compliance_sweep as _cs
         sw = _cs.latest() or _cs.sweep()
         hi = [f for f in sw.get("findings", []) if f.get("severity") == "high"]; med = [f for f in sw.get("findings", []) if f.get("severity") == "medium"]

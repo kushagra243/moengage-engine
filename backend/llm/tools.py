@@ -614,6 +614,28 @@ def refresh_learnings() -> Dict[str, Any]:
     return learnings.refresh()
 
 
+def ask_sops(question: str) -> Dict[str, Any]:
+    """Ask our own SOP library a plain-English question and get a cited answer: process walkthroughs, inter-team dependencies, who owns the next step, who to contact when blocked, limits, exclusions, KPIs. Use this before describing any internal process — it is grounded in the library, not memory."""
+    from .. import sopqa
+    r = sopqa.ask(question, actor="agent")
+    r.pop("note", None)
+    return r
+
+
+def sop_ownership(sop_id: str) -> Dict[str, Any]:
+    """Who owns each part of one SOP: primary owner, accountable, reviewers, per-step owners, the ten process segments with the engine surface for each, hand-offs between segments, and the escalation ladder with SLAs."""
+    from .. import sop_ownership as own
+    from ..sops import get_sop
+    sop = get_sop(sop_id)
+    return own.walkthrough(sop) if sop else {"error": f"unknown SOP {sop_id}", "available": "use list_sops"}
+
+
+def sop_knowledge_gaps(limit: int = 15) -> Dict[str, Any]:
+    """Questions the SOP library could not answer — the queue of SOPs worth writing, with how often each was asked."""
+    from .. import sopqa
+    return sopqa.gaps(limit)
+
+
 def sop_india_review(sop_id: Optional[str] = None) -> Dict[str, Any]:
     """India-fit review of SOPs against our own skills (ASCI VDA disclaimer and forbidden words, TDS/tax framing, derivatives education-only posture, DLT/WhatsApp windows, DND, Hinglish for mass cohorts, salary-week timing, no onboarding bonuses): score, flags with fixes, missing India SOPs."""
     from .. import sop_india
@@ -946,6 +968,9 @@ TOOL_SCHEMAS: List[Dict[str, Any]] = [
     _fn("signal_fires", "Ledger of business events fired by the Signal Bridge.", {"limit": {"type": "integer"}}),
     _fn("compliance_sweep", "Lint every live campaign's copy against the India rules; findings with fixes.", {"force": {"type": "boolean"}}),
     _fn("refresh_learnings", "Recompile the our-learnings skill from our own readouts and reviews.", {}),
+    _fn("ask_sops", "Ask the SOP library a plain-English question; returns a cited answer from our own SOPs (process, ownership, escalation, limits).", {"question": STR}, ["question"]),
+    _fn("sop_ownership", "Owners, hand-offs, process segments and the escalation ladder for one SOP.", {"sop_id": STR}, ["sop_id"]),
+    _fn("sop_knowledge_gaps", "Questions the SOP library could not answer — SOPs worth writing.", {"limit": {"type": "integer"}}),
     _fn("sop_india_review", "India-fit review of SOPs by our compliance/copy/calendar skills: scores, flags, fixes, missing India SOPs.", {"sop_id": STR}),
     _fn("sop_india_fix", "Apply the deterministic India fixes to one SOP as a new version.", {"sop_id": STR}, ["sop_id"]),
     _fn("workspace_analysis", "Complete MoEngage programme analysis with the analyst narrative and ICE-ranked actions. Start here for programme-level questions.", {"force": {"type": "boolean"}}),
@@ -995,5 +1020,5 @@ TOOLS: Dict[str, Callable[..., Dict[str, Any]]] = {
     "north_star": _safe(north_star), "set_north_star": _safe(set_north_star), "comms_limits": _safe(comms_limits), "set_comms_limits": _safe(set_comms_limits), "peace_index": _safe(peace_index),
     "guardrail_monitor": _safe(guardrail_monitor), "write_flight_plan": _safe(write_flight_plan), "flight_plans": _safe(flight_plans),
     "segment_study": _safe(segment_study), "define_nomenclature": _safe(define_nomenclature), "list_sops": _safe(list_sops), "sop_detail": _safe(sop_detail), "define_sop": _safe(define_sop), "run_sop": _safe(run_sop), "sop_runs": _safe(sop_runs), "channel_matrix": _safe(channel_matrix),
-    "competitor_intel": _safe(competitor_intel), "competitor_benchmarks": _safe(competitor_benchmarks), "competitor_campaigns": _safe(competitor_campaigns), "onchain_vs_cex": _safe(onchain_vs_cex), "agent_roster": _safe(agent_roster), "council_review": _safe(council_review), "research_radar": _safe(research_radar), "propose_skill_update": _safe(propose_skill_update), "signal_catalog": _safe(signal_catalog), "propose_signal_rule": _safe(propose_signal_rule), "signal_fires": _safe(signal_fires), "compliance_sweep": _safe(compliance_sweep), "refresh_learnings": _safe(refresh_learnings), "sop_india_review": _safe(sop_india_review), "sop_india_fix": _safe(sop_india_fix), "workspace_analysis": _safe(workspace_analysis), "qa_report": _safe(qa_report), "verify_claims": _safe(verify_claims), "structural_audit": _safe(structural_audit), "market_moving_news": _safe(market_moving_news), "money_flow": _safe(money_flow), "market_flash": _safe(market_flash), "campaign_from_alert": _safe(campaign_from_alert), "competitor_dossier": _safe(competitor_dossier), "pair_battle": _safe(pair_battle), "web3_trending": _safe(web3_trending), "product_cohorts": _safe(product_cohorts), "announcement_lenses": _safe(announcement_lenses), "request_data": _safe(request_data), "data_requests": _safe(data_requests),
+    "competitor_intel": _safe(competitor_intel), "competitor_benchmarks": _safe(competitor_benchmarks), "competitor_campaigns": _safe(competitor_campaigns), "onchain_vs_cex": _safe(onchain_vs_cex), "agent_roster": _safe(agent_roster), "council_review": _safe(council_review), "research_radar": _safe(research_radar), "propose_skill_update": _safe(propose_skill_update), "signal_catalog": _safe(signal_catalog), "propose_signal_rule": _safe(propose_signal_rule), "signal_fires": _safe(signal_fires), "compliance_sweep": _safe(compliance_sweep), "refresh_learnings": _safe(refresh_learnings), "ask_sops": _safe(ask_sops), "sop_ownership": _safe(sop_ownership), "sop_knowledge_gaps": _safe(sop_knowledge_gaps), "sop_india_review": _safe(sop_india_review), "sop_india_fix": _safe(sop_india_fix), "workspace_analysis": _safe(workspace_analysis), "qa_report": _safe(qa_report), "verify_claims": _safe(verify_claims), "structural_audit": _safe(structural_audit), "market_moving_news": _safe(market_moving_news), "money_flow": _safe(money_flow), "market_flash": _safe(market_flash), "campaign_from_alert": _safe(campaign_from_alert), "competitor_dossier": _safe(competitor_dossier), "pair_battle": _safe(pair_battle), "web3_trending": _safe(web3_trending), "product_cohorts": _safe(product_cohorts), "announcement_lenses": _safe(announcement_lenses), "request_data": _safe(request_data), "data_requests": _safe(data_requests),
 }

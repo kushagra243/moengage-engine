@@ -28,6 +28,14 @@ Source: *BRD: Market Alerts 2.0 — Automated Market Alerts via Push Notificatio
 ## Assumptions the engine made (the BRD is silent)
 Z threshold 2.0 (breach 4.0) · Z on the latest candle return against the previous 168 hourly / 288 five-minute / 90 daily returns · PnL breach is 10 percentage points from the last alert on the same position, any day · PnL before Price Movement, Price Trending before Volume Trending · ETH breach $400 · ATH/ATL cap is 2 days per token per ISO week across the cohort · Volume audience Futures|Options · US Futures ranks right after crypto futures · cross-sell x = 5% over 24h · one alert per category per run · quiet hours 22:00–08:00 IST · Discovery and Cross-sell pause in capitulation or high-volatility-down regimes · 20% holdout. All are settings in `ma2_config_json` and shown in the tab. Say which assumption you relied on.
 
+## Discovery experiment — live without a cohort
+Position PnL and relevant-token alerts need the cohort file. Discovery does not, so it ships first as its own experiment.
+- **Signals**: large trades (whale module feed, else a labelled large-trade burst proxy from 5-minute candles), most traded today, BTC/ETH round-number milestones, an unusual BTC/ETH move, 1-year high or low.
+- **Delivery**: the engine fires the `MA2_Discovery` business event; **MoEngage chooses the audience and enforces the per-user cap**. The engine caps per signal, per token per day, and across the platform, and holds quiet hours and the stress pause. This is the one deliberate departure from BRD section 6, forced by having no user ids.
+- **Launch** (`market_alerts_launch_discovery`) queues two approvals: the MoEngage business-event push campaign (control group 20%, TTL 4h, liquidated-14d and loss-dormant suppressed) which on approval creates the draft **and registers the live experiment**, and the engine's permission to fire.
+- **Whale feed**: `POST /api/alerts2/whales` with `{"whales": [{"token","product","side","size_usd","ts"}]}`. Wallet addresses and every other field are dropped at the door. Trades age out after `whale_feed_ttl_min`.
+- **Read it** as lift over the campaign control group, not before-and-after.
+
 ## Process
 1. **Cohort.** The data team uploads JSON or CSV with opaque MoEngage customer ids and exposure: products, positions (with the app's PnL where possible), spot holdings with AUC, watchlist, traded tokens, futures-screen views, profitable trades, flags. Names, emails, phones, PAN, Aadhaar, device or bank ids reject the whole file. Template: `GET /api/alerts2/cohort/sample`.
 2. **Dry run.** Always allowed. Shows would-send per theme, holdout, suppression reasons and signals. Nothing sends, nothing is written to the cap ledger.

@@ -162,7 +162,7 @@ JOBS: List[Dict[str, Any]] = [
     {"name": "prices", "minutes": 1, "fn": _j_prices, "feeds": "Brain Lab prices · movers · OI · funding (real time)"},
     {"name": "market_context", "minutes": 10, "fn": _j_market_context, "feeds": "Brain Lab · Brain · signals (full picture incl. news, listings, competitors)"},
     {"name": "signals", "minutes": 5, "fn": _j_signals, "feeds": "Signal Bridge → MoEngage business events"},
-    {"name": "market_alerts", "minutes": 15, "fn": _j_market_alerts, "feeds": "Market Alerts 2.0 live pilot (runs only while a pilot is approved and the kill switch is off)"},
+    {"name": "market_alerts", "minutes": 15, "fn": _j_market_alerts, "feeds": "Market Alerts 2.0: the per-user pilot and the discovery experiment, each only while approved"},
     {"name": "benchmarks", "minutes": 15, "fn": _j_benchmarks, "feeds": "Brain Lab → Comparison"},
     {"name": "campaign_intel", "minutes": 15, "fn": _j_campaign_intel, "feeds": "Brain Lab → Competitors (their campaigns)"},
     {"name": "onchain_cex", "minutes": 15, "fn": _j_onchain_cex, "feeds": "Brain Lab → On-chain vs CEX"},

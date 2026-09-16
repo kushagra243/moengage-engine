@@ -68,7 +68,7 @@ if _migrated:
 register_executors()
 from . import devagent as _devagent
 _devagent.register()
-for _mod in ("signals", "research", "sop_improve", "sop_requests", "alerts2.service"):     # approval executors: signal_rule, skill_update, sop_change, sop_new, ma2_pilot
+for _mod in ("signals", "research", "sop_improve", "sop_requests", "alerts2.service", "alerts2.discovery"):     # approval executors: signal_rule, skill_update, sop_change, sop_new, ma2_pilot, ma2_discovery
     try:
         __import__("importlib").import_module(f"backend.{_mod}").register()
     except Exception as _e:
@@ -1642,6 +1642,68 @@ class Ma2KillPayload(BaseModel):
 
 class Ma2TemplatesPayload(BaseModel):
     templates: Dict[str, Dict[str, str]]
+
+
+class Ma2DiscoveryPayload(BaseModel):
+    name: str = ""
+    days: int = 14
+    signals: Optional[List[str]] = None
+    audience: str = ""
+    kpi: str = ""
+    note: str = ""
+
+class Ma2LaunchPayload(BaseModel):
+    audience: str = ""
+    days: int = 14
+    signals: Optional[List[str]] = None
+    control_pct: int = 20
+    kpi: str = "sessions_per_week"
+
+class Ma2WhalesPayload(BaseModel):
+    whales: List[Dict[str, Any]]
+
+
+@app.get("/api/alerts2/discovery")
+def alerts2_discovery_status():
+    from .alerts2 import discovery
+    return discovery.status()
+
+
+@app.post("/api/alerts2/discovery/run")
+def alerts2_discovery_run(payload: Ma2RunPayload, request: Request):
+    from .alerts2 import discovery
+    if payload.mode not in ("dry_run", "live"):
+        raise HTTPException(400, "mode must be dry_run or live")
+    r = discovery.run(payload.mode, actor=request_actor(request))
+    if not r.get("ok"):
+        raise HTTPException(400, r.get("error") or "run failed")
+    return r
+
+
+@app.post("/api/alerts2/discovery/propose")
+def alerts2_discovery_propose(payload: Ma2DiscoveryPayload, request: Request):
+    from .alerts2 import discovery
+    r = discovery.propose(payload.name, payload.days, payload.signals, payload.audience, payload.kpi, payload.note, created_by=request_actor(request))
+    if r.get("error"):
+        raise HTTPException(400, r["error"])
+    return r
+
+
+@app.post("/api/alerts2/discovery/launch")
+def alerts2_discovery_launch(payload: Ma2LaunchPayload, request: Request):
+    """Queue both halves: the MoEngage campaign draft (which registers the live experiment) and the engine's permission to fire."""
+    from .alerts2 import discovery
+    r = discovery.launch(payload.audience, payload.days, payload.signals, payload.control_pct, payload.kpi, created_by=request_actor(request))
+    if r.get("error"):
+        raise HTTPException(400, json.dumps(r)[:400])
+    return r
+
+
+@app.post("/api/alerts2/whales")
+def alerts2_whales(payload: Ma2WhalesPayload, request: Request):
+    """CoinDCX's own whale module posts liquidity-venue trades here. Only token, product, side, size, price and time are kept."""
+    from .alerts2 import discovery
+    return discovery.ingest_whales(payload.whales, actor=request_actor(request))
 
 
 @app.get("/api/alerts2")

@@ -57,6 +57,14 @@ def register_proposed(proposal: Dict[str, Any], source: str) -> Optional[int]:
     return eid
 
 
+def _as_text(v: Any) -> str:
+    """Kill criteria arrive as a list far more often than as a string; SQLite cannot bind a list, and the failure used to
+    be swallowed, so the campaign executed and no experiment was ever registered for it."""
+    if v in (None, ""):
+        return ""
+    return "; ".join(str(x) for x in v) if isinstance(v, (list, tuple)) else str(v)
+
+
 def register_from_proposal(proposal: Dict[str, Any], result: Dict[str, Any], source: str) -> Optional[int]:
     """Called after a create_campaign proposal executes."""
     if proposal.get("kind") != "create_campaign":
@@ -85,7 +93,7 @@ def register_from_proposal(proposal: Dict[str, Any], result: Dict[str, Any], sou
         cur = conn.execute("""INSERT INTO experiments (proposal_id, campaign_name, campaign_id, source, started_on, window_days, primary_kpi, target, guardrail_metric, control_group_pct, kill_criteria, baseline_json)
                               VALUES (?,?,?,?,?,?,?,?,?,?,?,?)""",
                            (proposal["id"], payload.get("name"), campaign_id, source, date.today().isoformat(), int(goal.get("measurement_window_days") or 7), goal.get("primary_kpi"), str(goal.get("target") or ""),
-                            goal.get("guardrail_metric"), float(goal.get("control_group_pct") or 0), goal.get("kill_criteria"), json.dumps(baseline)))
+                            goal.get("guardrail_metric"), float(goal.get("control_group_pct") or 0), _as_text(goal.get("kill_criteria")), json.dumps(baseline)))
         eid = cur.lastrowid
     conn.commit(); conn.close()
     return eid

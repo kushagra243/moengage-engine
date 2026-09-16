@@ -349,3 +349,111 @@ def test_pilot_approval_blocked_by_non_compliant_copy_and_tools_hide_user_rows()
     rules = tools.market_alerts_rules()
     assert rules["assumptions"] and any("Z-score" in a["topic"] for a in rules["assumptions"])
     assert approvals._executors.get("ma2_pilot") and "ma2_pilot" in approvals.KINDS
+
+
+# ── discovery experiment: no per-user data, fires business events ─────────────
+def _disc_ctx():
+    return {"crypto_markets": [{"symbol": "BTC", "price": 78100.0, "vol_24h_usd": 9e9}, {"symbol": "ETH", "price": 3120.0, "vol_24h_usd": 4e9},
+                               {"symbol": "SOL", "price": 160.0, "vol_24h_usd": 2e9}, {"symbol": "HYPE", "price": 40.0, "vol_24h_usd": 1e9}],
+            "crypto": {"regime": {"label": "chop"}}, "hooks": {"regime": "chop"}}
+
+
+def test_large_trade_burst_needs_both_volume_and_trade_size():
+    from backend.alerts2.discovery import large_trade_burst
+    base = [{"o": 100, "c": 100, "v": 1000, "n": 100} for _ in range(50)]
+    assert large_trade_burst(base, 1000, 3.0, 2.0) is None
+    quiet_spike = base + [{"o": 100, "c": 101, "v": 5000, "n": 500}]          # 5x volume but the same average trade size
+    assert large_trade_burst(quiet_spike, 1000, 3.0, 2.0) is None
+    whale = base + [{"o": 100, "c": 103, "v": 5000, "n": 50}]                 # 5x volume on a tenth of the trades
+    b = large_trade_burst(whale, 1000, 3.0, 2.0)
+    assert b and b["vol_x"] >= 5.0 and b["size_x"] >= 10.0 and b["direction"] == "up"
+    assert large_trade_burst(whale, 10 ** 9, 3.0, 2.0) is None, "below the minimum notional"
+    assert large_trade_burst(base[:5], 1000, 3.0, 2.0) is None
+
+
+def test_whale_feed_keeps_only_market_facts_and_ages_out(monkeypatch):
+    import time
+    from backend.alerts2 import discovery
+    r = discovery.ingest_whales([{"token": "eth", "side": "B", "size_usd": 4_000_000, "ts": time.time() * 1000, "users": ["0xabc"], "hash": "0xdead"},
+                                 {"token": "SOL", "side": "sell", "size_usd": 10, "ts": time.time()},
+                                 {"token": "BTC", "side": "sell", "size_usd": 900_000, "ts": time.time() - 7200}], actor="test")
+    assert r["accepted"] == 2 and r["rejected"] == 1
+    feed = discovery._whale_feed()
+    assert [w["token"] for w in feed] == ["ETH"], "the two-hour-old trade is outside the TTL"
+    assert set(feed[0]) == {"token", "product", "side", "size_usd", "price", "ts"} and feed[0]["side"] == "buy"
+    assert "0xabc" not in json.dumps(discovery._whale_feed(all_rows=True)), "wallet addresses never enter the engine"
+
+
+def test_discovery_dry_run_caps_and_live_gate(monkeypatch):
+    from backend.alerts2 import discovery, service
+    from backend.database import set_setting
+    from backend import approvals
+    set_setting("mock_mode", "true")
+    discovery.register()
+    monkeypatch.setattr(discovery.sig_mod, "hl_candles", lambda *a, **k: [])
+    monkeypatch.setattr(discovery.sig_mod, "zscore", lambda *a, **k: None)
+    from backend.market import sources
+    monkeypatch.setattr(sources, "klines", lambda *a, **k: [])
+    now = datetime(2026, 9, 16, 12, 0, tzinfo=IST)
+
+    dry = discovery.run("dry_run", now=now, ctx=_disc_ctx())
+    assert dry["ok"] and dry["would_send"] >= 1
+    assert any(d["signal"] == "most_traded" and d["token"] == "HYPE" for d in dry["summary"]["decisions"]), "majors are excluded from most traded"
+    assert not discovery.run("live", now=now, ctx=_disc_ctx())["ok"], "no approved experiment, no fire"
+
+    p = discovery.propose("disc test", days=7, signals=["most_traded", "milestone", "large_trades"], created_by="test")
+    approvals.approve_and_execute(p["proposal_id"], decided_by="lead")
+    assert discovery.is_live(now)["live"]
+
+    live = discovery.run("live", now=now, ctx=_disc_ctx())
+    assert live["ok"] and live["sent"] >= 1
+    fires = discovery.fires(10)
+    assert fires and all(f["status"] == "recorded_mock" for f in fires)
+    again = discovery.run("live", now=now, ctx=_disc_ctx())
+    assert again["sent"] == 0 and again["summary"]["suppression_reasons"].get("already_sent_today"), "the same signal and token does not repeat in a day"
+
+    quiet = discovery.run("live", now=now.replace(hour=23), ctx=_disc_ctx())
+    assert quiet["sent"] == 0 and quiet["summary"]["quiet_hours"]
+    stress_ctx = {**_disc_ctx(), "crypto": {"regime": {"label": "capitulation"}}}
+    assert discovery.run("live", now=now.replace(hour=14), ctx=stress_ctx)["sent"] == 0
+
+    service.set_kill(True, actor="test")
+    assert not discovery.run("live", now=now, ctx=_disc_ctx())["ok"]
+    service.set_kill(False, actor="test")
+
+
+def test_discovery_launches_a_real_moengage_campaign_and_experiment():
+    from backend.alerts2 import discovery
+    from backend import approvals
+    from backend.llm import tools
+    from backend.moengage.executors import register_all
+    register_all()                                        # the MoEngage executors main.py registers at boot
+    b = discovery.campaign_brief(control_pct=20)
+    check = tools.campaign_brief_check(b["goal"], b["variants"], "push", market_linked=True, ttl_hours=b["ttl_hours"])
+    assert check["ok"], check["problems"]
+    assert b["schedule"]["business_event"] == discovery.EVENT and b["goal"]["control_group_pct"] == 20
+    assert any("liquidat" in e.lower() for e in b["exclusions"])
+
+    r = discovery.launch(days=7, signals=["most_traded"], created_by="test")
+    camp = approvals.get_proposal(r["campaign_proposal_id"])
+    assert camp["kind"] == "create_campaign" and camp["status"] == "pending"
+    assert "{{BusinessEvent.title}}" in json.dumps(camp["payload"]), "copy comes from the event the engine fires"
+    st = discovery.status()
+    assert st["campaign"]["state"] == "pending" and [l["step"] for l in st["launch"]][0].startswith("MoEngage")
+
+    approvals.approve_and_execute(r["campaign_proposal_id"], decided_by="lead")
+    from backend.database import get_db
+    conn = get_db(); row = conn.execute("SELECT id, control_group_pct, primary_kpi FROM experiments WHERE proposal_id=?", (r["campaign_proposal_id"],)).fetchone(); conn.close()
+    assert row and row["control_group_pct"] == 20, "an approved campaign becomes a live experiment with a control group"
+
+
+def test_experiment_registration_survives_list_kill_criteria():
+    """A campaign proposal executed but no experiment appeared: SQLite cannot bind a list, and the error was swallowed."""
+    from backend import experiments
+    from backend.database import get_db
+    p = {"id": 987654, "kind": "create_campaign", "payload": {"name": "KillCriteriaList", "goal": {
+        "primary_kpi": "sessions_per_week", "target": "+0.3", "guardrail_metric": "notification_disable_rate",
+        "control_group_pct": 20, "measurement_window_days": 14, "kill_criteria": ["disable rate > 0.3%", "uninstalls up"]}}}
+    eid = experiments.register_from_proposal(p, {"success": True, "campaign_id": "cmp_1"}, "mock")
+    conn = get_db(); row = conn.execute("SELECT kill_criteria FROM experiments WHERE id=?", (eid,)).fetchone(); conn.close()
+    assert eid and "disable rate" in row["kill_criteria"]

@@ -182,6 +182,19 @@ def _deliver(user_id: str, event: str, attrs: Dict[str, Any], cfg: Dict[str, Any
         return {"status": "failed", "error": redact(str(e))[:200]}
 
 
+def _deliver_business_event(event: str, attrs: Dict[str, Any]) -> Dict[str, Any]:
+    """Discovery alerts have no user id: MoEngage picks the audience from a segment on the business-event campaign."""
+    from ..moengage import MoEngageClient
+    if getattr(MoEngageClient(), "mock_mode", True):
+        return {"status": "recorded_mock"}
+    try:
+        from ..moengage.public_api import PublicAPI
+        PublicAPI().business_event_trigger(event, {k: v for k, v in attrs.items() if v is not None})
+        return {"status": "sent"}
+    except Exception as e:
+        return {"status": "failed", "error": redact(str(e))[:200]}
+
+
 def _attrs(d: Dict[str, Any], key: str, copy: Dict[str, str], run_id: Optional[int]) -> Dict[str, Any]:
     f = d.get("fields") or {}
     return {"ma_category": d["category"], "ma_theme": d["theme"], "ma_alert_type": d["alert_type"], "ma_slot": d.get("slot") or "",
@@ -314,11 +327,13 @@ def run(mode: str = "dry_run", actor: str = "user", now: Optional[datetime] = No
 
 
 def scheduled_tick() -> Dict[str, Any]:
-    """Refresher job: live runs only while a pilot is live; otherwise nothing happens and nothing is fetched."""
+    """Refresher job: the per-user pilot and the discovery experiment run independently, each only while approved."""
+    from . import discovery
+    out: Dict[str, Any] = {"ok": True}
     st = pilot_live()
-    if not st["live"]:
-        return {"ok": True, "skipped": st["why"]}
-    return run("live", actor="scheduler")
+    out["pilot"] = {"skipped": st["why"]} if not st["live"] else run("live", actor="scheduler")
+    out["discovery"] = discovery.scheduled_tick()
+    return out
 
 
 # ── views ─────────────────────────────────────────────────────────────────────

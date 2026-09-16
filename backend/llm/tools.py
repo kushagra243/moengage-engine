@@ -660,6 +660,34 @@ def market_alerts_dry_run() -> Dict[str, Any]:
     return _ma2_compact(r)
 
 
+def market_alerts_discovery(dry_run: bool = False) -> Dict[str, Any]:
+    """The discovery experiment: market-level alerts that need no per-user data (large trades/whale, most traded, BTC/ETH milestones, unusual major moves, 1-year highs). Shows whether it is live, today's fires against the caps, the whale source and the MoEngage setup; dry_run=true also detects what would fire right now without sending."""
+    from ..alerts2 import discovery
+    st = discovery.status()
+    out = {k: st[k] for k in ("live", "why_not_live", "experiment", "today", "caps", "whale_source", "event", "setup")}
+    out["signals"] = {k: v["label"] for k, v in st["signals"].items()}
+    out["recent_fires"] = [{k: f[k] for k in ("created_at", "signal", "token", "direction", "title", "status")} for f in st["fires"][:8]]
+    if dry_run:
+        r = discovery.run("dry_run", actor="agent")
+        s = r.get("summary") or {}
+        out["dry_run"] = {"detected": r.get("detected"), "would_send": r.get("would_send"), "suppressed": r.get("suppressed"), "by_signal": s.get("by_signal"),
+                          "suppression_reasons": s.get("suppression_reasons"), "regime": s.get("regime"),
+                          "decisions": [{k: d.get(k) for k in ("signal", "token", "direction", "decision", "reason", "title", "body", "source")} for d in (s.get("decisions") or [])[:10]]}
+    return out
+
+
+def market_alerts_propose_discovery(name: str = "", days: int = 14, signals: Optional[List[str]] = None, audience: str = "", kpi: str = "", note: str = "") -> Dict[str, Any]:
+    """Queue the discovery alerts experiment for approval (kind ma2_discovery). Market-level only, no user data, no cohort needed. Nothing fires until a human approves it."""
+    from ..alerts2 import discovery
+    return discovery.propose(name, days, signals, audience, kpi, note, created_by="agent")
+
+
+def market_alerts_launch_discovery(audience: str = "", days: int = 14, signals: Optional[List[str]] = None, control_pct: int = 20, kpi: str = "sessions_per_week") -> Dict[str, Any]:
+    """Launch the discovery alerts experiment: queues the MoEngage business-event push campaign (approving it creates the draft in MoEngage and registers a live experiment with a readout) and the engine's permission to fire the signals. Both need a human approval."""
+    from ..alerts2 import discovery
+    return discovery.launch(audience, days, signals, control_pct, kpi, created_by="agent")
+
+
 def market_alerts_propose_pilot(name: str = "", holdout_pct: Optional[int] = None, days: int = 14, themes: Optional[List[str]] = None, note: str = "") -> Dict[str, Any]:
     """Queue the Market Alerts 2.0 live pilot for the uploaded cohort as an approval (kind ma2_pilot). Nothing sends until a human approves it."""
     from ..alerts2 import service
@@ -1072,6 +1100,11 @@ TOOL_SCHEMAS: List[Dict[str, Any]] = [
     _fn("market_alerts_status", "Market Alerts 2.0 pilot state, cohort mix, today's alerts-per-user from the cap ledger, last run aggregates, copy compliance, MoEngage setup."),
     _fn("market_alerts_rules", "The Market Alerts 2.0 BRD as enforced: thresholds, caps, priorities, themes and the assumptions where the BRD is silent."),
     _fn("market_alerts_dry_run", "Dry-run Market Alerts 2.0 for the pilot cohort against live signals: would-send per theme, holdout, suppression reasons. Sends nothing."),
+    _fn("market_alerts_discovery", "Discovery experiment state: market-level alerts needing no user data, today's fires vs caps, whale source, MoEngage setup; dry_run=true detects what would fire now.", {"dry_run": {"type": "boolean"}}),
+    _fn("market_alerts_propose_discovery", "Queue the discovery alerts experiment for approval. No cohort, no user data; fires MoEngage business events.",
+        {"name": STR, "days": {"type": "integer"}, "signals": {"type": "array", "items": STR}, "audience": STR, "kpi": STR, "note": STR}),
+    _fn("market_alerts_launch_discovery", "Launch the discovery experiment: queues the MoEngage business-event push campaign (draft + live experiment on approval) and the engine's permission to fire.",
+        {"audience": STR, "days": {"type": "integer"}, "signals": {"type": "array", "items": STR}, "control_pct": {"type": "integer"}, "kpi": STR}),
     _fn("market_alerts_propose_pilot", "Queue the Market Alerts 2.0 live pilot for the uploaded cohort as an approval. Nothing sends until a human approves.",
         {"name": STR, "holdout_pct": {"type": "integer"}, "days": {"type": "integer"}, "themes": {"type": "array", "items": STR}, "note": STR}),
     _fn("data_gaps", "What data is missing to run and measure campaigns (events, attributes, cohorts, capabilities) with what each unblocks; sync=true files them as data requests.", {"sync": {"type": "boolean"}, "min_severity": STR}),
@@ -1134,5 +1167,5 @@ TOOLS: Dict[str, Callable[..., Dict[str, Any]]] = {
     "north_star": _safe(north_star), "set_north_star": _safe(set_north_star), "comms_limits": _safe(comms_limits), "set_comms_limits": _safe(set_comms_limits), "peace_index": _safe(peace_index),
     "guardrail_monitor": _safe(guardrail_monitor), "write_flight_plan": _safe(write_flight_plan), "flight_plans": _safe(flight_plans),
     "segment_study": _safe(segment_study), "define_nomenclature": _safe(define_nomenclature), "list_sops": _safe(list_sops), "sop_detail": _safe(sop_detail), "define_sop": _safe(define_sop), "run_sop": _safe(run_sop), "sop_runs": _safe(sop_runs), "channel_matrix": _safe(channel_matrix),
-    "competitor_intel": _safe(competitor_intel), "competitor_benchmarks": _safe(competitor_benchmarks), "competitor_campaigns": _safe(competitor_campaigns), "onchain_vs_cex": _safe(onchain_vs_cex), "agent_roster": _safe(agent_roster), "council_review": _safe(council_review), "research_radar": _safe(research_radar), "propose_skill_update": _safe(propose_skill_update), "signal_catalog": _safe(signal_catalog), "propose_signal_rule": _safe(propose_signal_rule), "signal_fires": _safe(signal_fires), "compliance_sweep": _safe(compliance_sweep), "refresh_learnings": _safe(refresh_learnings), "data_gaps": _safe(data_gaps), "market_alerts_status": _safe(market_alerts_status), "market_alerts_rules": _safe(market_alerts_rules), "market_alerts_dry_run": _safe(market_alerts_dry_run), "market_alerts_propose_pilot": _safe(market_alerts_propose_pilot), "sop_catalog": _safe(sop_catalog), "sop_teams": _safe(sop_teams), "request_sop": _safe(request_sop), "draft_sop": _safe(draft_sop), "sop_requests": _safe(sop_requests), "sop_improvements": _safe(sop_improvements), "propose_sop_change": _safe(propose_sop_change), "ask_sops": _safe(ask_sops), "sop_ownership": _safe(sop_ownership), "sop_knowledge_gaps": _safe(sop_knowledge_gaps), "sop_india_review": _safe(sop_india_review), "sop_india_fix": _safe(sop_india_fix), "workspace_analysis": _safe(workspace_analysis), "qa_report": _safe(qa_report), "verify_claims": _safe(verify_claims), "structural_audit": _safe(structural_audit), "market_moving_news": _safe(market_moving_news), "money_flow": _safe(money_flow), "market_flash": _safe(market_flash), "campaign_from_alert": _safe(campaign_from_alert), "competitor_dossier": _safe(competitor_dossier), "pair_battle": _safe(pair_battle), "web3_trending": _safe(web3_trending), "product_cohorts": _safe(product_cohorts), "announcement_lenses": _safe(announcement_lenses), "request_data": _safe(request_data), "data_requests": _safe(data_requests),
+    "competitor_intel": _safe(competitor_intel), "competitor_benchmarks": _safe(competitor_benchmarks), "competitor_campaigns": _safe(competitor_campaigns), "onchain_vs_cex": _safe(onchain_vs_cex), "agent_roster": _safe(agent_roster), "council_review": _safe(council_review), "research_radar": _safe(research_radar), "propose_skill_update": _safe(propose_skill_update), "signal_catalog": _safe(signal_catalog), "propose_signal_rule": _safe(propose_signal_rule), "signal_fires": _safe(signal_fires), "compliance_sweep": _safe(compliance_sweep), "refresh_learnings": _safe(refresh_learnings), "data_gaps": _safe(data_gaps), "market_alerts_status": _safe(market_alerts_status), "market_alerts_rules": _safe(market_alerts_rules), "market_alerts_dry_run": _safe(market_alerts_dry_run), "market_alerts_propose_pilot": _safe(market_alerts_propose_pilot), "market_alerts_discovery": _safe(market_alerts_discovery), "market_alerts_propose_discovery": _safe(market_alerts_propose_discovery), "market_alerts_launch_discovery": _safe(market_alerts_launch_discovery), "sop_catalog": _safe(sop_catalog), "sop_teams": _safe(sop_teams), "request_sop": _safe(request_sop), "draft_sop": _safe(draft_sop), "sop_requests": _safe(sop_requests), "sop_improvements": _safe(sop_improvements), "propose_sop_change": _safe(propose_sop_change), "ask_sops": _safe(ask_sops), "sop_ownership": _safe(sop_ownership), "sop_knowledge_gaps": _safe(sop_knowledge_gaps), "sop_india_review": _safe(sop_india_review), "sop_india_fix": _safe(sop_india_fix), "workspace_analysis": _safe(workspace_analysis), "qa_report": _safe(qa_report), "verify_claims": _safe(verify_claims), "structural_audit": _safe(structural_audit), "market_moving_news": _safe(market_moving_news), "money_flow": _safe(money_flow), "market_flash": _safe(market_flash), "campaign_from_alert": _safe(campaign_from_alert), "competitor_dossier": _safe(competitor_dossier), "pair_battle": _safe(pair_battle), "web3_trending": _safe(web3_trending), "product_cohorts": _safe(product_cohorts), "announcement_lenses": _safe(announcement_lenses), "request_data": _safe(request_data), "data_requests": _safe(data_requests),
 }

@@ -41,6 +41,18 @@ DEFAULTS: Dict[str, Any] = {
     "product_order": ["futures", "us_futures", "options", "spot"],    # BRD: Futures > Options > Spot
     "relation_order": ["active", "traded", "watchlist", "none"],      # BRD: Active token/position first, then traded/watchlisted
     "theme_order": {"relevance": ["pnl", "price_movement"], "discovery": ["price_trending", "volume_trending"]},
+    # ── Discovery experiment (market-level, no per-user data) ─────────────────
+    "discovery_daily_cap": 3,                  # fires per day across the platform; MoEngage holds the per-user cap
+    "discovery_signal_caps": {"large_trades": 2, "most_traded": 1, "milestone": 2, "btc_move": 2, "ath_atl": 2},
+    "discovery_order": ["large_trades", "milestone", "btc_move", "ath_atl", "most_traded"],
+    "discovery_scan_tokens": 25,               # tokens scanned for large-trade bursts, by 24h volume
+    "discovery_ath_tokens": 12,
+    "discovery_move_tokens": ["BTC", "ETH"],
+    "whale_feed_ttl_min": 60,                  # how long a posted whale trade stays eligible
+    "whale_feed_min_usd": 250000.0,            # smallest trade the feed accepts
+    "large_trade_min_usd": 2000000.0,          # a 5-minute candle must move at least this much notional
+    "large_trade_vol_multiple": 3.0,           # …and be this far above its own median
+    "large_trade_size_multiple": 2.0,          # …with an average trade size this far above its median
     # ── Engine guardrails (ours, not the BRD's) ───────────────────────────────
     "holdout_pct": 20,
     "quiet_start": "22:00", "quiet_end": "08:00",   # IST; push outside 08:00–22:00 is DND for Indian users
@@ -86,6 +98,7 @@ THEMES: Dict[str, Dict[str, Any]] = {
     "referral": {"category": "mot", "label": "Referral moment of truth", "brd": "5.2", "audience": ["futures", "us_futures", "options", "spot"], "landing": "referral_page", "event": "MOT_Referral", "extra": None},
 }
 
+DISCOVERY_TEMPLATES = {"large_trades": ("whale:", "burst:"), "most_traded": ("most_traded:",), "milestone": ("milestone:",), "btc_move": ("market_move:",), "ath_atl": ("ath:", "atl:")}
 THEME_TEMPLATES = {"pnl": ("pnl:",), "price_movement": ("price_movement:",), "price_trending": ("ath:", "atl:", "milestone:"),
                    "volume_trending": ("most_traded:", "whale:"), "cross_sell": ("cross_sell:",), "referral": ("referral:",)}
 
@@ -102,6 +115,10 @@ DEFAULT_TEMPLATES: Dict[str, Dict[str, str]] = {
     "most_traded:any": {"title": "Most traded today: {token}", "body": "{token} leads global {product_label} volume today. See the market."},
     "whale:buy": {"title": "Large buying in {token}", "body": "A large buy of about {size} was recorded in {token}. See the market."},
     "whale:sell": {"title": "Large selling in {token}", "body": "A large sell of about {size} was recorded in {token}. See the market."},
+    "burst:up": {"title": "Unusual trading activity in {token}", "body": "About {size} traded in {token} in five minutes, well above its usual. See the market."},
+    "burst:down": {"title": "Unusual trading activity in {token}", "body": "About {size} traded in {token} in five minutes, well above its usual. See the market."},
+    "market_move:up": {"title": "{token} is up {move_abs}%", "body": "An unusual move for {token} against its own recent range. See the chart or set a price alert."},
+    "market_move:down": {"title": "{token} is down {move_abs}%", "body": "An unusual move for {token} against its own recent range. See the chart or set a price alert."},
     "cross_sell:up": {"title": "Your {token} holding is up {move_abs}%", "body": "Futures can be used to trade or hedge {token} price moves. Learn how it works and the risks first."},
     "cross_sell:down": {"title": "Your {token} holding is down {move_abs}%", "body": "Learn how futures can be used to hedge a spot holding, and the risks involved."},
     "referral:any": {"title": "Know someone who trades?", "body": "Invite them to CoinDCX from your referral page."},

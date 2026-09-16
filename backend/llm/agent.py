@@ -24,7 +24,7 @@ TOOL_OUTPUT_CHARS = 16000          # hard ceiling; the effective budget comes fr
 # per-tool output budgets (chars). Heavy list tools get less; detail tools a bit more. Anything else uses llm_tool_output_chars.
 TOOL_BUDGETS = {"list_campaigns": 6000, "campaign_taxonomy": 6000, "segment_study": 7000, "anomaly_report": 6000, "market_snapshot": 5000, "market_news": 3500, "market_campaign_hooks": 4500,
                 "growth_hacks": 4000, "list_proposals": 3500, "moengage_api_reference": 5000, "skill": 9000, "moengage_guidance": 4000, "campaign_deep_dive": 7000, "flight_plans": 6000,
-                "sop_detail": 5000, "list_sops": 3000, "experiment_readouts": 4000, "peace_index": 4000, "self_diagnose": 6000, "market_alerts_status": 5000, "market_alerts_rules": 5000, "market_alerts_dry_run": 4500}
+                "sop_detail": 5000, "list_sops": 3000, "experiment_readouts": 4000, "peace_index": 4000, "self_diagnose": 6000, "market_alerts_status": 5000, "market_alerts_rules": 5000, "market_alerts_dry_run": 4500, "market_alerts_discovery": 5000}
 DROP_KEYS = {"_stats_raw", "_provenance", "raw", "trace", "snapshot_json"}
 
 

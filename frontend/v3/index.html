@@ -1,0 +1,26 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>MoEngage Brain</title>
+<link rel="stylesheet" href="/static/fonts/fonts.css">
+<link rel="stylesheet" href="/static/v3/v3.css">
+</head>
+<body>
+<header class="top" role="banner">
+  <div class="brand"><span class="dot" aria-hidden="true"></span>MOENGAGE BRAIN</div>
+  <nav class="nav" id="nav" aria-label="screens"></nav>
+  <div class="meta"><span id="synced">synced --:-- · next 09:00</span> <a class="ops" href="/ops" title="operator console: settings, alerts, playbook governance">ops</a></div>
+</header>
+<main class="col" id="main" aria-live="polite"></main>
+<div class="ask" id="ask" role="search">
+  <span class="k">ASK</span>
+  <div class="field"><input id="ask-in" type="text" aria-label="Ask the brain" autocomplete="off"><span class="ghost" id="ask-ghost">why did winback fall this week</span><span class="cursor" aria-hidden="true"></span></div>
+  <span class="hint">⌘K</span>
+</div>
+<div id="ask-out" class="col askout" hidden></div>
+<div class="toast" id="toast" role="status" hidden></div>
+<script src="/static/v3/v3.js"></script>
+</body>
+</html>

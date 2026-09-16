@@ -1816,6 +1816,51 @@ def alerts2_templates(payload: Ma2TemplatesPayload, request: Request):
     return lint
 
 
+# ── v3 quiet terminal ───────────────────────────────────────────────────────────
+@app.get("/api/v3/today")
+def v3_today():
+    from . import v3
+    return v3.today()
+
+
+@app.post("/api/v3/decisions/{did}/{action}")
+def v3_decide(did: str, action: str, request: Request):
+    from . import v3
+    if action not in ("approve", "defer"):
+        raise HTTPException(400, "action must be approve or defer")
+    return v3.resolve(did, action, actor=request_actor(request))
+
+
+@app.get("/api/v3/rivals")
+def v3_rivals():
+    from . import v3
+    return v3.rivals()
+
+
+@app.get("/api/v3/ideas")
+def v3_ideas():
+    from . import v3
+    return v3.ideas()
+
+
+@app.post("/api/v3/ideas/{raw}/promote")
+def v3_promote(raw: str, request: Request):
+    from . import v3
+    return v3.promote(raw, actor=request_actor(request))
+
+
+@app.get("/api/v3/running")
+def v3_running():
+    from . import v3
+    return v3.running()
+
+
+@app.get("/api/v3/plays")
+def v3_plays(sop: Optional[str] = None):
+    from . import v3
+    return v3.plays(sop)
+
+
 @app.get("/api/brain/compliance")
 def brain_compliance(force: bool = False):
     from . import compliance_sweep
@@ -2000,7 +2045,7 @@ def _index_html(name: str = os.path.join("terminal", "index.html")) -> str:
 async def _no_cache_static(request: Request, call_next):
     """Static assets and the shell are revalidated on every load, so a restart never leaves a browser on an old terminal.js."""
     resp = await call_next(request)
-    if request.url.path.startswith("/static/") or request.url.path in ("/", "/terminal"):
+    if request.url.path.startswith("/static/") or request.url.path in ("/", "/terminal", "/ops"):
         resp.headers["Cache-Control"] = "no-cache, must-revalidate"
     return resp
 
@@ -2010,6 +2055,11 @@ if os.path.exists(FRONTEND_DIR):
 
     @app.get("/", response_class=HTMLResponse)
     def index():
+        """The v3 quiet terminal: five screens, one decision at a time. The operator console lives at /ops."""
+        return HTMLResponse(_index_html(os.path.join("v3", "index.html")), headers={"Content-Security-Policy": CSP})
+
+    @app.get("/ops", response_class=HTMLResponse)
+    def ops_page():
         return HTMLResponse(_index_html(os.path.join("terminal", "index.html")), headers={"Content-Security-Policy": CSP})
 
     @app.get("/terminal", response_class=HTMLResponse)

@@ -345,6 +345,43 @@ def cmd_update(a):
     print(f"[!] the reload did not land within 30s — check data/logs/engine.log; it is still serving {before_run} (boot {before_boot})")
 
 
+def cmd_alerts(a):
+    """Market Alerts 2.0 from the terminal: why nothing reaches MoEngage, what would fire now, and the campaign the agent designed."""
+    from backend.alerts2 import discovery, brief
+    from backend import approvals
+    if a.action == "preflight":
+        st = discovery.status()
+        from backend.alerts2 import service as _svc
+        from backend.database import get_setting as _gs
+        print(f"stage: {st['stage']}   live: {st['live']}   why not: {st['why_not_live'] or '-'}   kill switch: {_svc.kill_switch()}   mock: {_gs('mock_mode', 'true')}")
+        for c in st["preflight"]:
+            mark = "OK " if c["ok"] else ("?? " if c["ok"] is None else "XX ")
+            print(f"{mark}{c['check']}: {c['detail']}" + (f"\n     fix: {c['fix']}" if c.get("fix") else ""))
+        print("\ncohorts:")
+        for c in st["cohorts"]:
+            print(f"  {c['id']:15} {c['segment']:22} {c['event']:24} {'ACTIVE' if c['active'] else ('locked' if c['locked'] else 'ready')}")
+        props = [p for p in approvals.list_proposals(limit=100) if p.get("kind") in ("create_campaign", "ma2_discovery") and "iscovery" in str(p.get("title"))][:8]
+        print("\nproposals:")
+        for p in props or []:
+            print(f"  #{p['id']:<4} {p['kind']:16} {p['status']:9} {str(p.get('title'))[:70]}" + (f"\n        error: {str(p.get('error'))[:200]}" if p.get("error") else ""))
+        if not props:
+            print("  none yet - press Review the launch brief in the Market Alerts tab, or: ./cli.py alerts brief")
+    elif a.action == "detect":
+        r = discovery.run("dry_run", actor="cli")
+        s = r.get("summary") or {}
+        print(f"detected {r.get('detected')}  would fire {r.get('would_send')}  queued {r.get('queued')}  held {r.get('held_quiet_hours')}  suppressed {r.get('suppressed')}  {s.get('suppression_reasons')}")
+        for d in (s.get("decisions") or [])[:15]:
+            print(f"  {d['decision']:14} {d['signal']:14} {d['token']:6} {d.get('reason') or ''}  -> {', '.join(d.get('cohorts') or []) or '-'}   {d['title']}")
+    elif a.action == "brief":
+        b = brief.build(days=0, cohort_ids=(a.cohorts.split(",") if a.cohorts else ["internal"]), with_dry_run=not a.no_dry_run)
+        print(brief.markdown(b))
+    elif a.action == "coverage":
+        c = discovery.coverage(a.day)
+        print(f"day {c['day']}  expected {c['expected']}  recorded {c['recorded']}  missed {c['missed_count']}  outcomes {c.get('outcomes')}")
+        for m in c["missed"][:20]:
+            print("  missed:", m["det_key"])
+
+
 def cmd_audit_log(a):
     from backend.security.audit import tail, verify_chain
     _print({"chain": verify_chain(), "entries": tail(a.n)})
@@ -372,6 +409,8 @@ def main():
     sp.add_parser("housekeeping", help="expire stale ideas/proposals, archive past flight plans").set_defaults(fn=cmd_housekeeping)
     s = sp.add_parser("selfheal", help="engine health: report | rollback (revert last agent merge)"); s.add_argument("action", nargs="?", default="report", choices=["report", "rollback"]); s.add_argument("--tests", action="store_true"); s.set_defaults(fn=cmd_selfheal)
     s = sp.add_parser("audit-log"); s.add_argument("-n", type=int, default=30); s.set_defaults(fn=cmd_audit_log)
+    s = sp.add_parser("alerts", help="Market Alerts 2.0: preflight (why nothing reaches MoEngage) | detect | brief | coverage")
+    s.add_argument("action", choices=["preflight", "detect", "brief", "coverage"]); s.add_argument("--cohorts"); s.add_argument("--day"); s.add_argument("--no-dry-run", action="store_true"); s.set_defaults(fn=cmd_alerts)
     s = sp.add_parser("update", help="pull the latest code and reload the running engine in place (keys and settings untouched)")
     s.add_argument("--branch", default="main"); s.add_argument("--port"); s.add_argument("--no-pull", action="store_true", help="reload what is already checked out")
     s.set_defaults(fn=cmd_update)

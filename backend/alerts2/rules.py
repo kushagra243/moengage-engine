@@ -50,6 +50,15 @@ DEFAULTS: Dict[str, Any] = {
     "discovery_move_tokens": ["BTC", "ETH"],
     "whale_feed_ttl_min": 60,                  # how long a posted whale trade stays eligible
     "whale_feed_min_usd": 250000.0,            # smallest trade the feed accepts
+    "perishable_signals": ["large_trades", "milestone", "btc_move"],   # a price fact is worth sending while it is true
+    "evergreen_signals": ["most_traded", "ath_atl"],                    # these keep: they wait for the day's send window
+    "send_windows": [{"id": "morning", "start": "09:15", "end": "10:30", "why": "first look of the day"},
+                     {"id": "midday", "start": "13:15", "end": "14:30", "why": "lunch break, inside the 10:00-21:00 India window"},
+                     {"id": "evening", "start": "19:30", "end": "21:00", "why": "highest app time in India"}],
+    "queue_ttl_min": {"most_traded": 720, "ath_atl": 720, "large_trades": 120, "milestone": 240, "btc_move": 240},
+    "window_explore_pct": 20,                  # share of days that try a window other than the best one so far
+    "window_min_days": 3,                      # days of stats before a window can be called best
+    "window_default": "evening",
     "large_trade_min_usd": 2000000.0,          # a 5-minute candle must move at least this much notional
     "large_trade_vol_multiple": 3.0,           # …and be this far above its own median
     "large_trade_size_multiple": 2.0,          # …with an average trade size this far above its median

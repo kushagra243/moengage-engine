@@ -21,7 +21,7 @@ from typing import Any, Dict, List, Optional, Tuple
 
 from ..database import get_db, get_setting
 from ..security import audit, redact
-from . import rules, signals as sig_mod
+from . import rules, signals as sig_mod, timing
 
 IST = timezone(timedelta(hours=5, minutes=30))
 STRESS = ("capitulation", "high_volatility_down")
@@ -191,7 +191,7 @@ def is_live(now: Optional[datetime] = None) -> Dict[str, Any]:
         return {"live": False, "why": "no approved discovery experiment — propose one and approve it on the Ideas board", "experiment": None}
     if x.get("ends_at") and now.isoformat() > x["ends_at"]:
         return {"live": False, "why": f"experiment ended {x['ends_at'][:16]}", "experiment": x}
-    return {"live": True, "why": None, "experiment": x}
+    return {"live": True, "why": None, "experiment": x, "standing": not x.get("ends_at")}
 
 
 def _whale_path() -> str:
@@ -291,7 +291,8 @@ def run(mode: str = "dry_run", actor: str = "user", now: Optional[datetime] = No
     cands.sort(key=lambda c: (order.index(c["signal"]) if c["signal"] in order else 99, -abs(float(c.get("value") or 0))))
     decided: List[Dict[str, Any]] = []
     fires: List[tuple] = []
-    sent = supp = failed = 0
+    sent = supp = failed = queued_n = 0
+    queued = timing.queued_keys(now)
     run_id = None
     if mode == "live":
         conn = get_db(); cur = conn.execute("INSERT INTO ma2_runs (started_at, mode, actor) VALUES (?,?,?)", (now.isoformat(), "discovery", actor)); run_id = cur.lastrowid; conn.commit(); conn.close()
@@ -316,8 +317,19 @@ def run(mode: str = "dry_run", actor: str = "user", now: Optional[datetime] = No
         tkey = _template_key(c)
         copy = rules.render(tkey, c.get("fields") or {}, tpls.get(tkey))
         row = {**c, "template": tkey, "title": copy["title"], "body": copy["body"], "reason": reason, "decision": "suppressed" if reason else ("would_send" if mode != "live" else "sent")}
+        evergreen = c["signal"] in set(cfg.get("evergreen_signals") or [])
+        if not reason and evergreen and (c["signal"], c["token"], c["direction"]) in queued:
+            reason = "already_queued_today"
         if reason:
             supp += 1
+        elif evergreen:
+            if mode == "live":
+                q = timing.enqueue({**c, "title": copy["title"], "body": copy["body"]}, now, cfg, actor=actor)
+                row["decision"] = "queued"; row["window"] = q["window"]; row["due_at"] = q["due_at"]; row["held_for_min"] = q["held_for_min"]
+                queued.add((c["signal"], c["token"], c["direction"])); queued_n += 1
+            else:
+                w = timing.window_for_day(now.strftime("%Y-%m-%d"), cfg)["window"]
+                row["decision"] = "would_queue"; row["window"] = w["id"]; row["due_at"] = timing.next_due(now, w).isoformat(); queued_n += 1
         elif mode == "live":
             r = _deliver_business_event(EVENT, {"signal": c["signal"], "token": c["token"], "product": c["product"], "direction": c["direction"],
                                                 "value": c.get("value"), "title": copy["title"], "body": copy["body"], "landing": "token_page",
@@ -334,7 +346,10 @@ def run(mode: str = "dry_run", actor: str = "user", now: Optional[datetime] = No
             _count(counts, c, key)          # a dry run counts against the caps too, so it shows what live would really send
         decided.append(row)
 
-    summary = {"regime": regime, "quiet_hours": quiet, "stress": stress, "by_signal": {k: sum(1 for d in decided if d["signal"] == k and d["decision"] in ("sent", "recorded_mock", "would_send")) for k in SIGNALS},
+    released = release(now, actor, regime) if mode == "live" else {"fired": 0, "expired": 0, "due": len(timing.due_now(now))}
+    sent += released.get("fired", 0)
+    summary = {"regime": regime, "quiet_hours": quiet, "stress": stress, "queued": queued_n, "released": released,
+               "timing": timing.view(cfg, now), "by_signal": {k: sum(1 for d in decided if d["signal"] == k and d["decision"] in ("sent", "recorded_mock", "would_send")) for k in SIGNALS},
                "suppression_reasons": {r: sum(1 for d in decided if d["reason"] == r) for r in {d["reason"] for d in decided if d["reason"]}},
                "detected": len(cands), "decisions": decided[:40], "whale_source": "CoinDCX whale feed" if _whale_feed() else "large-trade burst proxy (public candles)",
                "experiment": x.get("name"), "audience_note": x.get("audience") or "set in MoEngage on the business-event campaign"}
@@ -356,21 +371,79 @@ def run(mode: str = "dry_run", actor: str = "user", now: Optional[datetime] = No
         state_set_many({**updates, **sig_mod.ath_state_updates(ath_tokens, state, now)})
         audit("ma2.discovery_run", {"run_id": run_id, "sent": sent, "failed": failed}, actor=actor)
     return {"ok": True, "run_id": run_id, "mode": mode, "detected": len(cands), ("sent" if mode == "live" else "would_send"): sent,
-            "suppressed": supp, "failed": failed, "ms": ms, "summary": summary, "errors": errors[:8]}
+            "queued": queued_n, "released": released.get("fired", 0), "suppressed": supp, "failed": failed, "ms": ms, "summary": summary, "errors": errors[:8]}
+
+
+def release(now: datetime, actor: str = "engine", regime: Optional[str] = None) -> Dict[str, Any]:
+    """Send what the window lane has been holding, re-checking the gates at the moment of sending, not when it was queued."""
+    from .service import _deliver_business_event
+    cfg = rules.config()
+    expired = timing.expire(now)
+    items = timing.due_now(now)
+    if not items:
+        return {"fired": 0, "expired": expired, "due": 0}
+    if _quiet(now, cfg):
+        return {"fired": 0, "expired": expired, "due": len(items), "held": "quiet_hours"}
+    if regime is None:
+        try:
+            from ..market import context as mctx
+            ctx = mctx._latest(3600) or {}
+            regime = str(((ctx.get("crypto") or {}).get("regime") or {}).get("label") or "unknown")
+        except Exception:
+            regime = "unknown"
+    if regime in STRESS and cfg.get("stress_suppress_discovery", True):
+        for it in items:
+            timing.mark(it["id"], "expired", now)
+        return {"fired": 0, "expired": expired + len(items), "due": len(items), "held": "stress_regime"}
+    counts = fired_today(now)
+    fired = 0
+    for it in items:
+        key = f"{it['signal']}|{it['token']}|{it['direction']}"
+        if counts.get(key, 0) >= 1 or counts.get(it["signal"], 0) >= int((cfg.get("discovery_signal_caps") or {}).get(it["signal"], 1)) or counts.get("_total", 0) >= int(cfg.get("discovery_daily_cap") or 3):
+            timing.mark(it["id"], "expired", now)
+            continue
+        r = _deliver_business_event(EVENT, {"signal": it["signal"], "token": it["token"], "product": it["product"], "direction": it["direction"],
+                                            "value": it["value"], "title": it["title"], "body": it["body"], "landing": "token_page",
+                                            "source": it.get("source"), "window": it["window_id"], "queued_at": it["created_at"]})
+        timing.mark(it["id"], "sent" if r["status"] != "failed" else "failed", now)
+        conn = get_db()
+        conn.execute("""INSERT INTO ma2_discovery_fires (run_id, day_ist, week_ist, signal, token, product, direction, value, title, body, status, error)
+                        VALUES (?,?,?,?,?,?,?,?,?,?,?,?)""",
+                     (None, now.strftime("%Y-%m-%d"), sig_mod.iso_week(now), it["signal"], it["token"], it["product"], it["direction"], it["value"],
+                      it["title"], it["body"], r["status"], r.get("error")))
+        conn.commit(); conn.close()
+        if r["status"] != "failed":
+            fired += 1
+            _count(counts, {"signal": it["signal"]}, key)
+    if fired:
+        timing.count_fire(now.strftime("%Y-%m-%d"), fired)
+        audit("ma2.discovery_released", {"fired": fired, "window": items[0]["window_id"]}, actor=actor)
+    return {"fired": fired, "expired": expired, "due": len(items)}
 
 
 def scheduled_tick() -> Dict[str, Any]:
     st = is_live()
+    now = datetime.now(IST)
     if not st["live"]:
-        return {"ok": True, "skipped": st["why"]}
-    return run("live", actor="scheduler")
+        released = release(now, "scheduler") if timing.due_now(now) else {"fired": 0}
+        return {"ok": True, "skipped": st["why"], "released": released.get("fired", 0)}
+    out = run("live", actor="scheduler")
+    if now.hour == 6 and now.minute < 30:                       # once a day, learn which window earned its clicks
+        try:
+            out["feedback"] = timing.feedback(actor="scheduler")
+        except Exception as e:
+            out["feedback"] = {"ok": False, "why": str(e)[:120]}
+    return out
 
 
 # ── the MoEngage side: a real campaign draft and a real experiment ────────────
-def campaign_brief(audience: str = "", control_pct: int = 20, window_days: int = 14, kpi: str = "sessions_per_week", ttl_hours: int = 4) -> Dict[str, Any]:
-    """The business-event-triggered push campaign this experiment runs on, as a goal brief the engine can propose."""
+def campaign_brief(audience: str = "", control_pct: int = 10, window_days: int = 14, kpi: str = "sessions_per_week", ttl_hours: int = 4, continuous: bool = True) -> Dict[str, Any]:
+    """The business-event-triggered push campaign this experiment runs on, as a goal brief the engine can propose.
+
+    Continuous by default: the whole push-enabled base minus the standing exclusions, with a permanent control group so
+    lift can be read in any week without ever stopping the programme."""
     cfg = rules.config()
-    seg = audience or "ACTIVE_30D"
+    seg = audience or "ALL_PUSH_ENABLED"
     return {
         "name": f"MA2_Discovery_Push_{datetime.now(IST).strftime('%b%y')}",
         "channel": "push",
@@ -385,9 +458,10 @@ def campaign_brief(audience: str = "", control_pct: int = 20, window_days: int =
         "frequency_cap": f"MoEngage per-user cap; engine cap {cfg.get('discovery_daily_cap')}/day across the platform",
         "goal": {
             "transition": "activated_habitual",
+            "continuous": continuous,
             "hypothesis": "Market facts that need no personal data (large trades, the day's most traded token, round-number milestones, unusual major moves, 1-year highs) bring active traders back into the app within the day.",
             "primary_kpi": kpi,
-            "target": "+0.3 sessions per active user per week vs the control group",
+            "target": "+0.3 sessions per active user per week vs the permanent control group" if continuous else "+0.3 sessions per active user per week vs the control group",
             "guardrail_metric": "notification_disable_rate",
             "control_group_pct": int(control_pct),
             "measurement_window_days": int(window_days),
@@ -398,10 +472,10 @@ def campaign_brief(audience: str = "", control_pct: int = 20, window_days: int =
     }
 
 
-def propose_campaign(audience: str = "", control_pct: int = 20, window_days: int = 14, kpi: str = "sessions_per_week", created_by: str = "user") -> Dict[str, Any]:
+def propose_campaign(audience: str = "", control_pct: int = 10, window_days: int = 14, kpi: str = "sessions_per_week", created_by: str = "user", continuous: bool = True) -> Dict[str, Any]:
     """Queue the MoEngage campaign itself: approving it creates the draft in MoEngage and registers a live experiment with a readout."""
     from ..llm import tools as t
-    b = campaign_brief(audience, control_pct, window_days, kpi)
+    b = campaign_brief(audience, control_pct, window_days, kpi, continuous=continuous)
     check = t.campaign_brief_check(b["goal"], b["variants"], b["channel"], market_linked=True, ttl_hours=b["ttl_hours"])
     if not check["ok"]:
         return {"error": "brief rejected", "problems": check["problems"]}
@@ -416,9 +490,10 @@ def propose_campaign(audience: str = "", control_pct: int = 20, window_days: int
             "note": "approve on the Ideas board: MoEngage gets the draft and the engine registers it as a live experiment with a readout"}
 
 
-def launch(audience: str = "", days: int = 14, signals: Optional[List[str]] = None, control_pct: int = 20, kpi: str = "sessions_per_week", created_by: str = "user") -> Dict[str, Any]:
-    """One action, two approvals: the MoEngage campaign draft, and the engine's permission to fire the signals."""
-    camp = propose_campaign(audience, control_pct, days, kpi, created_by=created_by)
+def launch(audience: str = "", days: int = 0, signals: Optional[List[str]] = None, control_pct: int = 10, kpi: str = "sessions_per_week", created_by: str = "user") -> Dict[str, Any]:
+    """One action, two approvals: the MoEngage campaign draft, and the engine's permission to fire the signals.
+    days=0 (the default) means continuous: no end date, a permanent control group, weekly readouts."""
+    camp = propose_campaign(audience, control_pct, days or 28, kpi, created_by=created_by, continuous=days <= 0)
     if camp.get("error"):
         return camp
     exp = propose(name="", days=days, signals=signals, audience=audience, kpi=kpi,
@@ -437,7 +512,7 @@ def propose(name: str = "", days: int = 14, signals: Optional[List[str]] = None,
                "audience": audience or "MoEngage segment on the MA2_Discovery campaign (engine sends no user ids)",
                "kpi": kpi or "sessions and trades within 24h of a fire, treated vs the campaign's control group",
                "caps": {"platform_per_day": cfg.get("discovery_daily_cap"), "per_signal": cfg.get("discovery_signal_caps")}, "note": note[:500]}
-    title = f"Discovery alerts experiment: {payload['name']} · {len(sigs)} signals · {days}d"
+    title = f"Discovery alerts experiment: {payload['name']} · {len(sigs)} signals · " + ("continuous, permanent holdout" if int(days) <= 0 else f"{days}d")
     why = ("Market-level alerts that need no per-user data: large-trade bursts, the day's most traded token, BTC/ETH milestones, unusual major moves and 1-year highs. "
            f"The engine fires the {EVENT} business event; MoEngage chooses the audience and enforces the per-user frequency cap. "
            f"Engine caps: {payload['caps']['platform_per_day']}/day across the platform, per-signal caps, quiet hours, paused in stress regimes. Kill switch stops it at once.")
@@ -448,8 +523,8 @@ def propose(name: str = "", days: int = 14, signals: Optional[List[str]] = None,
 def _validate(payload: Dict[str, Any]) -> None:
     if not [s for s in payload.get("signals") or [] if s in SIGNALS]:
         raise ValueError("pick at least one signal")
-    if not 1 <= int(payload.get("days") or 0) <= 90:
-        raise ValueError("days must be between 1 and 90")
+    if not 0 <= int(payload.get("days") or 0) <= 90:
+        raise ValueError("days must be 0 (continuous) or 1-90")
     blocking = [k for k in rules.lint_all()["blocking"] if k.startswith(("whale:", "most_traded:", "milestone:", "ath:", "atl:", "price_movement:"))]
     if blocking:
         raise ValueError("copy fails compliance for " + ", ".join(blocking) + " — fix the templates first")
@@ -465,7 +540,8 @@ def _execute(payload: Dict[str, Any]) -> Dict[str, Any]:
     from .service import state_set_many, set_kill
     now = datetime.now(IST)
     x = {"name": payload["name"], "signals": payload["signals"], "audience": payload.get("audience"), "kpi": payload.get("kpi"),
-         "started_at": now.isoformat(), "ends_at": (now + timedelta(days=int(payload.get("days") or 14))).isoformat(),
+         "started_at": now.isoformat(), "continuous": int(payload.get("days") or 0) <= 0,
+         "ends_at": None if int(payload.get("days") or 0) <= 0 else (now + timedelta(days=int(payload["days"]))).isoformat(),
          "proposal_id": payload.get("_proposal_id"), "approved_by": payload.get("_approved_by", "user")}
     state_set_many({"discovery": x})
     set_kill(False, actor=x["approved_by"])
@@ -519,6 +595,7 @@ def status(now: Optional[datetime] = None) -> Dict[str, Any]:
             "today": {"total": counts.get("_total", 0), "by_signal": {k: counts.get(k, 0) for k in SIGNALS}},
             "caps": {"platform_per_day": cfg.get("discovery_daily_cap"), "per_signal": cfg.get("discovery_signal_caps"), "quiet": f"{cfg['quiet_start']}–{cfg['quiet_end']} IST"},
             "whale_source": "CoinDCX whale feed (uploaded)" if _whale_feed() else "large-trade burst proxy from public 5-minute candles",
+            "timing": timing.view(cfg, now), "continuous": bool((st["experiment"] or {}).get("continuous")),
             "event": EVENT, "fires": fires(20),
             "setup": [
                 {"step": f"Create the business event {EVENT}", "detail": "Attributes: signal, token, product, direction, value, title, body, landing, source, plus move, price, level, size_usd where they apply."},

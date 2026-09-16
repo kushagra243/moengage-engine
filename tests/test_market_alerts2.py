@@ -434,7 +434,7 @@ def test_discovery_launches_a_real_moengage_campaign_and_experiment():
     assert b["schedule"]["business_event"] == discovery.EVENT and b["goal"]["control_group_pct"] == 20
     assert any("liquidat" in e.lower() for e in b["exclusions"])
 
-    r = discovery.launch(days=7, signals=["most_traded"], created_by="test")
+    r = discovery.launch(days=7, signals=["most_traded"], control_pct=20, created_by="test")
     camp = approvals.get_proposal(r["campaign_proposal_id"])
     assert camp["kind"] == "create_campaign" and camp["status"] == "pending"
     assert "{{BusinessEvent.title}}" in json.dumps(camp["payload"]), "copy comes from the event the engine fires"
@@ -457,3 +457,84 @@ def test_experiment_registration_survives_list_kill_criteria():
     eid = experiments.register_from_proposal(p, {"success": True, "campaign_id": "cmp_1"}, "mock")
     conn = get_db(); row = conn.execute("SELECT kill_criteria FROM experiments WHERE id=?", (eid,)).fetchone(); conn.close()
     assert eid and "disable rate" in row["kill_criteria"]
+
+
+# ── continuous programme and the best-time loop ───────────────────────────────
+def test_send_windows_learn_from_click_rate_and_keep_exploring():
+    from backend.alerts2 import timing, rules
+    from backend.database import get_db
+    cfg = rules.config()
+    timing.init_tables()
+    conn = get_db()
+    conn.execute("DELETE FROM ma2_window_days")
+    for i, (day, win, ctr) in enumerate([("2026-09-01", "morning", 1.0), ("2026-09-02", "morning", 1.2), ("2026-09-03", "morning", 1.1),
+                                         ("2026-09-04", "evening", 3.0), ("2026-09-05", "evening", 3.4), ("2026-09-06", "evening", 3.2)]):
+        conn.execute("INSERT INTO ma2_window_days (day_ist, window_id, chosen_by, fires, delivered, clicks, ctr) VALUES (?,?,?,?,?,?,?)", (day, win, "explore", 2, 1000, int(ctr * 10), ctr))
+    conn.commit(); conn.close()
+    b = timing.best(cfg)
+    assert b["learned"] and b["window"]["id"] == "evening" and "3.2" in b["why"]
+    picks = {timing.window_for_day(f"2026-10-{d:02d}", cfg)["chosen_by"] for d in range(1, 26)}
+    assert "explore" in picks and "best" in picks, "the engine keeps trying other windows instead of locking in"
+    assert timing.window_for_day("2026-10-05", cfg)["window"]["id"] == timing.window_for_day("2026-10-05", cfg)["window"]["id"], "a day keeps its window"
+
+
+def test_best_time_is_not_claimed_before_there_is_evidence():
+    from backend.alerts2 import timing, rules
+    from backend.database import get_db
+    conn = get_db(); conn.execute("DELETE FROM ma2_window_days"); conn.commit(); conn.close()
+    b = timing.best(rules.config())
+    assert not b["learned"] and b["window"]["id"] == "evening" and "no window has" in b["why"]
+
+
+def test_evergreen_signals_wait_for_the_window_and_perishable_ones_do_not(monkeypatch):
+    from backend.alerts2 import discovery, timing, service
+    from backend import approvals
+    from backend.database import get_db, set_setting
+    set_setting("mock_mode", "true")
+    discovery.register()
+    conn = get_db(); conn.execute("DELETE FROM ma2_queue"); conn.execute("DELETE FROM ma2_discovery_fires"); conn.execute("DELETE FROM ma2_window_days"); conn.commit(); conn.close()
+    monkeypatch.setattr(discovery.sig_mod, "hl_candles", lambda *a, **k: [])
+    monkeypatch.setattr(discovery.sig_mod, "zscore", lambda *a, **k: None)
+    from backend.market import sources
+    monkeypatch.setattr(sources, "klines", lambda *a, **k: [])
+    discovery.ingest_whales([{"token": "ETH", "side": "buy", "size_usd": 5_000_000, "ts": __import__("time").time()}], actor="test")
+    p = discovery.propose("continuous", days=0, signals=["most_traded", "large_trades"], created_by="test")
+    approvals.approve_and_execute(p["proposal_id"], decided_by="lead")
+    st = discovery.is_live(datetime(2026, 9, 16, 11, 0, tzinfo=IST))
+    assert st["live"] and st.get("standing") and st["experiment"]["ends_at"] is None, "continuous: no end date"
+
+    morning = datetime(2026, 9, 16, 11, 0, tzinfo=IST)                        # before the evening window
+    r = discovery.run("live", now=morning, ctx=_disc_ctx())
+    assert r["sent"] >= 1 and r["queued"] == 1, "the whale fires now, the most-traded token waits"
+    q = [x for x in timing.queue_view() if x["status"] == "queued"]
+    assert q and q[0]["signal"] == "most_traded" and q[0]["due_at"] > morning.isoformat()
+    assert discovery.release(morning, "test")["fired"] == 0, "nothing is due before the window opens"
+
+    evening = datetime(2026, 9, 16, 19, 45, tzinfo=IST)
+    out = discovery.release(evening, "test")
+    assert out["fired"] == 1
+    assert [f["signal"] for f in discovery.fires(5)][0] == "most_traded"
+    assert [x["status"] for x in timing.queue_view() if x["id"] == q[0]["id"]] == ["sent"]
+
+
+def test_queued_alerts_are_dropped_when_they_go_stale_or_the_market_turns():
+    from backend.alerts2 import discovery, timing
+    from backend.database import get_db
+    conn = get_db(); conn.execute("DELETE FROM ma2_queue"); conn.commit(); conn.close()
+    now = datetime(2026, 9, 16, 11, 0, tzinfo=IST)
+    timing.enqueue({"signal": "ath_atl", "token": "LIT", "direction": "up", "value": 4.0, "title": "t", "body": "b"}, now, __import__("backend.alerts2.rules", fromlist=["rules"]).config(), actor="test")
+    late = now + timedelta(days=2)
+    assert discovery.release(late, "test")["fired"] == 0 and [x["status"] for x in timing.queue_view()][0] == "expired", "a two-day-old 1-year high is not news"
+
+    timing.enqueue({"signal": "ath_atl", "token": "LIT", "direction": "up", "value": 4.0, "title": "t", "body": "b"}, now, __import__("backend.alerts2.rules", fromlist=["rules"]).config(), actor="test")
+    out = discovery.release(datetime(2026, 9, 16, 20, 0, tzinfo=IST), "test", regime="capitulation")
+    assert out["fired"] == 0 and out.get("held") == "stress_regime"
+
+
+def test_continuous_campaign_targets_the_whole_base_with_a_permanent_control():
+    from backend.alerts2 import discovery
+    from backend.llm import tools
+    b = discovery.campaign_brief(continuous=True)
+    assert b["target_segment"] == "ALL_PUSH_ENABLED" and b["goal"]["control_group_pct"] == 10 and b["goal"]["continuous"] is True
+    assert tools.campaign_brief_check(b["goal"], b["variants"], "push", market_linked=True, ttl_hours=b["ttl_hours"])["ok"]
+    assert any("liquidat" in e.lower() for e in b["exclusions"]) and any("dnd" in e.lower() or "unsub" in e.lower() for e in b["exclusions"])

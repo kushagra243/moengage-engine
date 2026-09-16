@@ -666,6 +666,8 @@ def market_alerts_discovery(dry_run: bool = False) -> Dict[str, Any]:
     st = discovery.status()
     out = {k: st[k] for k in ("live", "why_not_live", "experiment", "today", "caps", "whale_source", "event", "setup")}
     out["signals"] = {k: v["label"] for k, v in st["signals"].items()}
+    out["preflight"] = st.get("preflight")
+    out["timing"] = {"today": (st.get("timing") or {}).get("today"), "best": (st.get("timing") or {}).get("best"), "queue": len((st.get("timing") or {}).get("queue") or [])}
     out["recent_fires"] = [{k: f[k] for k in ("created_at", "signal", "token", "direction", "title", "status")} for f in st["fires"][:8]]
     if dry_run:
         r = discovery.run("dry_run", actor="agent")

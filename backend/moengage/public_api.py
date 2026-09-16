@@ -91,7 +91,7 @@ class PublicAPI:
             path = path.replace("{" + k + "}", str(v))
         url = self.host + path
         # core-services campaign APIs reject any body without a caller-supplied request_id
-        if path.startswith("/core-services/") and isinstance(body, dict) and "request_id" not in body:
+        if (path.startswith("/core-services/") or path.startswith("/v5/campaigns")) and isinstance(body, dict) and "request_id" not in body:
             body = {**body, "request_id": str(uuid.uuid4())}
         headers = self._headers(ep)
         if write:

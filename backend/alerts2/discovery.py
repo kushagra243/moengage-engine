@@ -582,6 +582,61 @@ def _campaign_state() -> Dict[str, Any]:
     return {"state": p.get("status"), "detail": detail, "proposal_id": p["id"], "experiment_id": exp_id, "name": (p.get("payload") or {}).get("name")}
 
 
+def preflight() -> List[Dict[str, Any]]:
+    """Why nothing appeared in MoEngage. Every reason a draft or a fire can silently go nowhere, checked one by one."""
+    from ..database import get_setting
+    from ..moengage import MoEngageClient
+    out: List[Dict[str, Any]] = []
+    mock = get_setting("mock_mode", "true").lower() == "true"
+    out.append({"check": "Mode", "ok": not mock, "detail": "mock mode: drafts and fires are simulated and nothing reaches MoEngage" if mock else "live: writes go to MoEngage",
+                "fix": "Engine → Settings → mock_mode = false (and add the API keys) to work against the real workspace" if mock else ""})
+    try:
+        from ..moengage.public_api import PublicAPI
+        api = PublicAPI()
+        has_c = api.has("campaigns")
+    except Exception as e:
+        api, has_c = None, False
+        out.append({"check": "MoEngage API", "ok": False, "detail": f"client error: {redact(str(e))[:120]}", "fix": "check Workspace ID, region and keys in Engine → Settings"})
+    out.append({"check": "Campaigns API key", "ok": bool(has_c), "detail": "present" if has_c else "missing: the draft cannot be created over the API",
+                "fix": "" if has_c else "Engine → Settings → moengage_campaign_key (Campaigns API key from MoEngage → Settings → APIs)"})
+    from ..moengage.executors import _created_by
+    cb = _created_by()
+    out.append({"check": "Creator email", "ok": bool(cb) or mock, "detail": cb or ("not set (only needed once mock mode is off)" if mock else "not set — MoEngage rejects a draft without created_by"),
+                "fix": "" if cb or mock else "Engine → Settings → moengage_created_by = your MoEngage dashboard login email"})
+    ev_ok, ev_detail = None, "cannot be checked in mock mode"
+    ev_fix = f"create {EVENT} in MoEngage → Business Events with the attributes below before going live"
+    if not mock and api:
+        try:
+            r = api.business_events_list()
+            names = json.dumps(r.get("data") or r)
+            ev_ok = EVENT in names
+            ev_detail = f"{EVENT} exists in MoEngage" if ev_ok else f"{EVENT} is not defined in this workspace yet"
+            ev_fix = "" if ev_ok else f"MoEngage → Business Events → create {EVENT} with the attributes listed below, then propose the campaign again"
+        except Exception as e:
+            ev_ok, ev_detail = False, f"could not list business events: {redact(str(e))[:110]}"
+            ev_fix = "the business-events API needs its key; the event can also be created in the dashboard"
+    out.append({"check": "Business event", "ok": ev_ok, "detail": ev_detail, "fix": ev_fix})
+    camp = _campaign_state()
+    ok = camp["state"] == "executed" and not mock
+    detail = {"not proposed": "no campaign proposal exists yet — press Launch", "pending": f"proposal #{camp['proposal_id']} is waiting for approval on the Ideas board",
+              "executed": (f"draft simulated in mock mode (proposal #{camp['proposal_id']}): nothing was created in MoEngage" if mock
+                           else f"draft created in MoEngage (proposal #{camp['proposal_id']})"), "failed": f"proposal #{camp['proposal_id']} failed"}.get(camp["state"], camp["state"])
+    err = ""
+    if camp.get("proposal_id"):
+        try:
+            from .. import approvals
+            pr = approvals.get_proposal(camp["proposal_id"])
+            err = str(pr.get("error") or "")[:300]
+        except Exception:
+            pass
+    out.append({"check": "Campaign draft", "ok": ok, "detail": detail + (f" — {err}" if err else ""),
+                "fix": "" if ok else {"pending": "approve it on the Ideas board", "not proposed": "press Launch below",
+                                      "executed": "switch mock_mode off, then launch again to create the real draft"}.get(camp["state"], "fix the cause above and launch again")})
+    st = is_live()
+    out.append({"check": "Engine firing", "ok": st["live"], "detail": st["why"] or "approved and firing", "fix": "" if st["live"] else "approve the discovery experiment on the Ideas board"})
+    return out
+
+
 def status(now: Optional[datetime] = None) -> Dict[str, Any]:
     now = now or datetime.now(IST)
     st = is_live(now)
@@ -595,7 +650,7 @@ def status(now: Optional[datetime] = None) -> Dict[str, Any]:
             "today": {"total": counts.get("_total", 0), "by_signal": {k: counts.get(k, 0) for k in SIGNALS}},
             "caps": {"platform_per_day": cfg.get("discovery_daily_cap"), "per_signal": cfg.get("discovery_signal_caps"), "quiet": f"{cfg['quiet_start']}–{cfg['quiet_end']} IST"},
             "whale_source": "CoinDCX whale feed (uploaded)" if _whale_feed() else "large-trade burst proxy from public 5-minute candles",
-            "timing": timing.view(cfg, now), "continuous": bool((st["experiment"] or {}).get("continuous")),
+            "timing": timing.view(cfg, now), "continuous": bool((st["experiment"] or {}).get("continuous")), "preflight": preflight(),
             "event": EVENT, "fires": fires(20),
             "setup": [
                 {"step": f"Create the business event {EVENT}", "detail": "Attributes: signal, token, product, direction, value, title, body, landing, source, plus move, price, level, size_usd where they apply."},

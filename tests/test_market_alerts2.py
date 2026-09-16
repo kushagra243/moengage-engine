@@ -538,3 +538,63 @@ def test_continuous_campaign_targets_the_whole_base_with_a_permanent_control():
     assert b["target_segment"] == "ALL_PUSH_ENABLED" and b["goal"]["control_group_pct"] == 10 and b["goal"]["continuous"] is True
     assert tools.campaign_brief_check(b["goal"], b["variants"], "push", market_linked=True, ttl_hours=b["ttl_hours"])["ok"]
     assert any("liquidat" in e.lower() for e in b["exclusions"]) and any("dnd" in e.lower() or "unsub" in e.lower() for e in b["exclusions"])
+
+
+# ── the draft MoEngage actually accepts ───────────────────────────────────────
+def test_campaign_payload_matches_the_documented_v5_schema():
+    """The engine used to post its own brief shape to /v5/campaigns, so no draft ever appeared in MoEngage."""
+    from backend.alerts2 import discovery
+    from backend.moengage.executors import v5_campaign_payload
+    b = discovery.campaign_brief(continuous=True)
+    p = {k: b[k] for k in ("name", "channel", "target_segment", "variants", "schedule", "ttl_hours", "goal", "frequency_cap")}
+    body = v5_campaign_payload(p)
+    assert body["channel"] == "PUSH" and body["campaign_delivery_type"] == "BUSINESS_EVENT_TRIGGERED"
+    assert body["basic_details"]["business_event"] == discovery.EVENT, "the event name belongs in basic_details"
+    push = body["campaign_content"]["content"]["push"]["android"]
+    assert push["template_type"] == "BASIC" and push["basic_details"]["title"] == "{{BusinessEvent.title}}"
+    assert body["segmentation_details"]["is_all_user_campaign"] is True and body["segmentation_details"]["send_campaign_to_opt_out_users"] is False
+    assert body["scheduling_details"]["delivery_type"] == "AT_FIXED_TIME" and body["scheduling_details"]["expiry_time"] > body["scheduling_details"]["start_time"]
+    assert body["control_group_details"] == {"is_campaign_control_group_enabled": True, "campaign_control_group_percentage": 10}
+    assert set(body) <= {"request_id", "channel", "campaign_delivery_type", "created_by", "basic_details", "trigger_condition", "campaign_content",
+                         "segmentation_details", "scheduling_details", "delivery_controls", "advanced", "conversion_goal_details",
+                         "control_group_details", "utm_params", "campaign_audience_limit"}, "no field outside the documented schema"
+
+
+def test_a_named_segment_becomes_a_custom_segment_filter():
+    from backend.alerts2 import discovery
+    from backend.moengage.executors import v5_campaign_payload
+    b = discovery.campaign_brief(audience="ACTIVE_30D")
+    p = {k: b[k] for k in ("name", "channel", "target_segment", "variants", "schedule", "ttl_hours", "goal", "frequency_cap")}
+    seg = v5_campaign_payload(p)["segmentation_details"]
+    assert seg["included_filters"]["filters"] == [{"filter_type": "custom_segments", "name": "ACTIVE_30D"}]
+
+
+def test_live_draft_refuses_without_a_creator_email_and_the_event_name():
+    from backend.moengage import executors
+    from backend.database import set_setting
+    from backend.alerts2 import discovery
+    b = discovery.campaign_brief()
+    p = {k: b[k] for k in ("name", "channel", "target_segment", "variants", "schedule", "ttl_hours", "goal", "frequency_cap")}
+    set_setting("mock_mode", "true")
+    executors._cmp_validate(p)                                     # mock: allowed, nothing leaves the machine
+    set_setting("mock_mode", "false")
+    try:
+        with pytest.raises(ValueError, match="created_by"):
+            executors._cmp_validate(p)
+        set_setting("moengage_created_by", "ops@example.com")
+        executors._cmp_validate(p)
+        bad = {**p, "schedule": {"type": "business_event_triggered"}}
+        with pytest.raises(ValueError, match="business_event"):
+            executors._cmp_validate(bad)
+    finally:
+        set_setting("mock_mode", "true"); set_setting("moengage_created_by", "")
+
+
+def test_preflight_names_every_reason_nothing_reached_moengage():
+    from backend.alerts2 import discovery
+    from backend.database import set_setting
+    set_setting("mock_mode", "true")
+    checks = {c["check"]: c for c in discovery.preflight()}
+    assert set(checks) == {"Mode", "Campaigns API key", "Creator email", "Business event", "Campaign draft", "Engine firing"}
+    assert checks["Mode"]["ok"] is False and "nothing reaches MoEngage" in checks["Mode"]["detail"]
+    assert all(c["ok"] or c["fix"] for c in checks.values()), "anything blocked says how to unblock it"

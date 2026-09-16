@@ -26,6 +26,16 @@ from . import rules, signals as sig_mod, timing, detect
 IST = timezone(timedelta(hours=5, minutes=30))
 STRESS = ("capitulation", "high_volatility_down")
 EVENT = "MA2_Discovery"
+DEFAULT_COHORTS: List[Dict[str, Any]] = [
+    {"id": "internal", "label": "Internal employees (test cohort)", "segment": None, "event": "MA2_Discovery_INTERNAL", "control_pct": 5, "stage": "internal",
+     "signals": ["large_trades", "most_traded", "milestone", "btc_move", "ath_atl", "agent_pick"], "why": "the first and only cohort until the internal stage has run"},
+    {"id": "futures_active", "label": "Futures traders, active 30d", "segment": "FUTURES_ACTIVE_30D", "event": "MA2_Discovery_FUTURES", "control_pct": 10, "stage": "all",
+     "signals": ["large_trades", "most_traded", "milestone", "btc_move", "ath_atl"], "why": "large trades and open-interest stories are futures stories"},
+    {"id": "spot_active", "label": "Spot traders, active 30d", "segment": "SPOT_ACTIVE_30D", "event": "MA2_Discovery_SPOT", "control_pct": 10, "stage": "all",
+     "signals": ["most_traded", "milestone", "btc_move", "ath_atl"], "why": "price facts and milestones; no whale or leverage stories for spot-only users"},
+    {"id": "all", "label": "Whole push-enabled base", "segment": "ALL_PUSH_ENABLED", "event": EVENT, "control_pct": 10, "stage": "all",
+     "signals": ["most_traded", "milestone", "btc_move", "ath_atl"], "why": "the broad base gets the calm facts only"},
+]
 _BAD_TOKENS: Dict[str, float] = {}          # token → retry-after timestamp, for symbols the venue answers 500 to (delisted, renamed)
 
 SIGNALS = {
@@ -34,6 +44,7 @@ SIGNALS = {
     "milestone": {"label": "Round-number milestone", "why": "BTC crossing a $1,000 band or ETH a $200 band", "product": "futures"},
     "btc_move": {"label": "Unusual BTC/ETH move", "why": "an hourly move far outside its own recent range", "product": "futures"},
     "ath_atl": {"label": "1-year high or low", "why": "the price reached its highest or lowest level in a year", "product": "futures"},
+    "agent_pick": {"label": "Agent pick (internal stage)", "why": "the agent's own read of the market picture: funding crowds, OI flushes, listings, rotations — internal cohort only, every line linted", "product": "futures"},
 }
 
 
@@ -149,6 +160,8 @@ def _candidates(cfg: Dict[str, Any], state: Dict[str, Any], ctx: Dict[str, Any],
 
 def _template_key(c: Dict[str, Any]) -> str:
     """Real whale trades say buy or sell; the proxy only knows a burst of size, so it says exactly that."""
+    if c["signal"] == "agent_pick":
+        return "agent"
     if c["signal"] == "large_trades":
         return f"whale:{'buy' if c['direction'] == 'up' else 'sell'}" if c.get("from_feed") else f"burst:{c['direction']}"
     if c["signal"] == "milestone":
@@ -271,8 +284,24 @@ def _whale_feed(all_rows: bool = False) -> List[Dict[str, Any]]:
 
 
 # ── the run ───────────────────────────────────────────────────────────────────
+def _agent_due(now: datetime, cfg: Dict[str, Any]) -> bool:
+    from .service import state_all
+    last = (state_all() or {}).get("agent_last_run")
+    if not last:
+        return True
+    try:
+        return (now - datetime.fromisoformat(last)).total_seconds() >= float(cfg.get("agent_every_min") or 15) * 60
+    except Exception:
+        return True
+
+
+def _mark_agent_ran(now: datetime) -> None:
+    from .service import state_set_many
+    state_set_many({"agent_last_run": now.isoformat()})
+
+
 def _interval_of(c: Dict[str, Any], cfg: Dict[str, Any]) -> float:
-    if c.get("from_feed"):
+    if c.get("from_feed") or c.get("from_agent"):
         return 0.0
     if c["signal"] == "btc_move":
         return float(detect.INTERVAL_S.get((cfg.get("candle") or {}).get("futures", "1h"), 3600))
@@ -315,12 +344,15 @@ def run(mode: str = "dry_run", actor: str = "user", now: Optional[datetime] = No
     from .service import state_all, state_set_many, _deliver_business_event
     t0 = time.time(); init_tables(); detect.init_tables()
     now = now or datetime.now(IST)
-    cfg = rules.config()
     live = is_live(now)
     if mode == "live" and not live["live"]:
         return {"ok": False, "error": f"not live: {live['why']}"}
     x = live["experiment"] or {}
+    stage = x.get("stage") or "internal"                    # no experiment yet → preview the internal stage, which is what launches first
+    cfg = rules.config(stage=stage)
     enabled = set(x.get("signals") or SIGNALS) if mode == "live" else set(SIGNALS)
+    if cfg.get("agent_autonomy"):
+        enabled.add("agent_pick")
     if ctx is None:
         try:
             ctx = mctx.market_context()
@@ -334,6 +366,21 @@ def run(mode: str = "dry_run", actor: str = "user", now: Optional[datetime] = No
         already = len(cands) - len(fresh)
         cands = fresh
     regime = str(((ctx.get("crypto") or {}).get("regime") or {}).get("label") or (ctx.get("hooks") or {}).get("regime") or "unknown")
+    agent_note = None
+    if cfg.get("agent_autonomy") and stage == "internal" and mode == "live" and _agent_due(now, cfg):
+        from . import agent as agent_mod
+        tpls0 = rules.templates()
+        for c in cands:                                                       # give the agent the default copy it may sharpen
+            k0 = _template_key(c); cp0 = rules.render(k0, c.get("fields") or {}, tpls0.get(k0)); c["title"], c["body"] = cp0["title"], cp0["body"]
+        ap = agent_mod.pass_once(cands, ctx, cfg, now)
+        agent_note = ap
+        for c in cands:
+            rw = ap["rewrites"].get(c.get("det_key"))
+            if rw:
+                c["agent_title"], c["agent_body"], c["agent_why"] = rw["title"], rw["body"], rw["why"]
+        picks = detect.record(ap["picks"], now)
+        cands.extend(picks)
+        _mark_agent_ran(now)
     counts = fired_today(now)
     caps = cfg.get("discovery_signal_caps") or {}
     total_cap = int(cfg.get("discovery_daily_cap") or 3)
@@ -342,6 +389,7 @@ def run(mode: str = "dry_run", actor: str = "user", now: Optional[datetime] = No
     tpls = rules.templates()
     perishable = set(cfg.get("perishable_signals") or [])
     evergreen_set = set(cfg.get("evergreen_signals") or [])
+    targets_all = active_cohorts() if mode == "live" else [c for c in cohorts(cfg) if c["stage"] == stage or (stage == "all")]
 
     order = list(cfg.get("discovery_order") or ["large_trades", "milestone", "btc_move", "ath_atl", "most_traded"])
     cands.sort(key=lambda c: (order.index(c["signal"]) if c["signal"] in order else 99, float(c.get("candle_t") or 0), -abs(float(c.get("value") or 0))))
@@ -375,9 +423,12 @@ def run(mode: str = "dry_run", actor: str = "user", now: Optional[datetime] = No
             reason = "signal_daily_cap"
         elif counts.get("_total", 0) >= total_cap:
             reason = "platform_daily_cap"
-        tkey = _template_key(c)
-        copy = rules.render(tkey, c.get("fields") or {}, tpls.get(tkey))
-        row = {**c, "template": tkey, "title": copy["title"], "body": copy["body"], "reason": reason, "decision": "suppressed" if reason else ("would_send" if mode != "live" else "sent")}
+        tkey = _template_key(c) if c["signal"] != "agent_pick" else "agent"
+        copy = {"title": c["title"], "body": c["body"]} if c["signal"] == "agent_pick" else rules.render(tkey, c.get("fields") or {}, tpls.get(tkey))
+        if c.get("agent_title"):
+            copy = {"title": c["agent_title"], "body": c["agent_body"]}
+        row = {**c, "template": tkey, "title": copy["title"], "body": copy["body"], "reason": reason, "decision": "suppressed" if reason else ("would_send" if mode != "live" else "sent"),
+               "by_agent": bool(c.get("agent_title") or c.get("from_agent")), "why": c.get("agent_why") or c.get("why")}
         evergreen = c["signal"] in evergreen_set
         if not reason and (evergreen or quiet) and (c["signal"], c["token"], c["direction"]) in queued:
             reason = "already_queued_today"
@@ -400,11 +451,17 @@ def run(mode: str = "dry_run", actor: str = "user", now: Optional[datetime] = No
             else:
                 held += 1
         elif mode == "live":
-            r = _deliver_business_event(EVENT, {"signal": c["signal"], "token": c["token"], "product": c["product"], "direction": c["direction"],
-                                                "value": c.get("value"), "title": copy["title"], "body": copy["body"], "landing": "token_page",
-                                                "source": c.get("source"), "event_key": c.get("det_key"), "run_id": run_id,
-                                                **{k: v for k, v in (c.get("fields") or {}).items() if k not in ("token", "product")}})
-            row["decision"] = r["status"]
+            attrs = {"signal": c["signal"], "token": c["token"], "product": c["product"], "direction": c["direction"], "value": c.get("value"),
+                     "title": copy["title"], "body": copy["body"], "landing": "token_page", "source": c.get("source"), "event_key": c.get("det_key"), "run_id": run_id,
+                     **{k: v for k, v in (c.get("fields") or {}).items() if k not in ("token", "product")}}
+            targets = route(c, targets_all)
+            if not targets:
+                row["decision"] = "suppressed"; row["reason"] = "no_cohort_takes_this_signal"; supp += 1; outcome(c, "suppressed:no_cohort_takes_this_signal")
+                decided.append(row); continue
+            results = {t["id"]: _send_to_cohort(t, attrs, c.get("det_key") or key) for t in targets}
+            ok = [k for k, r in results.items() if r["status"] != "failed"]
+            r = {"status": (results[ok[0]]["status"] if ok else "failed"), "error": "; ".join(f"{k}: {v.get('error')}" for k, v in results.items() if v["status"] == "failed") or None}
+            row["decision"] = r["status"]; row["cohorts"] = ok
             _write_fire(run_id, now, c, copy, r["status"], r.get("error"))
             if r["status"] == "failed":
                 failed += 1; row["error"] = r.get("error"); outcome(c, "failed")
@@ -413,11 +470,13 @@ def run(mode: str = "dry_run", actor: str = "user", now: Optional[datetime] = No
         else:
             sent += 1
             _count(counts, c, key)          # a dry run counts against the caps too, so it shows what live would really send
+            row["cohorts"] = [t["id"] for t in route(c, targets_all)]
         decided.append(row)
 
     released = release(now, actor, regime) if mode == "live" else {"fired": 0, "expired": 0, "due": len(timing.due_now(now))}
     sent += released.get("fired", 0)
-    summary = {"regime": regime, "quiet_hours": quiet, "stress": stress, "queued": queued_n, "held_quiet_hours": held, "already_recorded": already, "released": released,
+    summary = {"regime": regime, "stage": stage, "profile": cfg.get("stage_profile"), "agent": ({k: agent_note[k] for k in ("note", "model", "rejected")} if agent_note else None),
+               "quiet_hours": quiet, "stress": stress, "queued": queued_n, "held_quiet_hours": held, "already_recorded": already, "released": released,
                "timing": timing.view(cfg, now), "by_signal": {k: sum(1 for d in decided if d["signal"] == k and d["decision"] in ("sent", "recorded_mock", "would_send")) for k in SIGNALS},
                "suppression_reasons": {r: sum(1 for d in decided if d["reason"] == r) for r in {d["reason"] for d in decided if d["reason"]}},
                "detected": len(cands), "decisions": decided[:40], "whale_source": "CoinDCX whale feed" if _whale_feed() else "large-trade burst proxy (public candles)",
@@ -443,7 +502,7 @@ def run(mode: str = "dry_run", actor: str = "user", now: Optional[datetime] = No
 def release(now: datetime, actor: str = "engine", regime: Optional[str] = None) -> Dict[str, Any]:
     """Send what the window lane has been holding, re-checking the gates at the moment of sending, not when it was queued."""
     from .service import _deliver_business_event
-    cfg = rules.config()
+    cfg = rules.config(stage=(experiment() or {}).get("stage") or "internal")
     expired = timing.expire(now)
     items = timing.due_now(now)
     if not items:
@@ -479,9 +538,13 @@ def release(now: datetime, actor: str = "engine", regime: Optional[str] = None) 
             if (it["direction"] == "up" and px < level) or (it["direction"] == "down" and px > level):
                 timing.mark(it["id"], "stale", now)              # the fact stopped being true while it waited
                 continue
-        r = _deliver_business_event(EVENT, {"signal": it["signal"], "token": it["token"], "product": it["product"], "direction": it["direction"],
-                                            "value": it["value"], "title": it["title"], "body": it["body"], "landing": "token_page",
-                                            "source": it.get("source"), "window": it["window_id"], "queued_at": it["created_at"]})
+        targets = route(it, active_cohorts())
+        if not targets:
+            timing.mark(it["id"], "expired", now); continue
+        results = [_send_to_cohort(t, {"signal": it["signal"], "token": it["token"], "product": it["product"], "direction": it["direction"],
+                                       "value": it["value"], "title": it["title"], "body": it["body"], "landing": "token_page",
+                                       "source": it.get("source"), "window": it["window_id"], "queued_at": it["created_at"]}, f"q{it['id']}|{it['signal']}|{it['token']}") for t in targets]
+        r = next((x for x in results if x["status"] != "failed"), results[0])
         timing.mark(it["id"], "sent" if r["status"] != "failed" else "failed", now)
         conn = get_db()
         conn.execute("""INSERT INTO ma2_discovery_fires (run_id, day_ist, week_ist, signal, token, product, direction, value, title, body, status, error, created_at)
@@ -498,9 +561,26 @@ def release(now: datetime, actor: str = "engine", regime: Optional[str] = None) 
     return {"fired": fired, "expired": expired, "due": len(items)}
 
 
+HEARTBEAT_EVENT = "MA2_Engine_Heartbeat"
+
+
+def heartbeat(now: datetime) -> Dict[str, Any]:
+    """One business event per tick while live. A MoEngage flow that waits for the next heartbeat and pages the ops cohort
+    when none arrives in 30 minutes is the dead-man's switch: MoEngage watches the engine, not the other way round."""
+    from .service import _deliver_business_event, state_set_many
+    r = _deliver_business_event(HEARTBEAT_EVENT, {"at": now.isoformat(), "engine": "moengage-engine", "cadence_min": 5})
+    state_set_many({"heartbeat_last": now.isoformat(), "heartbeat_status": r["status"]})
+    return r
+
+
 def scheduled_tick() -> Dict[str, Any]:
     st = is_live()
     now = datetime.now(IST)
+    if st["live"]:
+        try:
+            heartbeat(now)
+        except Exception:
+            pass
     if not st["live"]:
         released = release(now, "scheduler") if timing.due_now(now) else {"fired": 0}
         return {"ok": True, "skipped": st["why"], "released": released.get("fired", 0)}
@@ -514,28 +594,39 @@ def scheduled_tick() -> Dict[str, Any]:
 
 
 # ── the MoEngage side: a real campaign draft and a real experiment ────────────
-def campaign_brief(audience: str = "", control_pct: int = 10, window_days: int = 14, kpi: str = "sessions_per_week", ttl_hours: int = 4, continuous: bool = True) -> Dict[str, Any]:
+def campaign_brief(audience: str = "", control_pct: int = 10, window_days: int = 14, kpi: str = "sessions_per_week", ttl_hours: int = 4, continuous: bool = True,
+                   cohort_id: Optional[str] = None) -> Dict[str, Any]:
     """The business-event-triggered push campaign this experiment runs on, as a goal brief the engine can propose.
 
     Continuous by default: the whole push-enabled base minus the standing exclusions, with a permanent control group so
     lift can be read in any week without ever stopping the programme."""
     cfg = rules.config()
-    seg = audience or "ALL_PUSH_ENABLED"
+    co = cohort(cohort_id) if cohort_id else None
+    if co:
+        audience = co["segment"]; control_pct = int(co.get("control_pct") or control_pct)
+    stage = "all" if str(audience).upper().startswith("ALL") else ("internal" if (not audience or audience == cfg.get("internal_segment")) else "segment")
+    if stage == "internal":
+        control_pct = 5                                          # employees all see it; 5% is the smallest control the framework allows
+    seg = audience or str(cfg.get("internal_segment") or "INTERNAL_EMPLOYEES")
+    event = (co or {}).get("event") or (EVENT if stage == "all" else "MA2_Discovery_INTERNAL" if stage == "internal" else EVENT)
+    suffix = ("_" + (co["id"] if co else stage).upper()) if (co or stage != "all") else ""
     return {
-        "name": f"MA2_Discovery_Push_{datetime.now(IST).strftime('%b%y')}",
+        "name": f"MA2_Discovery_Push{suffix}_{datetime.now(IST).strftime('%b%y')}",
+        "stage": stage, "cohort": (co or {}).get("id"), "event": event,
         "channel": "push",
         "target_segment": seg,
         "variants": [{"title": "{{BusinessEvent.title}}", "body": "{{BusinessEvent.body}}", "cta": "See the market",
                       "note": "copy is written by the engine per signal and passed on the event; wording variants are tested in the engine's templates, not here"}],
-        "schedule": {"type": "business_event_triggered", "business_event": EVENT, "send": "immediately on trigger",
+        "schedule": {"type": "business_event_triggered", "business_event": event, "send": "immediately on trigger",
                      "frequency_capping": "leave MoEngage capping ON: the engine caps per signal and per day, not per user"},
         "ttl_hours": ttl_hours,
-        "market_hook_id": f"ma2_discovery:{EVENT}",
+        "market_hook_id": f"ma2_discovery:{event}",
         "exclusions": ["liquidated in last 14d", "loss-dormant (realised loss >20% of deposits, no trade 21d)", "unsubscribed / DND", "push disabled"],
         "frequency_cap": f"MoEngage per-user cap; engine cap {cfg.get('discovery_daily_cap')}/day across the platform",
         "goal": {
             "transition": "activated_habitual",
             "continuous": continuous,
+            "stage": stage,
             "hypothesis": "Market facts that need no personal data (large trades, the day's most traded token, round-number milestones, unusual major moves, 1-year highs) bring active traders back into the app within the day.",
             "primary_kpi": kpi,
             "target": "+0.3 sessions per active user per week vs the permanent control group" if continuous else "+0.3 sessions per active user per week vs the control group",
@@ -549,47 +640,188 @@ def campaign_brief(audience: str = "", control_pct: int = 10, window_days: int =
     }
 
 
-def propose_campaign(audience: str = "", control_pct: int = 10, window_days: int = 14, kpi: str = "sessions_per_week", created_by: str = "user", continuous: bool = True) -> Dict[str, Any]:
+def propose_campaign(audience: str = "", control_pct: int = 10, window_days: int = 14, kpi: str = "sessions_per_week", created_by: str = "user", continuous: bool = True,
+                     cohort_id: Optional[str] = None) -> Dict[str, Any]:
     """Queue the MoEngage campaign itself: approving it creates the draft in MoEngage and registers a live experiment with a readout."""
     from ..llm import tools as t
-    b = campaign_brief(audience, control_pct, window_days, kpi, continuous=continuous)
+    b = campaign_brief(audience, control_pct, window_days, kpi, continuous=continuous, cohort_id=cohort_id)
     check = t.campaign_brief_check(b["goal"], b["variants"], b["channel"], market_linked=True, ttl_hours=b["ttl_hours"])
     if not check["ok"]:
         return {"error": "brief rejected", "problems": check["problems"]}
     r = t.propose_campaign(b["name"], b["channel"], b["target_segment"], b["variants"],
-                           rationale=("Discovery alerts experiment: the engine fires the " + EVENT + " business event when a market signal qualifies, and this campaign turns each fire into a push. "
+                           rationale=(f"Discovery alerts experiment, cohort {b.get('cohort') or b['stage']}: the engine fires the {b['event']} business event when a market signal qualifies for this cohort, and this campaign turns each fire into a push. "
                                       "Copy comes from the event attributes, so every alert is linted before it leaves the engine. Control group " + str(control_pct) + "% so the result reads as lift."),
                            goal=b["goal"], schedule=b["schedule"], ttl_hours=b["ttl_hours"], market_hook_id=b["market_hook_id"],
                            exclusions=b["exclusions"], frequency_cap=b["frequency_cap"], ice=b["ice"])
     if r.get("error"):
         return r
-    return {"proposal_id": r["proposal_id"], "status": r["status"], "brief_warnings": r.get("brief_warnings"), "campaign": b["name"],
+    return {"proposal_id": r["proposal_id"], "status": r["status"], "brief_warnings": r.get("brief_warnings"), "campaign": b["name"], "event": b["event"], "cohort": b.get("cohort"),
             "note": "approve on the Ideas board: MoEngage gets the draft and the engine registers it as a live experiment with a readout"}
 
 
-def launch(audience: str = "", days: int = 0, signals: Optional[List[str]] = None, control_pct: int = 10, kpi: str = "sessions_per_week", created_by: str = "user") -> Dict[str, Any]:
-    """One action, two approvals: the MoEngage campaign draft, and the engine's permission to fire the signals.
-    days=0 (the default) means continuous: no end date, a permanent control group, weekly readouts."""
-    camp = propose_campaign(audience, control_pct, days or 28, kpi, created_by=created_by, continuous=days <= 0)
-    if camp.get("error"):
-        return camp
+def launch(audience: str = "", days: int = 0, signals: Optional[List[str]] = None, control_pct: int = 10, kpi: str = "sessions_per_week", created_by: str = "user",
+           reviewed: bool = False, cohort_ids: Optional[List[str]] = None) -> Dict[str, Any]:
+    """Two steps, on purpose. The first call returns the full launch brief — every push word for word, the audience, the
+    timing, the caps, the exact MoEngage draft, the measurement plan, what would fire this minute — and creates nothing.
+    Only a call with reviewed=True queues the two approvals, and the brief travels with both so the approver reads the
+    same document. days=0 (the default) means continuous: no end date, a permanent control group, weekly readouts."""
+    from . import brief as brief_mod
+    cfg = rules.config()
+    plan = cohorts(cfg)
+    ids = [c for c in (cohort_ids or []) if any(x["id"] == c for x in plan)]
+    if not ids:                                                                            # legacy single-audience call → the matching cohort
+        audience = audience or str(cfg.get("internal_segment") or "INTERNAL_EMPLOYEES")
+        ids = ["all" if str(audience).upper().startswith("ALL") else "internal"]
+    chosen = [c for c in plan if c["id"] in ids]
+    stage = "internal" if all(c["stage"] == "internal" for c in chosen) else "all"
+    if any(c["stage"] != "internal" for c in chosen):
+        pr = promotion()
+        if not pr["ready"]:
+            return {"error": "cohorts beyond the internal employees are gated behind the internal stage: " + pr["why"], "promotion": pr, "locked": [c["id"] for c in chosen if c["stage"] != "internal"]}
+    audience = chosen[0]["segment"]
+    control_pct = int(chosen[0].get("control_pct") or control_pct)
+    b = brief_mod.build(days, signals, audience, control_pct, kpi, with_dry_run=True, cohort_ids=ids)
+    if b["copy_blocking"]:
+        return {"error": "copy fails compliance for " + ", ".join(b["copy_blocking"]) + " — fix the templates first", "brief": b}
+    if not reviewed:
+        return {"needs_review": True, "brief": b, "brief_markdown": brief_mod.markdown(b),
+                "next": "read the brief, then call again with reviewed=true (the tab's Confirm launch button does this)"}
+    camps = []
+    for c in chosen:
+        camp = propose_campaign(c["segment"], int(c.get("control_pct") or control_pct), days or 28, kpi, created_by=created_by, continuous=days <= 0, cohort_id=c["id"])
+        if camp.get("error"):
+            return {**camp, "cohort": c["id"]}
+        camps.append({**camp, "cohort": c["id"], "segment": c["segment"]})
+    camp = camps[0]
     exp = propose(name="", days=days, signals=signals, audience=audience, kpi=kpi,
-                  note=f"MoEngage campaign draft queued as proposal #{camp['proposal_id']}", created_by=created_by)
-    return {"campaign_proposal_id": camp["proposal_id"], "experiment_proposal_id": exp.get("proposal_id"), "campaign": camp.get("campaign"),
-            "brief_warnings": camp.get("brief_warnings"),
+                  note="MoEngage campaign drafts queued as " + ", ".join(f"#{x['proposal_id']} ({x['cohort']})" for x in camps), created_by=created_by, cohort_ids=ids)
+    try:                                                   # the approver on the Ideas board sees what the launcher saw
+        from .. import approvals
+        md = brief_mod.markdown({**b, "would_fire_now": b.get("would_fire_now")})
+        for pid in [x["proposal_id"] for x in camps] + [exp.get("proposal_id")]:
+            if pid:
+                approvals.update_payload(pid, {"launch_brief_md": md, "launch_brief": {k: b[k] for k in ("summary", "signals", "copy", "timing", "governance", "audience", "experiment")}}, actor=created_by, note="launch brief attached")
+    except Exception as e:
+        exp["brief_attach_error"] = str(e)[:120]
+    return {"campaign_proposal_id": camp["proposal_id"], "campaign_proposals": [{k: x[k] for k in ("proposal_id", "cohort", "segment", "campaign", "event")} for x in camps],
+            "experiment_proposal_id": exp.get("proposal_id"), "campaign": camp.get("campaign"), "cohorts": ids,
+            "brief_warnings": camp.get("brief_warnings"), "brief": b, "stage": stage, "audience": audience,
             "next": "approve both on the Ideas board: the campaign creates the MoEngage draft and the live experiment, the experiment lets the engine fire the event"}
 
 
 # ── experiment approval ───────────────────────────────────────────────────────
-def propose(name: str = "", days: int = 14, signals: Optional[List[str]] = None, audience: str = "", kpi: str = "", note: str = "", created_by: str = "user") -> Dict[str, Any]:
+def cohorts(cfg: Optional[Dict[str, Any]] = None) -> List[Dict[str, Any]]:
+    """The cohort plan: which segment hears which signals on which business event. Overridable with ma2_cohorts_json."""
+    from ..database import get_setting
+    cfg = cfg or rules.config()
+    rows = [dict(c) for c in DEFAULT_COHORTS]
+    try:
+        over = json.loads(get_setting("ma2_cohorts_json", "") or "[]") or []
+        if over:
+            rows = [dict(c) for c in over if isinstance(c, dict) and c.get("id") and c.get("event")]
+    except Exception:
+        pass
+    for c in rows:
+        if c["id"] == "internal" or not c.get("segment"):
+            c["segment"] = c.get("segment") or str(cfg.get("internal_segment") or "INTERNAL_EMPLOYEES")
+        c["stage"] = c.get("stage") or ("internal" if c["id"] == "internal" else "all")
+        c["signals"] = [x for x in (c.get("signals") or []) if x in SIGNALS]
+    return rows
+
+
+def cohort(cid: str) -> Optional[Dict[str, Any]]:
+    return next((c for c in cohorts() if c["id"] == cid), None)
+
+
+def active_cohorts() -> List[Dict[str, Any]]:
+    """Cohorts whose MoEngage campaign draft has been created (proposal executed) and that the approved experiment lists."""
+    from .. import approvals
+    x = experiment() or {}
+    wanted = set(x.get("cohorts") or ([("internal" if (x.get("stage") or "internal") == "internal" else "all")] if x else []))
+    try:
+        props = [p for p in approvals.list_proposals(limit=300) if p.get("kind") == "create_campaign" and p.get("status") == "executed"
+                 and str((p.get("payload") or {}).get("name") or "").startswith("MA2_Discovery")]
+    except Exception:
+        props = []
+    executed_events = {str(((p.get("payload") or {}).get("schedule") or {}).get("business_event") or "") for p in props}
+    mock = get_setting("mock_mode", "true").lower() == "true"
+    inform = internal_delivery()["mode"] == "inform"
+    out = []
+    for c in cohorts():
+        if c["id"] not in wanted:
+            continue
+        has_channel = c["event"] in executed_events or mock or (c["id"] == "internal" and inform)   # a real campaign, a mock workspace, or Inform for employees
+        if has_channel:
+            out.append(c)
+    return out
+
+
+def internal_delivery() -> Dict[str, Any]:
+    """How the employee cohort is reached: the business event → campaign path, or MoEngage Inform straight to the employee ids."""
+    from ..database import get_setting
+    from . import cohort as cohort_mod
+    mode = (get_setting("ma2_internal_delivery", "event") or "event").strip().lower()
+    users = cohort_mod.internal_users() if mode == "inform" else []
+    return {"mode": mode if (mode == "inform" and users) else "event", "requested": mode, "users": len(users),
+            "alert_id_set": bool(get_setting("ma2_inform_alert_id", "").strip()), "user_ids": users}
+
+
+def _send_to_cohort(t: Dict[str, Any], attrs: Dict[str, Any], det_key: str) -> Dict[str, Any]:
+    from .service import _deliver_business_event, _deliver_inform
+    if t["id"] == "internal":
+        d = internal_delivery()
+        if d["mode"] == "inform":
+            return _deliver_inform(det_key, {**attrs, "cohort": t["id"]}, d["user_ids"])
+    return _deliver_business_event(t["event"], {**attrs, "cohort": t["id"]})
+
+
+def route(alert: Dict[str, Any], targets: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+    """Which cohort events this alert goes to: every active cohort whose signal list includes it."""
+    return [c for c in targets if alert["signal"] in set(c.get("signals") or [])]
+
+
+def stage_of(audience: str, cfg: Optional[Dict[str, Any]] = None) -> str:
+    cfg = cfg or rules.config()
+    if not audience or audience == cfg.get("internal_segment"):
+        return "internal"
+    return "all" if str(audience).upper().startswith("ALL") else "segment"
+
+
+def promotion(now: Optional[datetime] = None) -> Dict[str, Any]:
+    """May the whole base be launched yet? Only after the internal-employee stage has run long enough and actually delivered."""
+    cfg = rules.config(); now = now or datetime.now(IST)
+    init_tables(); conn = get_db()
+    row = conn.execute("SELECT MIN(created_at) first_at, COUNT(*) n FROM ma2_discovery_fires WHERE status IN ('sent','recorded_mock')").fetchone()
+    conn.close()
+    x = experiment() or {}
+    internal_seen = bool(x) and x.get("stage", "internal") == "internal"
+    first_at = row["first_at"] if row and row["first_at"] else None
+    days = round((now - datetime.fromisoformat(first_at)).total_seconds() / 86400, 1) if first_at else 0.0
+    fires = int(row["n"] or 0) if row else 0
+    need_days, need_fires = int(cfg.get("internal_min_days") or 3), int(cfg.get("internal_min_fires") or 5)
+    if not internal_seen and not first_at:
+        return {"ready": False, "why": f"no internal stage has run yet — launch to {cfg.get('internal_segment')} first", "days": days, "fires": fires, "need_days": need_days, "need_fires": need_fires}
+    if days < need_days or fires < need_fires:
+        return {"ready": False, "why": f"internal stage has {fires}/{need_fires} alerts over {days}/{need_days} days", "days": days, "fires": fires, "need_days": need_days, "need_fires": need_fires}
+    return {"ready": True, "why": f"internal stage delivered {fires} alerts over {days} days", "days": days, "fires": fires, "need_days": need_days, "need_fires": need_fires}
+
+
+def propose(name: str = "", days: int = 14, signals: Optional[List[str]] = None, audience: str = "", kpi: str = "", note: str = "", created_by: str = "user",
+            override_reason: str = "", cohort_ids: Optional[List[str]] = None) -> Dict[str, Any]:
+    """override_reason lets a lead skip the internal-stage gate for the whole base; it is written into the proposal and the audit log."""
     from .. import approvals
     cfg = rules.config()
-    sigs = [s for s in (signals or list(SIGNALS)) if s in SIGNALS]
-    payload = {"name": name or f"Discovery alerts {datetime.now(IST).strftime('%b %Y')}", "days": int(days), "signals": sigs,
-               "audience": audience or "MoEngage segment on the MA2_Discovery campaign (engine sends no user ids)",
+    sigs = [s for s in (signals or [k for k in SIGNALS if k != "agent_pick"]) if s in SIGNALS and s != "agent_pick"]
+    stage = stage_of(audience, cfg)
+    payload = {"name": name or f"Discovery alerts {'internal test ' if stage == 'internal' else ''}{datetime.now(IST).strftime('%b %Y')}", "days": int(days), "signals": sigs,
+               "stage": stage, "audience": audience or str(cfg.get("internal_segment") or "INTERNAL_EMPLOYEES"),
+               "cohorts": [c for c in (cohort_ids or []) if cohort(c)] or (["internal"] if stage == "internal" else ["all"]),
                "kpi": kpi or "sessions and trades within 24h of a fire, treated vs the campaign's control group",
                "caps": {"platform_per_day": cfg.get("discovery_daily_cap"), "per_signal": cfg.get("discovery_signal_caps")}, "note": note[:500]}
-    title = f"Discovery alerts experiment: {payload['name']} · {len(sigs)} signals · " + ("continuous, permanent holdout" if int(days) <= 0 else f"{days}d")
+    if override_reason and stage == "all":
+        payload["promotion_override"] = True; payload["override_reason"] = override_reason[:300]
+        audit("ma2.promotion_override", {"reason": override_reason[:300]}, actor=created_by)
+    title = f"Discovery alerts experiment ({'internal employees' if stage == 'internal' else payload['audience']}): {payload['name']} · {len(sigs)} signals · " + ("continuous, permanent holdout" if int(days) <= 0 else f"{days}d")
     why = ("Market-level alerts that need no per-user data: large-trade bursts, the day's most traded token, BTC/ETH milestones, unusual major moves and 1-year highs. "
            f"The engine fires the {EVENT} business event; MoEngage chooses the audience and enforces the per-user frequency cap. "
            f"Engine caps: {payload['caps']['platform_per_day']}/day across the platform, per-signal caps, quiet hours, paused in stress regimes. Kill switch stops it at once.")
@@ -600,6 +832,10 @@ def propose(name: str = "", days: int = 14, signals: Optional[List[str]] = None,
 def _validate(payload: Dict[str, Any]) -> None:
     if not [s for s in payload.get("signals") or [] if s in SIGNALS]:
         raise ValueError("pick at least one signal")
+    if payload.get("stage") == "all" and not payload.get("promotion_override"):
+        pr = promotion()
+        if not pr["ready"]:
+            raise ValueError("the whole base is gated behind the internal-employee stage: " + pr["why"])
     if not 0 <= int(payload.get("days") or 0) <= 90:
         raise ValueError("days must be 0 (continuous) or 1-90")
     blocking = [k for k in rules.lint_all()["blocking"] if k.startswith(("whale:", "most_traded:", "milestone:", "ath:", "atl:", "price_movement:"))]
@@ -616,7 +852,8 @@ def _preview(payload: Dict[str, Any]) -> Dict[str, Any]:
 def _execute(payload: Dict[str, Any]) -> Dict[str, Any]:
     from .service import state_set_many, set_kill
     now = datetime.now(IST)
-    x = {"name": payload["name"], "signals": payload["signals"], "audience": payload.get("audience"), "kpi": payload.get("kpi"),
+    x = {"name": payload["name"], "signals": payload["signals"], "audience": payload.get("audience"), "kpi": payload.get("kpi"), "stage": payload.get("stage", "internal"),
+         "cohorts": payload.get("cohorts") or (["internal"] if payload.get("stage", "internal") == "internal" else ["all"]),
          "started_at": now.isoformat(), "continuous": int(payload.get("days") or 0) <= 0,
          "ends_at": None if int(payload.get("days") or 0) <= 0 else (now + timedelta(days=int(payload["days"]))).isoformat(),
          "proposal_id": payload.get("_proposal_id"), "approved_by": payload.get("_approved_by", "user")}
@@ -711,7 +948,46 @@ def preflight() -> List[Dict[str, Any]]:
                                       "executed": "switch mock_mode off, then launch again to create the real draft"}.get(camp["state"], "fix the cause above and launch again")})
     st = is_live()
     out.append({"check": "Engine firing", "ok": st["live"], "detail": st["why"] or "approved and firing", "fix": "" if st["live"] else "approve the discovery experiment on the Ideas board"})
+    try:
+        import subprocess
+        svc = subprocess.run(["launchctl", "list"], capture_output=True, text=True, timeout=5).stdout
+        installed = "moengage" in svc.lower()
+    except Exception:
+        installed = None
+    out.append({"check": "Engine as a service", "ok": installed, "detail": "installed under launchd: restarts on crash and at login" if installed else ("not installed: the emitter dies with the terminal" if installed is False else "could not check"),
+                "fix": "" if installed else "./cli.py service install"})
+    d = internal_delivery()
+    if d["requested"] == "inform":
+        has_i = False
+        try:
+            has_i = bool(api and api.has("inform"))
+        except Exception:
+            pass
+        out.append({"check": "Inform (internal cohort)", "ok": bool(has_i and d["alert_id_set"] and d["users"]) or (mock and d["users"] > 0),
+                    "detail": f"direct sends to {d['users']} employee id(s)" + ("" if d["alert_id_set"] else " · alert id missing") + ("" if has_i or mock else " · Inform API key missing"),
+                    "fix": "" if (has_i or mock) and d["alert_id_set"] and d["users"] else "Engine → Settings: moengage_inform_key and ma2_inform_alert_id; POST /api/alerts2/internal-users with the employee customer ids"})
+    hb = state_all_safe().get("heartbeat_last")
+    out.append({"check": "Heartbeat", "ok": bool(hb) if st["live"] else None, "detail": f"last {HEARTBEAT_EVENT} at {str(hb)[11:16]}" if hb else ("no heartbeat yet" if st["live"] else "starts when the experiment is live"),
+                "fix": f"create a MoEngage flow: entry on {HEARTBEAT_EVENT}, wait 30 min for the next one, else push the ops cohort — MoEngage then pages you if the engine goes silent"})
     return out
+
+
+def keepalive() -> Dict[str, Any]:
+    """What MoEngage keeps alive on its own, what still needs the engine, and how the engine is kept up."""
+    x = experiment() or {}
+    return {
+        "moengage_owns": ["the campaigns per cohort (business-event triggered, expiry one year, renew before it)", "segments, per-user frequency capping, DND, quiet hours on the campaign",
+                          "the control group and the campaign analytics", "delivery, retries, device tokens, opt-outs"],
+        "engine_still_needed_for": ["watching the market and firing the business event: MoEngage has no market-data ingestion", "the agent's picks on the internal cohort"],
+        "engine_kept_up_by": ["launchd service (./cli.py service install): starts at login, restarts on crash", "in-place reload (./cli.py update) so upgrades never stop it",
+                              "watermarks: a run that was late catches up instead of skipping", f"{HEARTBEAT_EVENT} every 5 minutes while live, so a MoEngage flow can page ops when it stops"],
+        "internal_delivery": ("MoEngage Inform: direct transactional sends to the employee ids, delivery status per message, no campaign to keep alive"
+                              if internal_delivery()["mode"] == "inform" else "business event → the internal campaign (switch to Inform with ma2_internal_delivery=inform and the employee ids)"),
+        "heartbeat_event": HEARTBEAT_EVENT, "heartbeat_last": state_all_safe().get("heartbeat_last"),
+        "campaign_expiry": "each cohort campaign is created with a one-year expiry; the preflight will warn 14 days before and a PATCH proposal extends it",
+        "if_the_mac_is_off": "nothing fires until it is back; MoEngage keeps the campaigns armed, so the first run after restart resumes from the watermark and announces only what is still fresh",
+        "cohorts_live": [c["id"] for c in active_cohorts()], "experiment": x.get("name"),
+    }
 
 
 def coverage(day: Optional[str] = None) -> Dict[str, Any]:
@@ -733,6 +1009,14 @@ def coverage(day: Optional[str] = None) -> Dict[str, Any]:
     return out
 
 
+def state_all_safe() -> Dict[str, Any]:
+    try:
+        from .service import state_all
+        return state_all() or {}
+    except Exception:
+        return {}
+
+
 def status(now: Optional[datetime] = None) -> Dict[str, Any]:
     now = now or datetime.now(IST)
     st = is_live(now)
@@ -747,6 +1031,12 @@ def status(now: Optional[datetime] = None) -> Dict[str, Any]:
             "caps": {"platform_per_day": cfg.get("discovery_daily_cap"), "per_signal": cfg.get("discovery_signal_caps"), "quiet": f"{cfg['quiet_start']}–{cfg['quiet_end']} IST"},
             "whale_source": "CoinDCX whale feed (uploaded)" if _whale_feed() else "large-trade burst proxy from public 5-minute candles",
             "timing": timing.view(cfg, now), "continuous": bool((st["experiment"] or {}).get("continuous")), "preflight": preflight(),
+            "stage": (st["experiment"] or {}).get("stage") or "internal", "internal_segment": cfg.get("internal_segment"), "promotion": promotion(now),
+            "cohorts": [{**c, "active": c["id"] in {a["id"] for a in active_cohorts()}, "locked": c["stage"] != "internal" and not promotion(now)["ready"]} for c in cohorts(cfg)],
+            "keepalive": keepalive(),
+            "autonomy": {"on": bool(rules.config(stage="internal").get("agent_autonomy")), "profile": {k: rules.INTERNAL_PROFILE[k] for k in ("discovery_daily_cap", "quiet_start", "quiet_end", "agent_every_min", "agent_max_picks")},
+                         "agent_last_run": (state_all_safe().get("agent_last_run")), "picks_today": counts.get("agent_pick", 0),
+                         "note": "internal stage only: the agent rewrites copy and adds its own picks with no human click per alert; the linter, freshness, kill switch and the employee segment still bind"},
             "determinism": {"cadence_min": 5, "closed_candles_only": True, "watermarks": True,
                             "outcomes_today": detect.outcomes_since(now.replace(hour=0, minute=0, second=0, microsecond=0)),
                             "note": "every closed candle is judged once; a late run catches up; quiet hours hold perishable facts instead of dropping them; use /api/alerts2/discovery/coverage to replay a day"},

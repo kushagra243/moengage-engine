@@ -270,3 +270,52 @@ def tokens_by_product(users: List[Dict[str, Any]]) -> Dict[str, List[str]]:
             for t in rel:
                 out[prod][t] += 1
     return {p: [t for t, _ in c.most_common()] for p, c in out.items()}
+
+
+# ── internal employees for MoEngage Inform (direct transactional sends, no campaign) ──────────────
+def save_internal_users(user_ids: List[str], actor: str = "user") -> Dict[str, Any]:
+    """Opaque MoEngage customer ids of the employee test cohort. Anything that looks like an email, phone, PAN or Aadhaar
+    is refused: Inform addresses users by the id MoEngage already knows, never by a personal detail."""
+    clean, bad = [], []
+    for u in user_ids or []:
+        v = str(u or "").strip()
+        if not v:
+            continue
+        if any(rx.search(v) for _, rx in PII_VALUES):
+            bad.append(v[:6] + "…")
+            continue
+        clean.append(v)
+    if bad:
+        raise CohortError(f"rejected: {len(bad)} value(s) look like personal details, not customer ids ({', '.join(bad[:3])}). Send MoEngage customer ids only.")
+    clean = list(dict.fromkeys(clean))
+    if not clean:
+        raise CohortError("no customer ids in the list")
+    meta = {"count": len(clean), "updated_at": datetime.now(timezone.utc).isoformat(), "updated_by": actor,
+            "digest": hashlib.sha256("".join(sorted(hash_id(u) for u in clean)).encode()).hexdigest()[:16]}
+    with open(os.path.join(data_dir(), "internal_users.json"), "w") as f:
+        json.dump({"meta": meta, "user_ids": clean}, f)
+    from ..security import audit
+    audit("ma2.internal_users", {"count": len(clean), "digest": meta["digest"]}, actor=actor)
+    return meta
+
+
+def internal_users() -> List[str]:
+    p = os.path.join(data_dir(), "internal_users.json")
+    if not os.path.exists(p):
+        return []
+    try:
+        with open(p) as f:
+            return [str(u) for u in (json.load(f).get("user_ids") or [])]
+    except Exception:
+        return []
+
+
+def internal_users_meta() -> Optional[Dict[str, Any]]:
+    p = os.path.join(data_dir(), "internal_users.json")
+    if not os.path.exists(p):
+        return None
+    try:
+        with open(p) as f:
+            return json.load(f).get("meta")
+    except Exception:
+        return None

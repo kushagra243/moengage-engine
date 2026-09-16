@@ -431,10 +431,10 @@ def test_discovery_launches_a_real_moengage_campaign_and_experiment():
     b = discovery.campaign_brief(control_pct=20)
     check = tools.campaign_brief_check(b["goal"], b["variants"], "push", market_linked=True, ttl_hours=b["ttl_hours"])
     assert check["ok"], check["problems"]
-    assert b["schedule"]["business_event"] == discovery.EVENT and b["goal"]["control_group_pct"] == 20
+    assert b["schedule"]["business_event"] == "MA2_Discovery_INTERNAL" and b["goal"]["control_group_pct"] == 5
     assert any("liquidat" in e.lower() for e in b["exclusions"])
 
-    r = discovery.launch(days=7, signals=["most_traded"], control_pct=20, created_by="test")
+    r = discovery.launch(days=7, signals=["most_traded"], control_pct=20, created_by="test", reviewed=True)
     camp = approvals.get_proposal(r["campaign_proposal_id"])
     assert camp["kind"] == "create_campaign" and camp["status"] == "pending"
     assert "{{BusinessEvent.title}}" in json.dumps(camp["payload"]), "copy comes from the event the engine fires"
@@ -444,7 +444,7 @@ def test_discovery_launches_a_real_moengage_campaign_and_experiment():
     approvals.approve_and_execute(r["campaign_proposal_id"], decided_by="lead")
     from backend.database import get_db
     conn = get_db(); row = conn.execute("SELECT id, control_group_pct, primary_kpi FROM experiments WHERE proposal_id=?", (r["campaign_proposal_id"],)).fetchone(); conn.close()
-    assert row and row["control_group_pct"] == 20, "an approved campaign becomes a live experiment with a control group"
+    assert row and row["control_group_pct"] == 5, "an approved internal-stage campaign becomes a live experiment; employees all see it, 5% control"
 
 
 def test_experiment_registration_survives_list_kill_criteria():
@@ -503,7 +503,8 @@ def test_evergreen_signals_wait_for_the_window_and_perishable_ones_do_not(monkey
     from backend.market import sources
     monkeypatch.setattr(sources, "klines", lambda *a, **k: [])
     discovery.ingest_whales([{"token": "ETH", "side": "buy", "size_usd": 5_000_000, "ts": __import__("time").time()}], actor="test")
-    p = discovery.propose("continuous", days=0, signals=["most_traded", "large_trades"], created_by="test")
+    p = discovery.propose("continuous", days=0, signals=["most_traded", "large_trades"], audience="ALL_PUSH_ENABLED", created_by="test",
+                          override_reason="test of the whole-base window lane", cohort_ids=["futures_active", "all"])
     approvals.approve_and_execute(p["proposal_id"], decided_by="lead")
     st = discovery.is_live(datetime(2026, 9, 16, 11, 0, tzinfo=IST))
     assert st["live"] and st.get("standing") and st["experiment"]["ends_at"] is None, "continuous: no end date"
@@ -539,7 +540,7 @@ def test_queued_alerts_are_dropped_when_they_go_stale_or_the_market_turns():
 def test_continuous_campaign_targets_the_whole_base_with_a_permanent_control():
     from backend.alerts2 import discovery
     from backend.llm import tools
-    b = discovery.campaign_brief(continuous=True)
+    b = discovery.campaign_brief(audience="ALL_PUSH_ENABLED", continuous=True)
     assert b["target_segment"] == "ALL_PUSH_ENABLED" and b["goal"]["control_group_pct"] == 10 and b["goal"]["continuous"] is True
     assert tools.campaign_brief_check(b["goal"], b["variants"], "push", market_linked=True, ttl_hours=b["ttl_hours"])["ok"]
     assert any("liquidat" in e.lower() for e in b["exclusions"]) and any("dnd" in e.lower() or "unsub" in e.lower() for e in b["exclusions"])
@@ -550,7 +551,7 @@ def test_campaign_payload_matches_the_documented_v5_schema():
     """The engine used to post its own brief shape to /v5/campaigns, so no draft ever appeared in MoEngage."""
     from backend.alerts2 import discovery
     from backend.moengage.executors import v5_campaign_payload
-    b = discovery.campaign_brief(continuous=True)
+    b = discovery.campaign_brief(audience="ALL_PUSH_ENABLED", continuous=True)
     p = {k: b[k] for k in ("name", "channel", "target_segment", "variants", "schedule", "ttl_hours", "goal", "frequency_cap")}
     body = v5_campaign_payload(p)
     assert body["channel"] == "PUSH" and body["campaign_delivery_type"] == "BUSINESS_EVENT_TRIGGERED"
@@ -600,7 +601,7 @@ def test_preflight_names_every_reason_nothing_reached_moengage():
     from backend.database import set_setting
     set_setting("mock_mode", "true")
     checks = {c["check"]: c for c in discovery.preflight()}
-    assert set(checks) == {"Mode", "Campaigns API key", "Creator email", "Business event", "Campaign draft", "Engine firing"}
+    assert set(checks) == {"Mode", "Campaigns API key", "Creator email", "Business event", "Campaign draft", "Engine firing", "Engine as a service", "Heartbeat"}
     assert checks["Mode"]["ok"] is False and "nothing reaches MoEngage" in checks["Mode"]["detail"]
     assert all(c["ok"] or c["fix"] for c in checks.values()), "anything blocked says how to unblock it"
 
@@ -683,9 +684,9 @@ def test_quiet_hours_hold_perishable_facts_instead_of_dropping_them(monkeypatch)
     r = discovery.run("live", now=night, ctx=_disc_ctx())
     assert r["sent"] == 0 and r["held_quiet_hours"] == 1, "held, not lost"
     q = [x for x in timing.queue_view() if x["status"] == "queued"]
-    assert q and q[0]["due_at"].startswith("2026-09-17T08:00")
-    assert discovery.release(datetime(2026, 9, 17, 7, 59, tzinfo=IST), "test")["fired"] == 0
-    assert discovery.release(datetime(2026, 9, 17, 8, 1, tzinfo=IST), "test")["fired"] == 1, "delivered the moment quiet hours end"
+    assert q and q[0]["due_at"].startswith("2026-09-17T07:00"), "the internal profile's quiet hours end at 07:00"
+    assert discovery.release(datetime(2026, 9, 17, 6, 59, tzinfo=IST), "test")["fired"] == 0
+    assert discovery.release(datetime(2026, 9, 17, 7, 1, tzinfo=IST), "test")["fired"] == 1, "delivered the moment quiet hours end"
 
 
 def test_held_milestone_is_dropped_if_the_price_fell_back(monkeypatch):
@@ -780,3 +781,288 @@ def test_the_same_round_level_is_not_announced_twice_in_a_chop():
     assert discovery._level_recent("BTC", 76000, now, rules.config()) is True
     assert discovery._level_recent("BTC", 77000, now, rules.config()) is False
     assert discovery._level_recent("BTC", 76000, now + timedelta(hours=7), rules.config()) is False, "after the cooldown it can be news again"
+
+
+# ── the launch brief and the staged rollout ───────────────────────────────────
+def test_launch_brief_contains_every_push_word_for_word_and_the_exact_draft():
+    from backend.alerts2 import brief, discovery, rules
+    b = brief.build(days=0, with_dry_run=False)
+    keys = {c["template"] for c in b["copy"]}
+    assert keys >= {"whale:buy", "whale:sell", "burst:up", "burst:down", "most_traded:any", "milestone:up", "milestone:down", "market_move:up", "market_move:down", "ath:up", "atl:down"}
+    for c in b["copy"]:
+        assert c["title"] and c["body"] and c["sample_title"] and "{" not in c["sample_title"], "samples are rendered, not raw placeholders"
+        assert c["lint"] == "passes" and not c["blocks"]
+    assert {s["signal"] for s in b["signals"]} == set(discovery.SIGNALS), "the internal brief lists the agent's own picks as a signal"
+    assert all(s["when"] and any(ch.isdigit() for ch in s["when"]) for s in b["signals"]), "every trigger is described with its actual numbers"
+    assert b["moengage_draft"]["campaign_delivery_type"] == "BUSINESS_EVENT_TRIGGERED" and b["moengage_draft"]["basic_details"]["business_event"] == "MA2_Discovery_INTERNAL"
+    assert [c["event"] for c in b["cohorts"]] == ["MA2_Discovery_INTERNAL"], "the default brief is the employee cohort alone"
+    assert b["experiment"]["control_group_pct"] == 5 and b["audience"]["stage"] == "internal", "the first brief is the internal-employee stage"
+    assert b["audience"]["segment"].startswith(rules.config()["internal_segment"])
+    md = brief.markdown(b)
+    for needle in ("## Every push, word for word", "## Audience", "## Experiment design", "## The exact draft", "## Assumptions", "STAGE 1", "BUSINESS_EVENT_TRIGGERED"):
+        assert needle in md
+    for c in b["copy"]:
+        assert c["body"] in md, "the markdown carries the templates themselves"
+
+
+def test_launch_shows_the_brief_first_and_creates_nothing_until_reviewed(monkeypatch):
+    from backend.alerts2 import discovery
+    from backend import approvals
+    from backend.database import set_setting
+    set_setting("mock_mode", "true"); discovery.register()
+    monkeypatch.setattr(discovery, "run", lambda *a, **k: {"ok": True, "detected": 0, "would_send": 0, "queued": 0, "held_quiet_hours": 0, "suppressed": 0, "summary": {}})
+    before = len(approvals.list_proposals(limit=500))
+    r = discovery.launch(days=0, signals=["most_traded"], created_by="test")
+    assert r.get("needs_review") and r["brief"]["copy"] and "word for word" in r["brief_markdown"]
+    assert len(approvals.list_proposals(limit=500)) == before, "no proposal exists until the brief is confirmed"
+    r2 = discovery.launch(days=0, signals=["most_traded"], created_by="test", reviewed=True)
+    assert r2["campaign_proposal_id"] and r2["experiment_proposal_id"] and r2["stage"] == "internal"
+    for pid in (r2["campaign_proposal_id"], r2["experiment_proposal_id"]):
+        p = approvals.get_proposal(pid)
+        assert "## Every push, word for word" in (p["payload"].get("launch_brief_md") or ""), "the approver reads what the launcher read"
+    camp = approvals.get_proposal(r2["campaign_proposal_id"])["payload"]
+    assert camp["target_segment"] == "INTERNAL_EMPLOYEES" and camp["goal"]["control_group_pct"] == 5 and "INTERNAL" in camp["name"]
+
+
+def test_whole_base_is_locked_until_the_internal_stage_has_run(monkeypatch):
+    from backend.alerts2 import discovery
+    from backend.database import get_db
+    from datetime import datetime as _dt
+    conn = get_db(); conn.execute("DELETE FROM ma2_discovery_fires"); conn.execute("DELETE FROM ma2_state WHERE key='discovery'"); conn.commit(); conn.close()
+    monkeypatch.setattr(discovery, "run", lambda *a, **k: {"ok": True, "detected": 0, "would_send": 0, "queued": 0, "held_quiet_hours": 0, "suppressed": 0, "summary": {}})
+    r = discovery.launch(audience="ALL_PUSH_ENABLED", days=0, signals=["most_traded"], created_by="test", reviewed=True)
+    assert r.get("error") and "internal" in r["error"] and "stage" in r["error"] and not r.get("campaign_proposal_id")
+    assert discovery.promotion()["ready"] is False
+    # simulate the internal stage: five alerts over four days
+    for i in range(5):
+        discovery._write_fire(None, _dt(2026, 9, 10 + i, 12, 0, tzinfo=IST), {"signal": "most_traded", "token": "HYPE", "direction": "any", "value": 1}, {"title": "t", "body": "b"}, "recorded_mock")
+    pr = discovery.promotion(now=_dt(2026, 9, 16, 12, 0, tzinfo=IST))
+    assert pr["ready"] and pr["fires"] == 5 and pr["days"] >= 3
+    conn = get_db(); conn.execute("DELETE FROM ma2_discovery_fires"); conn.commit(); conn.close()
+
+
+def test_agent_launch_tool_cannot_skip_the_brief():
+    from backend.llm import tools
+    import backend.alerts2.discovery as d
+    r = tools.market_alerts_launch_discovery(signals=["most_traded"])
+    assert r.get("needs_review") and r["brief"]["copy"] and "brief_markdown" not in r
+    b = tools.market_alerts_brief(signals=["milestone"])
+    assert {c["template"] for c in b["copy"]} == {"milestone:up", "milestone:down"} and "moengage_draft" not in b
+
+
+# ── the agent off the leash, on the internal cohort only ──────────────────────
+def test_internal_profile_relaxes_caps_but_not_the_law():
+    from backend.alerts2 import rules
+    base, internal = rules.config(), rules.config(stage="internal")
+    assert internal["discovery_daily_cap"] > base["discovery_daily_cap"] and internal["agent_autonomy"] is True and internal["evergreen_signals"] == []
+    assert internal["large_trade_min_usd"] == base["large_trade_min_usd"] and internal["perishable_max_age_min"] == base["perishable_max_age_min"], "freshness and thresholds are not loosened"
+    assert rules.config(stage="all").get("agent_autonomy") in (None, False)
+
+
+def _fake_llm(payload):
+    class _Cli:
+        def __init__(self, *a, **k): pass
+        def chat(self, messages, **k):
+            return {"content": json.dumps(payload), "model": "fake/bulk"}
+    return _Cli
+
+
+def test_agent_pass_keeps_only_copy_that_passes_the_linter_and_picks_from_the_snapshot(monkeypatch):
+    from backend.alerts2 import agent
+    import backend.llm.provider as prov
+    now = datetime(2026, 9, 16, 12, 0, tzinfo=IST)
+    ctx = {"crypto_markets": [{"symbol": "BTC", "price": 78000, "chg_24h": 2.0, "vol_24h_usd": 9e9, "oi_usd": 3e9, "funding_apr_pct": 41.0}, {"symbol": "HYPE", "price": 40, "chg_24h": 9.0, "vol_24h_usd": 1e9}],
+           "crypto": {"regime": {"label": "chop"}}, "crypto_movers_detail": {"crowded_long": [{"symbol": "BTC", "funding_apr_pct": 41.0}]}}
+    cands = [{"det_key": "most_traded|HYPE|2026-09-16", "signal": "most_traded", "token": "HYPE", "direction": "any", "fields": {"token": "HYPE"}, "title": "Most traded today: HYPE", "body": "HYPE leads."}]
+    payload = {"rewrites": [{"det_key": "most_traded|HYPE|2026-09-16", "title": "HYPE leads volume today, up 9%", "body": "Most traded futures token of the day. See the market or set an alert.", "why": "volume leader"},
+                            {"det_key": "most_traded|HYPE|2026-09-16", "title": "HYPE will moon, buy now", "body": "guaranteed", "why": "x"}],
+               "picks": [{"token": "BTC", "topic": "funding_crowding", "direction": "up", "title": "BTC funding is crowded long", "body": "Funding near 41% annualised: longs are paying up. Review open positions.", "why": "crowd", "evidence": "funding_apr 41.0"},
+                         {"token": "PEPE", "topic": "listing", "direction": "any", "title": "PEPE listed", "body": "See the market.", "why": "x", "evidence": "1"},
+                         {"token": "BTC", "topic": "level_watch", "direction": "up", "title": "BTC at 78,000: 5x leverage pays", "body": "Go long now.", "why": "x", "evidence": "78000"},
+                         {"token": "HYPE", "topic": "volume_leader", "direction": "up", "title": "HYPE volume", "body": "No number here.", "why": "x", "evidence": "big"}]}
+    monkeypatch.setattr(prov, "LLMClient", _fake_llm(payload))
+    out = agent.pass_once(cands, ctx, {"agent_max_picks": 4}, now)
+    assert list(out["rewrites"]) == ["most_traded|HYPE|2026-09-16"] and out["rewrites"]["most_traded|HYPE|2026-09-16"]["title"].startswith("HYPE leads")
+    assert [p["token"] for p in out["picks"]] == ["BTC"] and out["picks"][0]["det_key"] == "agent_pick|BTC|funding_crowding|2026-09-16"
+    reasons = {str(r.get("pick") or r.get("det_key")): r["why"] for r in out["rejected"]}
+    assert reasons["PEPE"] == "token not in snapshot" and "leverage" in reasons["BTC"] and reasons["HYPE"] == "no number in evidence"
+
+
+def test_agent_pass_is_silent_when_the_model_is_down(monkeypatch):
+    from backend.alerts2 import agent
+    import backend.llm.provider as prov
+    class _Down:
+        def __init__(self, *a, **k): pass
+        def chat(self, *a, **k): raise RuntimeError("provider offline")
+    monkeypatch.setattr(prov, "LLMClient", _Down)
+    out = agent.pass_once([], {"crypto_markets": []}, {}, datetime(2026, 9, 16, 12, 0, tzinfo=IST))
+    assert out["rewrites"] == {} and out["picks"] == [] and "skipped" in out["note"]
+
+
+def test_internal_live_run_lets_the_agent_send_picks_without_a_click(monkeypatch):
+    from backend.alerts2 import discovery, detect, rules
+    from backend import approvals
+    from backend.database import get_db, set_setting
+    import backend.llm.provider as prov
+    set_setting("mock_mode", "true"); discovery.register(); detect.init_tables()
+    conn = get_db()
+    for t in ("ma2_queue", "ma2_discovery_fires", "ma2_window_days", "ma2_detections", "ma2_watermarks"):
+        conn.execute(f"DELETE FROM {t}")
+    conn.execute("DELETE FROM ma2_state WHERE key IN ('discovery','agent_last_run')"); conn.commit(); conn.close()
+    import os
+    if os.path.exists(discovery._whale_path()):
+        os.remove(discovery._whale_path())
+    monkeypatch.setattr(discovery.sig_mod, "hl_candles", lambda *a, **k: [])
+    monkeypatch.setattr(discovery.sig_mod, "mids", lambda: {})
+    from backend.market import sources
+    monkeypatch.setattr(sources, "klines", lambda *a, **k: [])
+    payload = {"rewrites": [], "picks": [{"token": "BTC", "topic": "funding_crowding", "direction": "up", "title": "BTC funding is crowded long", "body": "Funding near 41% annualised: longs are paying up. Review open positions.", "why": "crowd", "evidence": "41.0"}]}
+    monkeypatch.setattr(prov, "LLMClient", _fake_llm(payload))
+    p = discovery.propose("internal unhinged", days=0, signals=["most_traded"], created_by="test")     # audience defaults to the employee segment
+    approvals.approve_and_execute(p["proposal_id"], decided_by="lead")
+    assert discovery.experiment()["stage"] == "internal"
+    ctx = {**_disc_ctx(), "crypto_markets": _disc_ctx()["crypto_markets"] + [], "crypto_movers_detail": {"crowded_long": [{"symbol": "BTC", "funding_apr_pct": 41.0}]}}
+    r = discovery.run("live", now=datetime(2026, 9, 16, 12, 0, tzinfo=IST), ctx=ctx)
+    dec = {d["signal"]: d for d in r["summary"]["decisions"]}
+    assert dec["agent_pick"]["decision"] == "recorded_mock" and dec["agent_pick"]["by_agent"] and "41%" in dec["agent_pick"]["body"]
+    assert dec["most_traded"]["decision"] == "recorded_mock", "on the internal profile the most-traded token goes out at once instead of waiting for a window"
+    assert r["summary"]["profile"] == "internal" and r["summary"]["agent"]["model"] == "fake/bulk"
+    r2 = discovery.run("live", now=datetime(2026, 9, 16, 12, 5, tzinfo=IST), ctx=ctx)
+    assert r2["summary"]["agent"] is None, "one model call per agent_every_min, not per tick"
+    assert discovery.fired_today(datetime(2026, 9, 16, 12, 0, tzinfo=IST))["agent_pick"] == 1
+
+
+# ── one campaign per cohort; MoEngage delivers, the engine routes the event ───
+def test_cohort_plan_routes_each_signal_to_the_cohorts_that_hear_it():
+    from backend.alerts2 import discovery
+    plan = discovery.cohorts()
+    ids = [c["id"] for c in plan]
+    assert ids[0] == "internal" and {"futures_active", "spot_active", "all"} <= set(ids)
+    assert plan[0]["segment"] == "INTERNAL_EMPLOYEES" and plan[0]["event"] == "MA2_Discovery_INTERNAL" and plan[0]["stage"] == "internal"
+    whale = {"signal": "large_trades"}; ath = {"signal": "ath_atl"}; pick = {"signal": "agent_pick"}
+    assert {c["id"] for c in discovery.route(whale, plan)} == {"internal", "futures_active"}, "a whale story never reaches spot-only or the broad base"
+    assert {c["id"] for c in discovery.route(ath, plan)} == {"internal", "futures_active", "spot_active", "all"}
+    assert [c["id"] for c in discovery.route(pick, plan)] == ["internal"], "the agent's own picks stay on the employee cohort"
+    assert len({c["event"] for c in plan}) == len(plan), "one business event per cohort, so MoEngage needs no attribute filters"
+
+
+def test_launch_creates_one_moengage_draft_per_cohort_and_locks_the_rest(monkeypatch):
+    from backend.alerts2 import discovery
+    from backend import approvals
+    from backend.database import get_db, set_setting
+    set_setting("mock_mode", "true"); discovery.register()
+    conn = get_db(); conn.execute("DELETE FROM ma2_discovery_fires"); conn.execute("DELETE FROM ma2_state WHERE key='discovery'"); conn.commit(); conn.close()
+    monkeypatch.setattr(discovery, "run", lambda *a, **k: {"ok": True, "detected": 0, "would_send": 0, "queued": 0, "held_quiet_hours": 0, "suppressed": 0, "summary": {}})
+    locked = discovery.launch(days=0, signals=["most_traded"], created_by="test", reviewed=True, cohort_ids=["internal", "futures_active"])
+    assert locked.get("error") and locked["locked"] == ["futures_active"], "only the employees until the internal stage has run"
+    r = discovery.launch(days=0, signals=["most_traded"], created_by="test", reviewed=True, cohort_ids=["internal"])
+    assert [c["cohort"] for c in r["campaign_proposals"]] == ["internal"] and r["campaign_proposals"][0]["event"] == "MA2_Discovery_INTERNAL"
+    camp = approvals.get_proposal(r["campaign_proposals"][0]["proposal_id"])["payload"]
+    assert camp["schedule"]["business_event"] == "MA2_Discovery_INTERNAL" and camp["target_segment"] == "INTERNAL_EMPLOYEES" and "INTERNAL" in camp["name"]
+    exp = approvals.get_proposal(r["experiment_proposal_id"])["payload"]
+    assert exp["cohorts"] == ["internal"] and "## One MoEngage campaign per cohort" in exp["launch_brief_md"]
+    # after the internal stage has earned it, three cohorts → three drafts on three events
+    from datetime import datetime as _dt
+    for i in range(5):
+        discovery._write_fire(None, _dt(2026, 9, 10 + i, 12, 0, tzinfo=IST), {"signal": "most_traded", "token": "HYPE", "direction": "any", "value": 1}, {"title": "t", "body": "b"}, "recorded_mock")
+    r2 = discovery.launch(days=0, signals=["most_traded"], created_by="test", reviewed=True, cohort_ids=["futures_active", "spot_active", "all"])
+    assert [c["event"] for c in r2["campaign_proposals"]] == ["MA2_Discovery_FUTURES", "MA2_Discovery_SPOT", "MA2_Discovery"]
+    conn = get_db(); conn.execute("DELETE FROM ma2_discovery_fires"); conn.commit(); conn.close()
+
+
+def test_live_run_fires_each_alert_on_every_active_cohort_event(monkeypatch):
+    from backend.alerts2 import discovery, detect, service
+    from backend import approvals
+    from backend.database import get_db, set_setting
+    set_setting("mock_mode", "true"); discovery.register(); detect.init_tables()
+    conn = get_db()
+    for t in ("ma2_queue", "ma2_discovery_fires", "ma2_window_days", "ma2_detections", "ma2_watermarks"):
+        conn.execute(f"DELETE FROM {t}")
+    conn.execute("DELETE FROM ma2_state WHERE key IN ('discovery','agent_last_run','heartbeat_last')"); conn.commit(); conn.close()
+    import os
+    if os.path.exists(discovery._whale_path()):
+        os.remove(discovery._whale_path())
+    monkeypatch.setattr(discovery.sig_mod, "hl_candles", lambda *a, **k: [])
+    monkeypatch.setattr(discovery.sig_mod, "mids", lambda: {})
+    from backend.market import sources
+    monkeypatch.setattr(sources, "klines", lambda *a, **k: [])
+    set_setting("ma2_agent_autonomy", "false")
+    sent = []
+    monkeypatch.setattr(service, "_deliver_business_event", lambda ev, attrs: (sent.append((ev, attrs.get("cohort"), attrs.get("signal"))) or {"status": "recorded_mock"}))
+    p = discovery.propose("cohorts", days=0, signals=["most_traded"], audience="ALL_PUSH_ENABLED", created_by="test", override_reason="cohort routing test", cohort_ids=["futures_active", "spot_active", "all"])
+    approvals.approve_and_execute(p["proposal_id"], decided_by="lead")
+    r = discovery.run("live", now=datetime(2026, 9, 16, 12, 0, tzinfo=IST), ctx=_disc_ctx())
+    # the whole-base profile queues most_traded for the window; release it and check where it went
+    out = discovery.release(datetime(2026, 9, 16, 19, 45, tzinfo=IST), "test", regime="chop")
+    assert out["fired"] == 1
+    assert {(e, c) for e, c, s in sent if s == "most_traded"} == {("MA2_Discovery_FUTURES", "futures_active"), ("MA2_Discovery_SPOT", "spot_active"), ("MA2_Discovery", "all")}
+    set_setting("ma2_agent_autonomy", "true")
+
+
+def test_heartbeat_and_keepalive_are_moengage_native():
+    from backend.alerts2 import discovery, service
+    from backend.database import set_setting
+    set_setting("mock_mode", "true")
+    r = discovery.heartbeat(datetime(2026, 9, 16, 12, 0, tzinfo=IST))
+    assert r["status"] == "recorded_mock"
+    k = discovery.keepalive()
+    assert k["heartbeat_event"] == "MA2_Engine_Heartbeat" and k["heartbeat_last"].startswith("2026-09-16T12:00")
+    assert any("no market-data ingestion" in x for x in k["engine_still_needed_for"]), "honest about what MoEngage cannot do"
+    checks = {c["check"]: c for c in discovery.preflight()}
+    assert "Heartbeat" in checks and "flow" in checks["Heartbeat"]["fix"] and "Engine as a service" in checks
+
+
+# ── MoEngage Inform for the employee cohort: direct sends, no campaign ─────────
+def test_inform_payload_is_idempotent_and_carries_the_facts():
+    from backend.alerts2 import service, cohort
+    attrs = {"title": "BTC crossed $78,000", "body": "BTC is trading at $78,050 after crossing $78,000. See the chart.", "token": "BTC", "product": "futures", "signal": "milestone",
+             "direction": "up", "landing": "token_page", "level": 78000, "run_id": 7, "event_key": "x"}
+    p = service.inform_payload("636b77e6e2cf83277195fb60", "emp_001", "milestone|BTC|up78000@1789", attrs, "MA2_Discovery_Internal")
+    assert p["alert_id"] == "636b77e6e2cf83277195fb60" and p["user_id"] == "emp_001" and p["alert_reference_name"] == "MA2_Discovery_Internal"
+    assert p["transaction_id"] == service.inform_payload("636b77e6e2cf83277195fb60", "emp_001", "milestone|BTC|up78000@1789", attrs)["transaction_id"], "same alert, same user → same transaction id, so MoEngage refuses a duplicate"
+    assert "emp_001" not in p["transaction_id"] and cohort.hash_id("emp_001")[:12] in p["transaction_id"]
+    pa = p["payloads"]["PUSH"]["personalized_attributes"]
+    assert pa["title"].startswith("BTC crossed") and pa["level"] == "78000" and "run_id" not in pa and "event_key" not in pa
+
+
+def test_employee_id_list_refuses_personal_details():
+    from backend.alerts2 import cohort
+    with pytest.raises(cohort.CohortError):
+        cohort.save_internal_users(["emp_1", "someone@coindcx.com"], actor="test")
+    with pytest.raises(cohort.CohortError):
+        cohort.save_internal_users(["9876543210"], actor="test")
+    m = cohort.save_internal_users(["emp_1", "emp_2", "emp_1"], actor="test")
+    assert m["count"] == 2 and cohort.internal_users() == ["emp_1", "emp_2"]
+
+
+def test_internal_cohort_goes_through_inform_when_configured(monkeypatch):
+    from backend.alerts2 import discovery, detect, service, cohort
+    from backend import approvals
+    from backend.database import get_db, set_setting
+    set_setting("mock_mode", "true"); discovery.register(); detect.init_tables()
+    conn = get_db()
+    for t in ("ma2_queue", "ma2_discovery_fires", "ma2_window_days", "ma2_detections", "ma2_watermarks"):
+        conn.execute(f"DELETE FROM {t}")
+    conn.execute("DELETE FROM ma2_state WHERE key IN ('discovery','agent_last_run')"); conn.commit(); conn.close()
+    import os
+    if os.path.exists(discovery._whale_path()):
+        os.remove(discovery._whale_path())
+    cohort.save_internal_users(["emp_1", "emp_2", "emp_3"], actor="test")
+    set_setting("ma2_internal_delivery", "inform"); set_setting("ma2_inform_alert_id", "alert123"); set_setting("ma2_agent_autonomy", "false")
+    monkeypatch.setattr(discovery.sig_mod, "hl_candles", lambda *a, **k: [])
+    monkeypatch.setattr(discovery.sig_mod, "mids", lambda: {})
+    from backend.market import sources
+    monkeypatch.setattr(sources, "klines", lambda *a, **k: [])
+    calls = []
+    monkeypatch.setattr(service, "_deliver_inform", lambda det_key, attrs, users: (calls.append((det_key, tuple(users), attrs["cohort"])) or {"status": "recorded_mock", "sent": len(users), "failed": 0, "channel": "inform"}))
+    monkeypatch.setattr(service, "_deliver_business_event", lambda ev, attrs: (_ for _ in ()).throw(AssertionError("the internal cohort must not use the event path when Inform is configured")))
+    try:
+        p = discovery.propose("inform internal", days=0, signals=["most_traded"], created_by="test")
+        approvals.approve_and_execute(p["proposal_id"], decided_by="lead")
+        r = discovery.run("live", now=datetime(2026, 9, 16, 12, 0, tzinfo=IST), ctx=_disc_ctx())
+        assert r["sent"] >= 1 and calls and calls[0][1] == ("emp_1", "emp_2", "emp_3") and calls[0][2] == "internal"
+        assert discovery.internal_delivery()["mode"] == "inform" and discovery.keepalive()["internal_delivery"].startswith("MoEngage Inform")
+        checks = {c["check"]: c for c in discovery.preflight()}
+        assert checks["Inform (internal cohort)"]["ok"] and "3 employee id" in checks["Inform (internal cohort)"]["detail"]
+    finally:
+        set_setting("ma2_internal_delivery", "event"); set_setting("ma2_inform_alert_id", ""); set_setting("ma2_agent_autonomy", "true")

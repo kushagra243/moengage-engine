@@ -155,7 +155,7 @@ def status():
 
 
 # ── settings ───────────────────────────────────────────────────────────────────
-ALLOWED_SETTING_PREFIXES = ("moengage_", "llm_", "market_", "schedule_", "refresh_", "analysis_", "taxonomy_", "autopilot_", "devagent_", "web3_", "competitor", "mock_mode")
+ALLOWED_SETTING_PREFIXES = ("moengage_", "llm_", "market_", "schedule_", "refresh_", "analysis_", "taxonomy_", "autopilot_", "devagent_", "web3_", "competitor", "mock_mode", "ma2_", "sop_", "sopqa_", "usd_inr")
 
 
 @app.get("/api/settings")
@@ -1654,13 +1654,28 @@ class Ma2DiscoveryPayload(BaseModel):
 
 class Ma2LaunchPayload(BaseModel):
     audience: str = ""
-    days: int = 14
+    days: int = 0
     signals: Optional[List[str]] = None
-    control_pct: int = 20
+    control_pct: int = 10
     kpi: str = "sessions_per_week"
+    reviewed: bool = False
+    cohort_ids: Optional[List[str]] = None
 
 class Ma2WhalesPayload(BaseModel):
     whales: List[Dict[str, Any]]
+
+class Ma2InternalUsersPayload(BaseModel):
+    user_ids: List[str]
+
+
+@app.post("/api/alerts2/internal-users")
+def alerts2_internal_users(payload: Ma2InternalUsersPayload, request: Request):
+    """The employee test cohort as MoEngage customer ids, for direct MoEngage Inform sends. Emails, phones, PAN or Aadhaar are refused."""
+    from .alerts2 import cohort
+    try:
+        return cohort.save_internal_users(payload.user_ids, actor=request_actor(request))
+    except cohort.CohortError as e:
+        raise HTTPException(400, str(e))
 
 
 @app.get("/api/alerts2/discovery")
@@ -1700,10 +1715,25 @@ def alerts2_discovery_propose(payload: Ma2DiscoveryPayload, request: Request):
 def alerts2_discovery_launch(payload: Ma2LaunchPayload, request: Request):
     """Queue both halves: the MoEngage campaign draft (which registers the live experiment) and the engine's permission to fire."""
     from .alerts2 import discovery
-    r = discovery.launch(payload.audience, payload.days, payload.signals, payload.control_pct, payload.kpi, created_by=request_actor(request))
+    r = discovery.launch(payload.audience, payload.days, payload.signals, payload.control_pct, payload.kpi, created_by=request_actor(request), reviewed=payload.reviewed, cohort_ids=payload.cohort_ids)
     if r.get("error"):
-        raise HTTPException(400, json.dumps(r)[:400])
+        raise HTTPException(400, str(r["error"])[:400])
     return r
+
+
+@app.get("/api/alerts2/discovery/brief")
+def alerts2_discovery_brief(format: str = "json", days: int = 0, signals: Optional[str] = None, audience: str = "", control_pct: int = 10, dry_run: bool = True, cohorts: Optional[str] = None):
+    """The launch brief: every push word for word, audience, timing, caps, the exact MoEngage draft, the measurement plan, what would fire now."""
+    from .alerts2 import brief
+    from . import docs_io
+    sigs = [x.strip() for x in (signals or "").split(",") if x.strip()] or None
+    b = brief.build(days, sigs, audience, control_pct, with_dry_run=dry_run, cohort_ids=[x.strip() for x in (cohorts or "").split(",") if x.strip()] or None)
+    stamp = datetime.now().strftime("%Y%m%d-%H%M")
+    if format == "md":
+        return _download(brief.markdown(b).encode("utf-8"), f"discovery-alerts-brief-{stamp}.md", "text/markdown; charset=utf-8")
+    if format == "docx":
+        return _download(docs_io.markdown_to_docx(brief.markdown(b), b["title"]), f"discovery-alerts-brief-{stamp}.docx", "application/vnd.openxmlformats-officedocument.wordprocessingml.document")
+    return {**b, "markdown": brief.markdown(b)}
 
 
 @app.post("/api/alerts2/whales")

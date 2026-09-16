@@ -195,6 +195,43 @@ def _deliver_business_event(event: str, attrs: Dict[str, Any]) -> Dict[str, Any]
         return {"status": "failed", "error": redact(str(e))[:200]}
 
 
+def inform_payload(alert_id: str, user_id: str, det_key: str, attrs: Dict[str, Any], alert_name: str = "") -> Dict[str, Any]:
+    """One MoEngage Inform request: the alert template in MoEngage, the customer id, an idempotent transaction id, and the
+    alert's facts as personalised attributes. Inform rejects a repeated transaction_id, so a retry can never double-send."""
+    from .cohort import hash_id
+    body = {"alert_id": alert_id, "user_id": str(user_id), "transaction_id": f"{det_key}:{hash_id(str(user_id))[:12]}"[:120],
+            "payloads": {"PUSH": {"personalized_attributes": {k: ("" if v is None else str(v)) for k, v in attrs.items()
+                                                              if k in ("title", "body", "token", "product", "signal", "direction", "landing", "move", "price", "level", "size_usd", "why", "cohort")}}}}
+    if alert_name:
+        body["alert_reference_name"] = alert_name
+    return body
+
+
+def _deliver_inform(det_key: str, attrs: Dict[str, Any], user_ids: List[str]) -> Dict[str, Any]:
+    """Send one alert to the employee list through MoEngage Inform. Returns counts; a 409 (duplicate transaction) counts as already sent."""
+    from ..moengage import MoEngageClient
+    alert_id = get_setting("ma2_inform_alert_id", "").strip()
+    alert_name = get_setting("ma2_inform_alert_name", "").strip()
+    if not alert_id:
+        return {"status": "failed", "error": "ma2_inform_alert_id is not set (the Inform alert template id from MoEngage → Inform)", "sent": 0, "failed": len(user_ids)}
+    if getattr(MoEngageClient(), "mock_mode", True):
+        return {"status": "recorded_mock", "sent": len(user_ids), "failed": 0, "channel": "inform"}
+    from ..moengage.public_api import PublicAPI
+    api = PublicAPI()
+    sent = failed = dup = 0; err = None
+    for uid in user_ids:
+        try:
+            api.inform_send(inform_payload(alert_id, uid, det_key, attrs, alert_name))
+            sent += 1
+        except Exception as e:
+            msg = redact(str(e))
+            if "409" in msg:
+                dup += 1
+            else:
+                failed += 1; err = msg[:160]
+    return {"status": "sent" if sent or dup else "failed", "sent": sent, "duplicates": dup, "failed": failed, "error": err, "channel": "inform"}
+
+
 def _attrs(d: Dict[str, Any], key: str, copy: Dict[str, str], run_id: Optional[int]) -> Dict[str, Any]:
     f = d.get("fields") or {}
     return {"ma_category": d["category"], "ma_theme": d["theme"], "ma_alert_type": d["alert_type"], "ma_slot": d.get("slot") or "",

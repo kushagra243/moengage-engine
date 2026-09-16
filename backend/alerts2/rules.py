@@ -50,6 +50,10 @@ DEFAULTS: Dict[str, Any] = {
     "discovery_move_tokens": ["BTC", "ETH"],
     "whale_feed_ttl_min": 60,                  # how long a posted whale trade stays eligible
     "whale_feed_min_usd": 250000.0,            # smallest trade the feed accepts
+    # ── staged rollout: internal employees first, the whole base only after that has run ──
+    "internal_segment": "INTERNAL_EMPLOYEES",  # MoEngage custom segment of employee accounts; the first experiment goes nowhere else
+    "internal_min_days": 3,                    # the internal stage must have run this long…
+    "internal_min_fires": 5,                   # …and delivered this many alerts before "all users" can be launched
     "perishable_signals": ["large_trades", "milestone", "btc_move"],   # a price fact is worth sending while it is true
     "evergreen_signals": ["most_traded", "ath_atl"],                    # these keep: they wait for the day's send window
     "send_windows": [{"id": "morning", "start": "09:15", "end": "10:30", "why": "first look of the day"},
@@ -152,9 +156,39 @@ _EXTRA_RULES = [
 ]
 
 
-def config() -> Dict[str, Any]:
+# The internal-employee stage runs "unhinged": more alerts, no waiting for windows, and the agent adds its own picks.
+# Everything that is law (copy linter, freshness, kill switch, the segment) still applies. Overridable with ma2_internal_profile_json.
+INTERNAL_PROFILE: Dict[str, Any] = {
+    "discovery_daily_cap": 40,
+    "discovery_signal_caps": {"large_trades": 10, "most_traded": 2, "milestone": 8, "btc_move": 6, "ath_atl": 6, "agent_pick": 12},
+    "milestone_level_cooldown_min": 60,
+    "perishable_signals": ["large_trades", "milestone", "btc_move", "most_traded", "ath_atl", "agent_pick"],   # everything goes out on detection
+    "evergreen_signals": [],
+    "quiet_start": "23:00", "quiet_end": "07:00",
+    "agent_autonomy": True,                    # the agent rewrites copy and adds picks without a human click per alert
+    "agent_every_min": 15,                     # at most one model call per this many minutes
+    "agent_max_picks": 3,
+}
+
+
+def config(stage: Optional[str] = None) -> Dict[str, Any]:
+    """Live config; stage="internal" layers the internal-employee profile on top."""
     from ..database import get_setting
     cfg = copy.deepcopy(DEFAULTS)
+    if stage == "internal":
+        prof = copy.deepcopy(INTERNAL_PROFILE)
+        try:
+            prof.update(json.loads(get_setting("ma2_internal_profile_json", "") or "{}") or {})
+        except Exception:
+            pass
+        for k, v in prof.items():
+            if isinstance(v, dict) and isinstance(cfg.get(k), dict):
+                cfg[k] = {**cfg[k], **v}
+            else:
+                cfg[k] = v
+        cfg["stage_profile"] = "internal"
+        if str(get_setting("ma2_agent_autonomy", "true")).lower() == "false":
+            cfg["agent_autonomy"] = False
     try:
         over = json.loads(get_setting("ma2_config_json", "") or "{}")
         for k, v in (over or {}).items():

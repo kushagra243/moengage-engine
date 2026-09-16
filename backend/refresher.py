@@ -162,7 +162,7 @@ JOBS: List[Dict[str, Any]] = [
     {"name": "prices", "minutes": 1, "fn": _j_prices, "feeds": "Brain Lab prices · movers · OI · funding (real time)"},
     {"name": "market_context", "minutes": 10, "fn": _j_market_context, "feeds": "Brain Lab · Brain · signals (full picture incl. news, listings, competitors)"},
     {"name": "signals", "minutes": 5, "fn": _j_signals, "feeds": "Signal Bridge → MoEngage business events"},
-    {"name": "market_alerts", "minutes": 15, "fn": _j_market_alerts, "feeds": "Market Alerts 2.0: the per-user pilot and the discovery experiment, each only while approved"},
+    {"name": "market_alerts", "minutes": 5, "fn": _j_market_alerts, "priority": True, "feeds": "Market Alerts 2.0: the per-user pilot and the discovery experiment, each only while approved"},
     {"name": "benchmarks", "minutes": 15, "fn": _j_benchmarks, "feeds": "Brain Lab → Comparison"},
     {"name": "campaign_intel", "minutes": 15, "fn": _j_campaign_intel, "feeds": "Brain Lab → Competitors (their campaigns)"},
     {"name": "onchain_cex", "minutes": 15, "fn": _j_onchain_cex, "feeds": "Brain Lab → On-chain vs CEX"},
@@ -266,8 +266,10 @@ def run_due(max_jobs: int = 3) -> List[Dict[str, Any]]:
     try:
         due = due_jobs()
         order = {j["name"]: i for i, j in enumerate(JOBS)}
-        due.sort(key=lambda n: order.get(n, 99))
-        return [run_job(n) for n in due[:max_jobs]]
+        prio = {j["name"] for j in JOBS if j.get("priority")}
+        due.sort(key=lambda n: (0 if n in prio else 1, order.get(n, 99)))
+        keep = [n for n in due if n in prio] + [n for n in due if n not in prio][:max_jobs]   # priority jobs never wait behind slow sources
+        return [run_job(n) for n in keep]
     finally:
         _lock.release()
 

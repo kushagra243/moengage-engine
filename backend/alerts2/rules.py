@@ -59,9 +59,11 @@ DEFAULTS: Dict[str, Any] = {
     "window_explore_pct": 20,                  # share of days that try a window other than the best one so far
     "window_min_days": 3,                      # days of stats before a window can be called best
     "window_default": "evening",
-    "large_trade_min_usd": 2000000.0,          # a 5-minute candle must move at least this much notional
-    "large_trade_vol_multiple": 3.0,           # …and be this far above its own median
-    "large_trade_size_multiple": 2.0,          # …with an average trade size this far above its median
+    "large_trade_min_usd": 3000000.0,          # a 5-minute candle must move at least this much notional
+    "large_trade_vol_multiple": 4.0,           # …and be this far above its own median
+    "large_trade_size_multiple": 3.0,          # …with an average trade size this far above its median
+    "perishable_max_age_min": {"large_trades": 30, "btc_move": 90, "milestone": 60},   # older than this is recorded as stale, never announced late
+    "milestone_level_cooldown_min": 360,       # the same round level is not announced again within this window (BTC chopping around 76,000)
     # ── Engine guardrails (ours, not the BRD's) ───────────────────────────────
     "holdout_pct": 20,
     "quiet_start": "22:00", "quiet_end": "08:00",   # IST; push outside 08:00–22:00 is DND for Indian users

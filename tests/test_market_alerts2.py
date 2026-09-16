@@ -410,7 +410,7 @@ def test_discovery_dry_run_caps_and_live_gate(monkeypatch):
     fires = discovery.fires(10)
     assert fires and all(f["status"] == "recorded_mock" for f in fires)
     again = discovery.run("live", now=now, ctx=_disc_ctx())
-    assert again["sent"] == 0 and again["summary"]["suppression_reasons"].get("already_sent_today"), "the same signal and token does not repeat in a day"
+    assert again["sent"] == 0 and again["summary"]["already_recorded"] >= 1, "a detection already judged is never judged twice"
 
     quiet = discovery.run("live", now=now.replace(hour=23), ctx=_disc_ctx())
     assert quiet["sent"] == 0 and quiet["summary"]["quiet_hours"]
@@ -492,7 +492,12 @@ def test_evergreen_signals_wait_for_the_window_and_perishable_ones_do_not(monkey
     from backend.database import get_db, set_setting
     set_setting("mock_mode", "true")
     discovery.register()
-    conn = get_db(); conn.execute("DELETE FROM ma2_queue"); conn.execute("DELETE FROM ma2_discovery_fires"); conn.execute("DELETE FROM ma2_window_days"); conn.commit(); conn.close()
+    from backend.alerts2 import detect
+    detect.init_tables()
+    conn = get_db()
+    for t in ("ma2_queue", "ma2_discovery_fires", "ma2_window_days", "ma2_detections", "ma2_watermarks"):
+        conn.execute(f"DELETE FROM {t}")
+    conn.commit(); conn.close()
     monkeypatch.setattr(discovery.sig_mod, "hl_candles", lambda *a, **k: [])
     monkeypatch.setattr(discovery.sig_mod, "zscore", lambda *a, **k: None)
     from backend.market import sources
@@ -598,3 +603,180 @@ def test_preflight_names_every_reason_nothing_reached_moengage():
     assert set(checks) == {"Mode", "Campaigns API key", "Creator email", "Business event", "Campaign draft", "Engine firing"}
     assert checks["Mode"]["ok"] is False and "nothing reaches MoEngage" in checks["Mode"]["detail"]
     assert all(c["ok"] or c["fix"] for c in checks.values()), "anything blocked says how to unblock it"
+
+
+# ── determinism: every closed candle judged exactly once, nothing missed ──────
+def _c5(start_ts, n, base_v=1000.0, base_n=100, px=100.0):
+    return [{"t": start_ts + i * 300, "o": px, "h": px + 0.2, "l": px - 0.2, "c": px, "v": base_v, "n": base_n} for i in range(n)]
+
+
+def test_only_closed_candles_are_judged_and_the_forming_one_waits():
+    from backend.alerts2 import detect
+    start = 1_789_000_000
+    rows = _c5(start, 60)
+    rows[-1] = {**rows[-1], "v": 20000.0, "n": 50, "c": 103.0, "o": 100.0}          # a burst in the newest candle
+    now_ts = start + 59 * 300 + 120                                                  # that candle is still forming
+    assert detect.closed(rows, "5m", now_ts)[-1]["t"] == rows[-2]["t"]
+    assert detect.burst_at(detect.closed(rows, "5m", now_ts), 58, 1000, 3.0, 2.0) is None
+    now_ts = start + 60 * 300                                                        # it has closed
+    closed = detect.closed(rows, "5m", now_ts)
+    assert closed[-1]["t"] == rows[-1]["t"] and detect.burst_at(closed, 59, 1000, 3.0, 2.0)
+
+
+def test_watermark_makes_a_late_run_catch_up_and_never_double_judge(monkeypatch):
+    from backend.alerts2 import detect, rules
+    from backend.database import get_db
+    conn = get_db(); conn.execute("DELETE FROM ma2_watermarks"); conn.execute("DELETE FROM ma2_detections"); conn.commit(); conn.close()
+    cfg = rules.config(); cfg.update({"large_trade_min_usd": 1000, "large_trade_vol_multiple": 3.0, "large_trade_size_multiple": 2.0})
+    start = 1_789_100_000
+    rows = _c5(start, 90)
+    for i in (60, 70, 80):                                                           # three bursts, 50 minutes apart
+        rows[i] = {**rows[i], "v": 20000.0, "n": 50, "c": 103.0}
+    now = datetime(2026, 9, 16, 12, 0, tzinfo=IST)
+    # first live run judges only what is closed at t=61 candles; then the job is late by 45 minutes
+    dets, _ = detect.scan_bursts("BTC", rows[:61], cfg, start + 61 * 300, True, now)
+    assert [int(d["candle_t"]) for d in dets] == [start + 60 * 300]
+    fresh = detect.record(dets, now); assert len(fresh) == 1
+    late = detect.scan_bursts("BTC", rows, cfg, start + 90 * 300, True, now)[0]      # 29 candles closed since: both later bursts, nothing repeated
+    assert [int(d["candle_t"]) for d in late] == [start + 70 * 300, start + 80 * 300]
+    assert len(detect.record(late, now)) == 2
+    again = detect.scan_bursts("BTC", rows, cfg, start + 90 * 300, True, now)[0]
+    assert again == [] and detect.record(dets + late, now) == [], "the same minute run twice produces nothing new"
+
+
+def test_milestone_is_read_off_the_price_path_not_a_point_sample():
+    from backend.alerts2.detect import path_crossings
+    # BTC spikes through 78,000 to 78,120 and closes back at 77,950 inside one 5-minute candle
+    spike = [{"t": 1, "o": 77900, "h": 78120, "l": 77880, "c": 77950}]
+    x = path_crossings(spike, 77900, 1000)
+    assert [(c["direction"], c["level"]) for c in x] == [], "up through 78k and straight back down nets to no crossing"
+    held = [{"t": 1, "o": 77900, "h": 78120, "l": 77880, "c": 78050}]
+    assert [(c["direction"], c["level"]) for c in path_crossings(held, 77900, 1000)] == [("up", 78000)]
+    # a fast fall through two bands in one candle reports both, in order
+    crash = [{"t": 2, "o": 78050, "h": 78060, "l": 75900, "c": 76010}]
+    assert [(c["direction"], c["level"]) for c in path_crossings(crash, 78050, 1000)] == [("down", 78000), ("down", 77000)]
+    # the reference is the previous close, so a gap between runs is not lost
+    gap = [{"t": 3, "o": 80010, "h": 80020, "l": 79990, "c": 80005}]
+    assert [(c["direction"], c["level"]) for c in path_crossings(gap, 78990, 1000)] == [("up", 79000), ("up", 80000)]
+
+
+def test_quiet_hours_hold_perishable_facts_instead_of_dropping_them(monkeypatch):
+    from backend.alerts2 import discovery, timing, detect, service
+    from backend import approvals
+    from backend.database import get_db, set_setting
+    set_setting("mock_mode", "true"); discovery.register(); detect.init_tables()
+    conn = get_db()
+    for t in ("ma2_queue", "ma2_discovery_fires", "ma2_window_days", "ma2_detections", "ma2_watermarks"):
+        conn.execute(f"DELETE FROM {t}")
+    conn.execute("DELETE FROM ma2_state WHERE key='discovery'"); conn.commit(); conn.close()
+    monkeypatch.setattr(discovery.sig_mod, "hl_candles", lambda *a, **k: [])
+    monkeypatch.setattr(discovery.sig_mod, "mids", lambda: {})
+    from backend.market import sources
+    monkeypatch.setattr(sources, "klines", lambda *a, **k: [])
+    import time as _t, os
+    if os.path.exists(discovery._whale_path()):
+        os.remove(discovery._whale_path())                                       # trades left by earlier tests
+    discovery.ingest_whales([{"token": "SOL", "side": "sell", "size_usd": 6_000_000, "ts": _t.time()}], actor="test")
+    p = discovery.propose("night", days=0, signals=["large_trades"], created_by="test")
+    approvals.approve_and_execute(p["proposal_id"], decided_by="lead")
+    night = datetime(2026, 9, 16, 23, 30, tzinfo=IST)
+    r = discovery.run("live", now=night, ctx=_disc_ctx())
+    assert r["sent"] == 0 and r["held_quiet_hours"] == 1, "held, not lost"
+    q = [x for x in timing.queue_view() if x["status"] == "queued"]
+    assert q and q[0]["due_at"].startswith("2026-09-17T08:00")
+    assert discovery.release(datetime(2026, 9, 17, 7, 59, tzinfo=IST), "test")["fired"] == 0
+    assert discovery.release(datetime(2026, 9, 17, 8, 1, tzinfo=IST), "test")["fired"] == 1, "delivered the moment quiet hours end"
+
+
+def test_held_milestone_is_dropped_if_the_price_fell_back(monkeypatch):
+    from backend.alerts2 import discovery, timing, rules
+    from backend.database import get_db
+    conn = get_db(); conn.execute("DELETE FROM ma2_queue"); conn.commit(); conn.close()
+    now = datetime(2026, 9, 16, 23, 0, tzinfo=IST)
+    timing.enqueue({"signal": "milestone", "token": "BTC", "direction": "up", "value": 78000, "title": "t", "body": "b"}, now, rules.config(), actor="test",
+                   due_at=datetime(2026, 9, 17, 8, 0, tzinfo=IST))
+    monkeypatch.setattr(discovery.sig_mod, "mids", lambda: {"BTC": 77800.0})
+    out = discovery.release(datetime(2026, 9, 17, 8, 5, tzinfo=IST), "test", regime="chop")
+    assert out["fired"] == 0 and [x["status"] for x in timing.queue_view()][0] == "stale", "a crossing that reversed overnight is not announced"
+
+
+def test_fires_are_written_the_moment_they_happen(monkeypatch):
+    """A crash after delivery must not double-send on the next tick: the ledger row exists before the loop moves on."""
+    from backend.alerts2 import discovery
+    from backend.database import get_db
+    from datetime import datetime as _dt
+    conn = get_db(); conn.execute("DELETE FROM ma2_discovery_fires"); conn.commit(); conn.close()
+    now = _dt(2026, 9, 16, 12, 0, tzinfo=IST)
+    discovery._write_fire(None, now, {"signal": "btc_move", "token": "BTC", "product": "futures", "direction": "up", "value": 3.1}, {"title": "t", "body": "b"}, "recorded_mock")
+    assert discovery.fired_today(now)["btc_move|BTC|up"] == 1
+
+
+def test_coverage_replay_finds_what_a_live_path_recorded_and_flags_what_it_did_not():
+    from backend.alerts2 import detect, rules
+    from backend.database import get_db
+    conn = get_db(); conn.execute("DELETE FROM ma2_detections"); conn.commit(); conn.close()
+    cfg = rules.config(); cfg.update({"large_trade_min_usd": 1000, "large_trade_vol_multiple": 3.0, "large_trade_size_multiple": 2.0, "milestone_bands": {}, "discovery_move_tokens": []})
+    day = "2026-09-16"
+    d0 = datetime.strptime(day, "%Y-%m-%d").replace(tzinfo=IST).timestamp()
+    rows = _c5(int(d0) - 48 * 300, 48 + 288)                                       # a full day plus the baseline before it
+    for i in (100, 200):
+        rows[i] = {**rows[i], "v": 20000.0, "n": 50, "c": 103.0}
+    now = datetime(2026, 9, 17, 1, 0, tzinfo=IST)
+    detect.record([{"det_key": f"large_trades|ETH|{int(rows[100]['t'])}", "signal": "large_trades", "token": "ETH", "candle_t": rows[100]["t"], "value": 1}], now)
+    c = detect.coverage(day, cfg, ["ETH"], lambda t: rows, lambda t: [])
+    assert c["expected"] == 2 and c["recorded"] == 1 and c["missed_count"] == 1
+    assert c["missed"][0]["det_key"] == f"large_trades|ETH|{int(rows[200]['t'])}"
+
+
+def test_alerts_job_runs_every_five_minutes_and_is_never_starved():
+    from backend import refresher
+    j = next(x for x in refresher.JOBS if x["name"] == "market_alerts")
+    assert j["minutes"] == 5 and j.get("priority") is True
+
+
+def test_catch_up_records_old_facts_but_only_announces_fresh_ones(monkeypatch):
+    """After an outage the watermark catches up on everything; a burst from three hours ago is recorded as stale, not pushed."""
+    from backend.alerts2 import discovery, detect, rules
+    from backend import approvals
+    from backend.database import get_db, set_setting
+    set_setting("mock_mode", "true"); discovery.register(); detect.init_tables()
+    conn = get_db()
+    for t in ("ma2_queue", "ma2_discovery_fires", "ma2_window_days", "ma2_detections", "ma2_watermarks"):
+        conn.execute(f"DELETE FROM {t}")
+    conn.execute("DELETE FROM ma2_state WHERE key='discovery'"); conn.commit(); conn.close()
+    import os
+    if os.path.exists(discovery._whale_path()):
+        os.remove(discovery._whale_path())
+    now = datetime(2026, 9, 16, 12, 0, tzinfo=IST)
+    start = int(now.timestamp()) - 340 * 300
+    rows = _c5(start, 340)
+    old_i, fresh_i = 340 - 36, 340 - 3                                              # 3 hours ago, and 15 minutes ago
+    for i in (old_i, fresh_i):
+        rows[i] = {**rows[i], "v": 60000.0, "n": 40, "c": 103.0}
+    monkeypatch.setattr(discovery.sig_mod, "hl_candles", lambda tok, interval, n: rows if (tok == "BTC" and interval == "5m") else [])
+    monkeypatch.setattr(discovery.sig_mod, "mids", lambda: {})
+    monkeypatch.setattr(discovery.sig_mod, "zscore", lambda *a, **k: None)
+    from backend.market import sources
+    monkeypatch.setattr(sources, "klines", lambda *a, **k: [])
+    monkeypatch.setattr(rules, "DEFAULTS", {**rules.DEFAULTS, "large_trade_min_usd": 1000, "large_trade_vol_multiple": 3.0, "large_trade_size_multiple": 2.0, "milestone_bands": {}})
+    p = discovery.propose("catchup", days=0, signals=["large_trades"], created_by="test")
+    approvals.approve_and_execute(p["proposal_id"], decided_by="lead")
+    ctx = {"crypto_markets": [{"symbol": "BTC", "price": 103.0, "vol_24h_usd": 9e9}], "crypto": {"regime": {"label": "chop"}}}
+    r = discovery.run("live", now=now, ctx=ctx)
+    dec = {int(d["candle_t"]): d for d in r["summary"]["decisions"] if d["signal"] == "large_trades"}
+    assert dec[rows[fresh_i]["t"]]["decision"] == "recorded_mock"
+    assert dec[rows[old_i]["t"]]["reason"] == "stale_at_detection"
+    outcomes = detect.outcomes_since(now - timedelta(hours=1))
+    assert outcomes.get("sent") == 1 and outcomes.get("suppressed:stale_at_detection") == 1, "both were judged; only the fresh one went out"
+    assert discovery.run("live", now=now, ctx=ctx)["summary"]["already_recorded"] == 0 and detect.watermark("large_trades|BTC|5m") == rows[-1]["t"]
+
+
+def test_the_same_round_level_is_not_announced_twice_in_a_chop():
+    from backend.alerts2 import discovery, rules
+    from backend.database import get_db
+    conn = get_db(); conn.execute("DELETE FROM ma2_discovery_fires"); conn.execute("DELETE FROM ma2_queue"); conn.commit(); conn.close()
+    now = datetime(2026, 9, 16, 12, 0, tzinfo=IST)
+    discovery._write_fire(None, now - timedelta(hours=2), {"signal": "milestone", "token": "BTC", "direction": "up", "value": 76000}, {"title": "t", "body": "b"}, "recorded_mock")
+    assert discovery._level_recent("BTC", 76000, now, rules.config()) is True
+    assert discovery._level_recent("BTC", 77000, now, rules.config()) is False
+    assert discovery._level_recent("BTC", 76000, now + timedelta(hours=7), rules.config()) is False, "after the cooldown it can be news again"

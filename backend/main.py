@@ -1669,6 +1669,13 @@ def alerts2_discovery_status():
     return discovery.status()
 
 
+@app.get("/api/alerts2/discovery/coverage")
+def alerts2_discovery_coverage(day: Optional[str] = None):
+    """Replay a day from candle history: what should have been detected vs what the live path recorded. missed_count must be 0."""
+    from .alerts2 import discovery
+    return discovery.coverage(day)
+
+
 @app.post("/api/alerts2/discovery/run")
 def alerts2_discovery_run(payload: Ma2RunPayload, request: Request):
     from .alerts2 import discovery

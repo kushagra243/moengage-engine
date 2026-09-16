@@ -127,10 +127,15 @@ def queued_keys(now: datetime) -> set:
     return {(r["signal"], r["token"], r["direction"]) for r in rows}
 
 
-def enqueue(item: Dict[str, Any], now: datetime, cfg: Dict[str, Any], actor: str = "engine") -> Dict[str, Any]:
+def enqueue(item: Dict[str, Any], now: datetime, cfg: Dict[str, Any], actor: str = "engine", due_at: Optional[datetime] = None) -> Dict[str, Any]:
+    """Queue for the day's window, or for an explicit time (a perishable fact held through quiet hours)."""
     day = now.strftime("%Y-%m-%d")
-    w = window_for_day(day, cfg, actor=actor)["window"]
-    due = next_due(now, w)
+    if due_at is not None:
+        w = {"id": "quiet_end", "start": due_at.strftime("%H:%M"), "end": due_at.strftime("%H:%M")}
+        due = due_at
+    else:
+        w = window_for_day(day, cfg, actor=actor)["window"]
+        due = next_due(now, w)
     ttl = float((cfg.get("queue_ttl_min") or {}).get(item["signal"], 720))
     conn = get_db()
     conn.execute("""INSERT INTO ma2_queue (created_at, signal, token, product, direction, value, title, body, source, window_id, due_at, expires_at, status)

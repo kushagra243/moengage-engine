@@ -77,12 +77,24 @@ def iso_week(d: datetime) -> str:
 
 
 # ── fetchers (network, cached) ────────────────────────────────────────────────
+CANDLES_5M = 340          # ~28 hours: one series shared by the live run and the coverage replay, so both hit the same cache entry
+CANDLES_1H_EXTRA = 30
+
+
 def _post(body: Dict[str, Any]) -> Any:
     from ..security import guarded_session
-    from ..market.sources import UA
-    r = guarded_session("market").post(HL, json=body, timeout=15, headers={"User-Agent": UA, "Content-Type": "application/json"})
-    r.raise_for_status()
-    return r.json()
+    from ..market.sources import UA, SourceDown
+    s = guarded_session("market")
+    for attempt in range(3):
+        r = s.post(HL, json=body, timeout=15, headers={"User-Agent": UA, "Content-Type": "application/json"})
+        if r.status_code == 429 and attempt < 2:
+            time.sleep(1.5 * (attempt + 1))                       # the venue meters requests per minute; a short pause is enough
+            continue
+        if r.status_code == 429:
+            raise SourceDown("liquidity venue rate limited")
+        r.raise_for_status()
+        return r.json()
+    raise SourceDown("liquidity venue rate limited")
 
 
 def mids() -> Dict[str, float]:
@@ -103,8 +115,9 @@ def hl_candles(coin: str, interval: str, n: int) -> List[Dict[str, float]]:
         raw = _post({"type": "candleSnapshot", "req": {"coin": coin, "interval": interval, "startTime": start}})
         if not isinstance(raw, list):
             return None
-        return [{"t": int(c["t"]) / 1000, "o": float(c["o"]), "h": float(c["h"]), "l": float(c["l"]), "c": float(c["c"]), "v": float(c["v"])} for c in raw if isinstance(c, dict)]
-    return cached(f"ma2_c_{coin.replace(':', '_')}_{interval}_{n}", fetch, ttl_s=min(secs, 300)) or []
+        return [{"t": int(c["t"]) / 1000, "o": float(c["o"]), "h": float(c["h"]), "l": float(c["l"]), "c": float(c["c"]), "v": float(c["v"]), "n": int(c.get("n") or 0)}
+                for c in raw if isinstance(c, dict)]
+    return cached(f"ma2_c_{coin.replace(':', '_')}_{interval}_{n}", fetch, ttl_s=min(secs, 120)) or []
 
 
 def options_turnover() -> Dict[str, float]:

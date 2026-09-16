@@ -21,11 +21,12 @@ from typing import Any, Dict, List, Optional, Tuple
 
 from ..database import get_db, get_setting
 from ..security import audit, redact
-from . import rules, signals as sig_mod, timing
+from . import rules, signals as sig_mod, timing, detect
 
 IST = timezone(timedelta(hours=5, minutes=30))
 STRESS = ("capitulation", "high_volatility_down")
 EVENT = "MA2_Discovery"
+_BAD_TOKENS: Dict[str, float] = {}          # token → retry-after timestamp, for symbols the venue answers 500 to (delisted, renamed)
 
 SIGNALS = {
     "large_trades": {"label": "Large trades (whale)", "why": "CoinDCX's whale module when it posts trades in, otherwise a burst of unusual notional volume and average trade size in one 5-minute candle", "product": "futures"},
@@ -63,64 +64,73 @@ def large_trade_burst(candles: List[Dict[str, float]], min_usd: float, vol_mult:
             "avg_trade_usd": round(last_s), "move_pct": round(move, 2), "direction": "up" if move >= 0 else "down", "price": float(c["c"])}
 
 
-def _candidates(cfg: Dict[str, Any], state: Dict[str, Any], ctx: Dict[str, Any], now: datetime, whales: List[Dict[str, Any]]) -> Tuple[List[Dict[str, Any]], Dict[str, Any], List[str]]:
+def _candidates(cfg: Dict[str, Any], state: Dict[str, Any], ctx: Dict[str, Any], now: datetime, whales: List[Dict[str, Any]],
+                advance: bool = False) -> Tuple[List[Dict[str, Any]], Dict[str, Any], List[str]]:
+    """Every alert the market produced since the last run. `advance` moves the watermarks (live runs only), so a dry run
+    previews the same set the next live run will judge, and a late live run catches up on everything that closed meanwhile."""
     errors: List[str] = []
     out: List[Dict[str, Any]] = []
     updates: Dict[str, Any] = {}
+    now_ts = now.timestamp()
     crypto = [r for r in ctx.get("crypto_markets") or [] if isinstance(r, dict) and r.get("symbol")]
     prices = {str(r["symbol"]).upper(): r.get("price") for r in crypto if r.get("price")}
+    try:
+        prices.update({k.split(":", 1)[-1].upper(): v for k, v in sig_mod.mids().items()})      # mark prices beat the cached snapshot
+    except Exception as e:
+        errors.append(f"mark prices: {str(e)[:60]}")
     top = [str(r["symbol"]).upper() for r in sorted(crypto, key=lambda r: -(r.get("vol_24h_usd") or 0))[:int(cfg.get("discovery_scan_tokens") or 25)]]
+    day = now.strftime("%Y-%m-%d")
 
-    # 1. whale feed if the team uploaded one, else the large-trade burst proxy
+    # 1. whale trades from the module, keyed by the trade itself; otherwise every closed 5-minute candle since the watermark
     if whales:
-        for w in whales[:3]:
-            out.append({"signal": "large_trades", "token": str(w.get("token", "")).upper(), "product": str(w.get("product") or "futures"),
-                        "direction": "up" if str(w.get("side", "buy")).lower() == "buy" else "down", "value": float(w.get("size_usd") or 0),
-                        "from_feed": True, "source": "CoinDCX whale module (liquidity-venue trades)", "fields": {"token": str(w.get("token", "")).upper(), "product": str(w.get("product") or "futures"), "size_usd": w.get("size_usd")}})
+        for w in whales:
+            tok = str(w.get("token", "")).upper()
+            out.append({"det_key": f"large_trades|{tok}|feed:{w.get('side')}:{int(float(w.get('size_usd') or 0))}:{int(float(w.get('ts') or 0))}", "signal": "large_trades",
+                        "token": tok, "product": str(w.get("product") or "futures"), "direction": "up" if str(w.get("side", "buy")).lower() == "buy" else "down",
+                        "value": float(w.get("size_usd") or 0), "candle_t": float(w.get("ts") or now_ts), "from_feed": True,
+                        "source": "CoinDCX whale module (liquidity-venue trades)", "fields": {"token": tok, "product": str(w.get("product") or "futures"), "size_usd": w.get("size_usd")}})
     else:
         for token in top:
+            if _BAD_TOKENS.get(token, 0) > now_ts:
+                continue
             try:
-                c = sig_mod.hl_candles(token, "5m", 60)
-                b = large_trade_burst(c, float(cfg["large_trade_min_usd"]), float(cfg["large_trade_vol_multiple"]), float(cfg["large_trade_size_multiple"]))
-                if b:
-                    out.append({"signal": "large_trades", "token": token, "product": "futures", "direction": b["direction"], "value": b["notional_usd"],
-                                "source": "large-trade burst proxy from public 5-minute candles",
-                                "fields": {"token": token, "product": "futures", "size_usd": b["notional_usd"], "move": b["move_pct"], "price": b["price"]}, "detail": b})
+                dets, _ = detect.scan_bursts(token, sig_mod.hl_candles(token, "5m", sig_mod.CANDLES_5M), cfg, now_ts, advance, now)
+                out.extend(dets)
             except Exception as e:
+                if "500" in str(e):
+                    _BAD_TOKENS[token] = now_ts + 3600          # the venue has no candles for this symbol; ask again in an hour, not every 5 minutes
                 errors.append(f"burst {token}: {str(e)[:60]}")
 
-    # 2. the day's most traded, majors excluded (BRD 4.2)
+    # 2. the day's most traded, majors excluded (BRD 4.2) — a daily fact, keyed by the day
     mt = sig_mod.most_traded(crypto, (cfg.get("volume_exclude") or {}).get("futures", []))
     if mt:
-        out.append({"signal": "most_traded", "token": mt, "product": "futures", "direction": "any", "value": next((r.get("vol_24h_usd") for r in crypto if str(r["symbol"]).upper() == mt), 0),
+        out.append({"det_key": f"most_traded|{mt}|{day}", "signal": "most_traded", "token": mt, "product": "futures", "direction": "any",
+                    "value": next((r.get("vol_24h_usd") for r in crypto if str(r["symbol"]).upper() == mt), 0), "candle_t": now_ts,
                     "source": "24h volume on the liquidity venue", "fields": {"token": mt, "product": "futures"}})
 
-    # 3. round-number milestones against the last price the engine saw
-    day = now.strftime("%Y-%m-%d")
+    # 3. round-number milestones along the closed 5-minute price path since the watermark
     for token, band in (cfg.get("milestone_bands") or {}).items():
-        px = prices.get(token)
-        ms = sig_mod.milestone_cross(state.get(f"ms_last:{token}"), px, float(band))
-        if px:
-            updates[f"ms_last:{token}"] = px
-        if ms:
-            out.append({"signal": "milestone", "token": token, "product": "futures", "direction": ms["direction"], "value": ms["level"],
-                        "source": "round-number band crossed since the last run", "fields": {"token": token, "product": "futures", "price": px, "level": ms["level"]}})
-            if state.get(f"ms_first:{token}:{day}") is None:
-                updates[f"ms_first:{token}:{day}"] = ms["level"]
+        try:
+            dets, last_close = detect.scan_milestones(token, sig_mod.hl_candles(token, "5m", sig_mod.CANDLES_5M), float(band), now_ts, advance, now, state.get(f"ms_close:{token}"))
+            out.extend(dets)
+            if last_close is not None:
+                updates[f"ms_close:{token}"] = last_close
+            for d in dets:
+                if state.get(f"ms_first:{token}:{day}") is None and f"ms_first:{token}:{day}" not in updates:
+                    updates[f"ms_first:{token}:{day}"] = d["value"]
+        except Exception as e:
+            errors.append(f"milestone {token}: {str(e)[:60]}")
 
-    # 4. an unusual move in the majors ("BTC price hike")
+    # 4. an unusual move in the majors, judged on each closed candle since the watermark
     interval = (cfg.get("candle") or {}).get("futures", "1h"); window = int((cfg.get("z_window") or {}).get(interval, 168))
+    secs = detect.INTERVAL_S.get(interval, 3600)
     for token in (cfg.get("discovery_move_tokens") or ["BTC", "ETH"]):
         try:
-            z = sig_mod.zscore([c["c"] for c in sig_mod.hl_candles(token, interval, window + 2)], window)
-            if z and abs(z["z"]) >= float(cfg["z_threshold"]):
-                out.append({"signal": "btc_move", "token": token, "product": "futures", "direction": "up" if z["ret_pct"] >= 0 else "down", "value": z["z"],
-                            "source": f"{interval} move against its own {window}-candle range",
-                            "fields": {"token": token, "product": "futures", "move": z["ret_pct"], "price": prices.get(token) or z.get("price")}})
+            out.extend(detect.scan_moves(token, sig_mod.hl_candles(token, interval, window + sig_mod.CANDLES_1H_EXTRA), interval, window, float(cfg["z_threshold"]), now_ts, advance, now))
         except Exception as e:
             errors.append(f"move {token}: {str(e)[:60]}")
 
-    # 5. 1-year high or low
+    # 5. 1-year high or low — a daily fact, keyed by the day
     week = sig_mod.iso_week(now)
     for token in top[:int(cfg.get("discovery_ath_tokens") or 12)]:
         try:
@@ -129,9 +139,9 @@ def _candidates(cfg: Dict[str, Any], state: Dict[str, Any], ctx: Dict[str, Any],
             if kind:
                 days = state.get(f"ath_days:{token}:{week}") or []
                 blocked = day not in days and len(days) >= int(cfg["ath_cap_per_token_per_week"])
-                out.append({"signal": "ath_atl", "token": token, "product": "futures", "direction": "up" if kind == "ath" else "down", "value": prices.get(token) or 0,
-                            "source": "daily candles, 1-year window", "alert_type": kind, "blocked": "ath_weekly_token_cap" if blocked else None,
-                            "fields": {"token": token, "product": "futures", "price": prices.get(token)}})
+                out.append({"det_key": f"ath_atl|{token}|{kind}:{day}", "signal": "ath_atl", "token": token, "product": "futures", "direction": "up" if kind == "ath" else "down",
+                            "value": prices.get(token) or 0, "candle_t": now_ts, "source": "daily candles, 1-year window", "alert_type": kind,
+                            "blocked": "ath_weekly_token_cap" if blocked else None, "fields": {"token": token, "product": "futures", "price": prices.get(token)}})
         except Exception as e:
             errors.append(f"ath {token}: {str(e)[:60]}")
     return out, updates, errors
@@ -261,10 +271,49 @@ def _whale_feed(all_rows: bool = False) -> List[Dict[str, Any]]:
 
 
 # ── the run ───────────────────────────────────────────────────────────────────
+def _interval_of(c: Dict[str, Any], cfg: Dict[str, Any]) -> float:
+    if c.get("from_feed"):
+        return 0.0
+    if c["signal"] == "btc_move":
+        return float(detect.INTERVAL_S.get((cfg.get("candle") or {}).get("futures", "1h"), 3600))
+    return 300.0
+
+
+def _level_recent(token: str, level: Any, now: datetime, cfg: Dict[str, Any]) -> bool:
+    """Has this round level already been announced (either direction) inside the cooldown?"""
+    if level is None:
+        return False
+    since = (now - timedelta(minutes=float(cfg.get("milestone_level_cooldown_min") or 360))).isoformat()
+    conn = get_db()
+    r = conn.execute("SELECT 1 FROM ma2_discovery_fires WHERE signal='milestone' AND token=? AND value=? AND status IN ('sent','recorded_mock') AND created_at >= ? LIMIT 1",
+                     (token, float(level), since)).fetchone()
+    q = conn.execute("SELECT 1 FROM ma2_queue WHERE signal='milestone' AND token=? AND value=? AND status IN ('queued','sent') AND created_at >= ? LIMIT 1",
+                     (token, float(level), since)).fetchone()
+    conn.close()
+    return bool(r or q)
+
+
+def _write_fire(run_id, now, c, copy, status, error=None) -> None:
+    """One row per delivery, written the moment it happens — a crash after this line can never double-send."""
+    conn = get_db()
+    conn.execute("""INSERT INTO ma2_discovery_fires (run_id, day_ist, week_ist, signal, token, product, direction, value, title, body, status, error, created_at)
+                    VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)""", (run_id, now.strftime("%Y-%m-%d"), sig_mod.iso_week(now), c["signal"], c["token"], c.get("product", "futures"),
+                                                          c.get("direction", "any"), c.get("value"), copy["title"], copy["body"], status, error, now.isoformat()))
+    conn.commit(); conn.close()
+
+
+def _quiet_end(now: datetime, cfg: Dict[str, Any]) -> datetime:
+    h, m = [int(x) for x in str(cfg["quiet_end"]).split(":")[:2]]
+    end = now.replace(hour=h, minute=m, second=0, microsecond=0)
+    return end if end > now else end + timedelta(days=1)
+
+
 def run(mode: str = "dry_run", actor: str = "user", now: Optional[datetime] = None, ctx: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
+    """Judge everything the market produced since the last run. Live runs advance the watermarks and record each
+    detection once; a dry run previews the same set without moving anything."""
     from ..market import context as mctx
     from .service import state_all, state_set_many, _deliver_business_event
-    t0 = time.time(); init_tables()
+    t0 = time.time(); init_tables(); detect.init_tables()
     now = now or datetime.now(IST)
     cfg = rules.config()
     live = is_live(now)
@@ -278,7 +327,12 @@ def run(mode: str = "dry_run", actor: str = "user", now: Optional[datetime] = No
         except Exception as e:
             return {"ok": False, "error": f"no market context: {redact(str(e))[:150]}"}
     state = state_all()
-    cands, updates, errors = _candidates(cfg, state, ctx, now, _whale_feed())
+    cands, updates, errors = _candidates(cfg, state, ctx, now, _whale_feed(), advance=(mode == "live"))
+    already = 0
+    if mode == "live":
+        fresh = detect.record(cands, now)
+        already = len(cands) - len(fresh)
+        cands = fresh
     regime = str(((ctx.get("crypto") or {}).get("regime") or {}).get("label") or (ctx.get("hooks") or {}).get("regime") or "unknown")
     counts = fired_today(now)
     caps = cfg.get("discovery_signal_caps") or {}
@@ -286,28 +340,35 @@ def run(mode: str = "dry_run", actor: str = "user", now: Optional[datetime] = No
     quiet = _quiet(now, cfg)
     stress = regime in STRESS and cfg.get("stress_suppress_discovery", True)
     tpls = rules.templates()
+    perishable = set(cfg.get("perishable_signals") or [])
+    evergreen_set = set(cfg.get("evergreen_signals") or [])
 
     order = list(cfg.get("discovery_order") or ["large_trades", "milestone", "btc_move", "ath_atl", "most_traded"])
-    cands.sort(key=lambda c: (order.index(c["signal"]) if c["signal"] in order else 99, -abs(float(c.get("value") or 0))))
+    cands.sort(key=lambda c: (order.index(c["signal"]) if c["signal"] in order else 99, float(c.get("candle_t") or 0), -abs(float(c.get("value") or 0))))
     decided: List[Dict[str, Any]] = []
-    fires: List[tuple] = []
-    sent = supp = failed = queued_n = 0
+    sent = supp = failed = queued_n = held = 0
     queued = timing.queued_keys(now)
     run_id = None
     if mode == "live":
         conn = get_db(); cur = conn.execute("INSERT INTO ma2_runs (started_at, mode, actor) VALUES (?,?,?)", (now.isoformat(), "discovery", actor)); run_id = cur.lastrowid; conn.commit(); conn.close()
+
+    def outcome(c, o):
+        if mode == "live" and c.get("det_key"):
+            detect.set_outcome(c["det_key"], o, now)
 
     for c in cands:
         key = f"{c['signal']}|{c['token']}|{c['direction']}"
         reason = None
         if c["signal"] not in enabled:
             reason = "signal_not_enabled"
-        elif quiet:
-            reason = "quiet_hours"
         elif stress:
             reason = "stress_regime"
         elif c.get("blocked"):
             reason = c["blocked"]
+        elif c["signal"] in perishable and not c.get("from_feed") and c.get("candle_t") and (now.timestamp() - (float(c["candle_t"]) + _interval_of(c, cfg))) / 60.0 > float((cfg.get("perishable_max_age_min") or {}).get(c["signal"], 60)):
+            reason = "stale_at_detection"            # caught up after an outage: recorded, but a fact this old is not news
+        elif c["signal"] == "milestone" and _level_recent(c["token"], c.get("value"), now, cfg):
+            reason = "same_level_recently"
         elif counts.get(key, 0) >= 1:
             reason = "already_sent_today"
         elif counts.get(c["signal"], 0) >= int(caps.get(c["signal"], 1)):
@@ -317,30 +378,38 @@ def run(mode: str = "dry_run", actor: str = "user", now: Optional[datetime] = No
         tkey = _template_key(c)
         copy = rules.render(tkey, c.get("fields") or {}, tpls.get(tkey))
         row = {**c, "template": tkey, "title": copy["title"], "body": copy["body"], "reason": reason, "decision": "suppressed" if reason else ("would_send" if mode != "live" else "sent")}
-        evergreen = c["signal"] in set(cfg.get("evergreen_signals") or [])
-        if not reason and evergreen and (c["signal"], c["token"], c["direction"]) in queued:
+        evergreen = c["signal"] in evergreen_set
+        if not reason and (evergreen or quiet) and (c["signal"], c["token"], c["direction"]) in queued:
             reason = "already_queued_today"
         if reason:
-            supp += 1
-        elif evergreen:
+            supp += 1; outcome(c, "suppressed:" + reason)
+        elif evergreen or (quiet and c["signal"] in perishable):
+            # evergreen facts wait for the day's window; perishable facts caught in quiet hours are HELD until it ends, not dropped
+            due = None if evergreen else _quiet_end(now, cfg)
             if mode == "live":
-                q = timing.enqueue({**c, "title": copy["title"], "body": copy["body"]}, now, cfg, actor=actor)
-                row["decision"] = "queued"; row["window"] = q["window"]; row["due_at"] = q["due_at"]; row["held_for_min"] = q["held_for_min"]
-                queued.add((c["signal"], c["token"], c["direction"])); queued_n += 1
+                q = timing.enqueue({**c, "title": copy["title"], "body": copy["body"]}, now, cfg, actor=actor, due_at=due)
+                row["decision"] = "queued" if evergreen else "held_quiet_hours"; row["window"] = q["window"]; row["due_at"] = q["due_at"]; row["held_for_min"] = q["held_for_min"]
+                queued.add((c["signal"], c["token"], c["direction"]))
+                outcome(c, "queued" if evergreen else "held_quiet_hours")
             else:
                 w = timing.window_for_day(now.strftime("%Y-%m-%d"), cfg)["window"]
-                row["decision"] = "would_queue"; row["window"] = w["id"]; row["due_at"] = timing.next_due(now, w).isoformat(); queued_n += 1
+                row["decision"] = "would_queue" if evergreen else "would_hold_quiet_hours"; row["window"] = w["id"] if evergreen else "quiet_end"
+                row["due_at"] = (due or timing.next_due(now, w)).isoformat()
+            if evergreen:
+                queued_n += 1
+            else:
+                held += 1
         elif mode == "live":
             r = _deliver_business_event(EVENT, {"signal": c["signal"], "token": c["token"], "product": c["product"], "direction": c["direction"],
                                                 "value": c.get("value"), "title": copy["title"], "body": copy["body"], "landing": "token_page",
-                                                "source": c.get("source"), "run_id": run_id, **{k: v for k, v in (c.get("fields") or {}).items() if k not in ("token", "product")}})
+                                                "source": c.get("source"), "event_key": c.get("det_key"), "run_id": run_id,
+                                                **{k: v for k, v in (c.get("fields") or {}).items() if k not in ("token", "product")}})
             row["decision"] = r["status"]
+            _write_fire(run_id, now, c, copy, r["status"], r.get("error"))
             if r["status"] == "failed":
-                failed += 1; row["error"] = r.get("error")
+                failed += 1; row["error"] = r.get("error"); outcome(c, "failed")
             else:
-                sent += 1
-                _count(counts, c, key)
-            fires.append((run_id, now.strftime("%Y-%m-%d"), sig_mod.iso_week(now), c["signal"], c["token"], c["product"], c["direction"], c.get("value"), copy["title"], copy["body"], r["status"], r.get("error")))
+                sent += 1; _count(counts, c, key); outcome(c, "sent")
         else:
             sent += 1
             _count(counts, c, key)          # a dry run counts against the caps too, so it shows what live would really send
@@ -348,7 +417,7 @@ def run(mode: str = "dry_run", actor: str = "user", now: Optional[datetime] = No
 
     released = release(now, actor, regime) if mode == "live" else {"fired": 0, "expired": 0, "due": len(timing.due_now(now))}
     sent += released.get("fired", 0)
-    summary = {"regime": regime, "quiet_hours": quiet, "stress": stress, "queued": queued_n, "released": released,
+    summary = {"regime": regime, "quiet_hours": quiet, "stress": stress, "queued": queued_n, "held_quiet_hours": held, "already_recorded": already, "released": released,
                "timing": timing.view(cfg, now), "by_signal": {k: sum(1 for d in decided if d["signal"] == k and d["decision"] in ("sent", "recorded_mock", "would_send")) for k in SIGNALS},
                "suppression_reasons": {r: sum(1 for d in decided if d["reason"] == r) for r in {d["reason"] for d in decided if d["reason"]}},
                "detected": len(cands), "decisions": decided[:40], "whale_source": "CoinDCX whale feed" if _whale_feed() else "large-trade burst proxy (public candles)",
@@ -356,9 +425,6 @@ def run(mode: str = "dry_run", actor: str = "user", now: Optional[datetime] = No
     ms = int((time.time() - t0) * 1000)
     conn = get_db()
     if mode == "live":
-        if fires:
-            conn.executemany("""INSERT INTO ma2_discovery_fires (run_id, day_ist, week_ist, signal, token, product, direction, value, title, body, status, error)
-                                VALUES (?,?,?,?,?,?,?,?,?,?,?,?)""", fires)
         conn.execute("UPDATE ma2_runs SET delivery=?, users=0, sent=?, holdout=0, suppressed=?, failed=?, summary_json=?, errors_json=?, ms=? WHERE id=?",
                      ("mock" if get_setting("mock_mode", "true").lower() == "true" else "moengage", sent, supp, failed, json.dumps(summary, default=str), json.dumps(errors[:20]), ms, run_id))
     else:
@@ -369,9 +435,9 @@ def run(mode: str = "dry_run", actor: str = "user", now: Optional[datetime] = No
     if mode == "live":
         ath_tokens = [d["token"] for d in decided if d["signal"] == "ath_atl" and d["decision"] in ("sent", "recorded_mock")]
         state_set_many({**updates, **sig_mod.ath_state_updates(ath_tokens, state, now)})
-        audit("ma2.discovery_run", {"run_id": run_id, "sent": sent, "failed": failed}, actor=actor)
+        audit("ma2.discovery_run", {"run_id": run_id, "sent": sent, "failed": failed, "held": held}, actor=actor)
     return {"ok": True, "run_id": run_id, "mode": mode, "detected": len(cands), ("sent" if mode == "live" else "would_send"): sent,
-            "queued": queued_n, "released": released.get("fired", 0), "suppressed": supp, "failed": failed, "ms": ms, "summary": summary, "errors": errors[:8]}
+            "queued": queued_n, "held_quiet_hours": held, "released": released.get("fired", 0), "suppressed": supp, "failed": failed, "ms": ms, "summary": summary, "errors": errors[:8]}
 
 
 def release(now: datetime, actor: str = "engine", regime: Optional[str] = None) -> Dict[str, Any]:
@@ -397,20 +463,31 @@ def release(now: datetime, actor: str = "engine", regime: Optional[str] = None) 
         return {"fired": 0, "expired": expired + len(items), "due": len(items), "held": "stress_regime"}
     counts = fired_today(now)
     fired = 0
+    mids: Dict[str, float] = {}
+    if any(it["signal"] == "milestone" for it in items):
+        try:
+            mids = {k.split(":", 1)[-1].upper(): v for k, v in sig_mod.mids().items()}
+        except Exception:
+            mids = {}
     for it in items:
         key = f"{it['signal']}|{it['token']}|{it['direction']}"
         if counts.get(key, 0) >= 1 or counts.get(it["signal"], 0) >= int((cfg.get("discovery_signal_caps") or {}).get(it["signal"], 1)) or counts.get("_total", 0) >= int(cfg.get("discovery_daily_cap") or 3):
             timing.mark(it["id"], "expired", now)
             continue
+        if it["signal"] == "milestone" and mids.get(it["token"]) is not None:
+            px, level = float(mids[it["token"]]), float(it["value"] or 0)
+            if (it["direction"] == "up" and px < level) or (it["direction"] == "down" and px > level):
+                timing.mark(it["id"], "stale", now)              # the fact stopped being true while it waited
+                continue
         r = _deliver_business_event(EVENT, {"signal": it["signal"], "token": it["token"], "product": it["product"], "direction": it["direction"],
                                             "value": it["value"], "title": it["title"], "body": it["body"], "landing": "token_page",
                                             "source": it.get("source"), "window": it["window_id"], "queued_at": it["created_at"]})
         timing.mark(it["id"], "sent" if r["status"] != "failed" else "failed", now)
         conn = get_db()
-        conn.execute("""INSERT INTO ma2_discovery_fires (run_id, day_ist, week_ist, signal, token, product, direction, value, title, body, status, error)
-                        VALUES (?,?,?,?,?,?,?,?,?,?,?,?)""",
+        conn.execute("""INSERT INTO ma2_discovery_fires (run_id, day_ist, week_ist, signal, token, product, direction, value, title, body, status, error, created_at)
+                        VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)""",
                      (None, now.strftime("%Y-%m-%d"), sig_mod.iso_week(now), it["signal"], it["token"], it["product"], it["direction"], it["value"],
-                      it["title"], it["body"], r["status"], r.get("error")))
+                      it["title"], it["body"], r["status"], r.get("error"), now.isoformat()))
         conn.commit(); conn.close()
         if r["status"] != "failed":
             fired += 1
@@ -637,6 +714,25 @@ def preflight() -> List[Dict[str, Any]]:
     return out
 
 
+def coverage(day: Optional[str] = None) -> Dict[str, Any]:
+    """Replay a day from candle history and prove nothing slipped past the live path. missed_count must be zero."""
+    from ..market import context as mctx
+    cfg = rules.config()
+    day = day or datetime.now(IST).strftime("%Y-%m-%d")
+    ctx = mctx._latest(24 * 3600) or {}
+    crypto = [r for r in ctx.get("crypto_markets") or [] if isinstance(r, dict) and r.get("symbol")]
+    top = [str(r["symbol"]).upper() for r in sorted(crypto, key=lambda r: -(r.get("vol_24h_usd") or 0))[:int(cfg.get("discovery_scan_tokens") or 25)]]
+    tokens = list(dict.fromkeys(top + list((cfg.get("milestone_bands") or {}).keys()) + list(cfg.get("discovery_move_tokens") or [])))
+    interval = (cfg.get("candle") or {}).get("futures", "1h"); window = int((cfg.get("z_window") or {}).get(interval, 168))
+    out = detect.coverage(day, cfg, tokens, lambda t: sig_mod.hl_candles(t, "5m", sig_mod.CANDLES_5M), lambda t: sig_mod.hl_candles(t, interval, window + sig_mod.CANDLES_1H_EXTRA))
+    out["outcomes"] = detect.outcomes_since(datetime.strptime(day, "%Y-%m-%d").replace(tzinfo=IST))
+    out["whale_feed"] = bool(_whale_feed())
+    out["live_since"] = ((experiment() or {}).get("started_at") or "")[:16]
+    out["note"] = ("expected = every detection a full replay of the day's closed candles produces; recorded = those the LIVE path judged (dry runs record nothing). "
+                   "missed must be zero from the moment the experiment went live; a stale outcome means it was seen but too old to announce")
+    return out
+
+
 def status(now: Optional[datetime] = None) -> Dict[str, Any]:
     now = now or datetime.now(IST)
     st = is_live(now)
@@ -651,6 +747,9 @@ def status(now: Optional[datetime] = None) -> Dict[str, Any]:
             "caps": {"platform_per_day": cfg.get("discovery_daily_cap"), "per_signal": cfg.get("discovery_signal_caps"), "quiet": f"{cfg['quiet_start']}–{cfg['quiet_end']} IST"},
             "whale_source": "CoinDCX whale feed (uploaded)" if _whale_feed() else "large-trade burst proxy from public 5-minute candles",
             "timing": timing.view(cfg, now), "continuous": bool((st["experiment"] or {}).get("continuous")), "preflight": preflight(),
+            "determinism": {"cadence_min": 5, "closed_candles_only": True, "watermarks": True,
+                            "outcomes_today": detect.outcomes_since(now.replace(hour=0, minute=0, second=0, microsecond=0)),
+                            "note": "every closed candle is judged once; a late run catches up; quiet hours hold perishable facts instead of dropping them; use /api/alerts2/discovery/coverage to replay a day"},
             "event": EVENT, "fires": fires(20),
             "setup": [
                 {"step": f"Create the business event {EVENT}", "detail": "Attributes: signal, token, product, direction, value, title, body, landing, source, plus move, price, level, size_usd where they apply."},

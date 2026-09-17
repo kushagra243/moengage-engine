@@ -83,6 +83,19 @@ def test_every_row_ends_in_a_working_affordance():
     assert [r["k"] for r in p["detail"]["rules"]] == ["SEND CAP", "HOLDOUT", "STOPS IF", "SUCCESS IS"] and p["detail"]["run"]["label"] == "RUN THIS PLAYBOOK NOW"
 
 
+def test_playbook_screen_reads_without_scrolling_past_the_library():
+    """The chosen playbook comes first with previous/next; the library is a grouped list with short labels, not a wall of tabs."""
+    from backend import v3
+    p = v3.plays()
+    assert p["detail"]["position"].startswith("1 of ") and p["detail"]["prev"] is None and p["detail"]["next"] == p["tabs"][1]["id"]
+    second = v3.plays(p["tabs"][1]["id"])
+    assert second["detail"]["position"].startswith("2 of ") and second["detail"]["prev"] == p["tabs"][0]["id"]
+    assert all(len(t["short"]) <= 47 and "(" not in t["short"] and t["group"] and isinstance(t["steps"], int) for t in p["tabs"])
+    assert p["groups"] and p["groups"][0] in ("Onboarding", "Activation") and all(t["group"] in p["groups"] for t in p["tabs"])
+    assert v3._short_name("Funded → first trade (72h)") == "Funded → first trade"
+    assert v3._short_name("A very long playbook name that goes on and on about the same transition again").endswith("…")
+
+
 def test_defer_hides_until_tomorrow_and_approve_executes_the_proposal():
     from backend import v3, approvals
     from backend.database import set_setting

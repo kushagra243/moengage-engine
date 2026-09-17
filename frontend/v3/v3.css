@@ -93,19 +93,38 @@ button{font:inherit;color:inherit;background:none;border:0;cursor:pointer;paddin
 .run .metric{flex:1 1 220px;color:var(--text-dim);font-size:13px}
 .run .status{flex:0 0 170px;font-size:13px}
 
-/* playbooks */
-.tabs{display:flex;flex-wrap:wrap;gap:8px 22px;margin:0 0 30px}
-.tabs a{font-size:13px;color:var(--text-dim)}
-.tabs a.on{color:var(--text-hi);border-bottom:1px solid var(--accent);padding-bottom:3px}
-.tabs .v{color:var(--text-ghost);font-size:11px;margin-left:6px}
+/* playbooks: the chosen one first and whole, the library below it */
+.play .tagline{display:flex;flex-wrap:wrap;gap:8px 24px;align-items:baseline;justify-content:space-between;margin:0 0 16px}
+.play .switch{display:flex;gap:22px;font-size:12px;letter-spacing:.12em}
+.play .switch a{color:var(--text-dim)}
+.play .switch a:hover{color:var(--accent)}
 .play h2{font:500 24px/1.3 var(--display);color:var(--text-hi);margin:0 0 4px}
-.play .metaline{font-size:13px;color:var(--text-mute);margin:0 0 26px}
+.play .metaline{font-size:13px;color:var(--text-mute);margin:0 0 14px}
+.play .body{margin:0 0 22px}
+.step{padding:12px 0}
 .step .n{flex:0 0 28px;color:var(--text-mute)}
 .step .st{flex:1 1 360px}
 .step .st b{color:var(--text-hi);font-weight:500;display:block}
 .step .gate{flex:0 0 110px;font-size:12px;letter-spacing:.14em;text-transform:uppercase}
+.rules{margin-top:22px}
+.rules .row{padding:10px 0}
 .rules .k{flex:0 0 130px;font-size:12px;letter-spacing:.2em;color:var(--text-mute)}
 .rules .v{flex:1 1 300px;color:var(--text-body)}
+.play .runline{margin:24px 0 0}
+.picker .lead{font-size:15px;margin-bottom:18px}
+.pk-find{display:flex;align-items:baseline;gap:18px;border-bottom:1px solid var(--hairline-hi);padding:0 0 10px;margin:0 0 6px}
+.pk-find input{flex:1 1 auto;background:transparent;border:0;color:var(--text-hi);font:400 14px var(--mono);padding:4px 0;min-width:0}
+.pk-find input::placeholder{color:var(--text-ghost)}
+.pk-group{margin:26px 0 4px}
+.pk-group[hidden]{display:none}
+a.pk{display:flex;color:var(--text-body);padding:9px 0;gap:10px 22px}
+a.pk[hidden]{display:none}
+a.pk .grow{flex:1 1 320px}
+a.pk .small{flex:0 0 auto;white-space:nowrap}
+a.pk .verb{color:var(--text-dim)}
+a.pk:hover .grow,a.pk:hover .verb{color:var(--accent)}
+a.pk.on .grow{color:var(--text-hi)}
+a.pk.on .verb{color:var(--green)}
 
 /* ask */
 .ask{position:fixed;left:0;right:0;bottom:0;background:rgba(7,11,16,.94);display:flex;align-items:center;gap:16px;padding:16px 34px;max-width:920px;margin:0 auto;z-index:4}

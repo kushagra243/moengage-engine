@@ -1,6 +1,7 @@
 'use strict';
 const TOKEN = (document.querySelector('meta[name="local-token"]') || {}).content || '';
 const $ = (s) => document.querySelector(s);
+const $$ = (s) => Array.from(document.querySelectorAll(s));
 const esc = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => ({'&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;'}[c]));
 const S = {screen: 'today', focusKey: null, resolved: new Set(), selectedSop: null, toast: '', clock: '', data: {}, params: {}};
 const SCREENS = [['today', 'Today'], ['rivals', 'Rivals'], ['ideas', 'Ideas'], ['running', 'Running'], ['plays', 'Playbooks']];
@@ -93,12 +94,29 @@ async function renderPlays() {
   const key = `plays:${S.selectedSop || ''}`;
   const d = S.data[key] || (S.data[key] = await api('/api/v3/plays' + (S.selectedSop ? `?sop=${encodeURIComponent(S.selectedSop)}` : ''))); nav((S.data.today || {}).open);
   const p = d.detail;
-  $('#main').innerHTML = `<section class="sec"><div class="lab">Playbooks</div><p class="lead">${esc(d.lead)}</p></section>
-    <section class="sec"><div class="tabs">${d.tabs.map((t) => `<a href="#plays?sop=${encodeURIComponent(t.id)}" class="${t.id === d.selected ? 'on' : ''}">${esc(t.name)}<span class="v">${esc(t.version)}</span></a>`).join('')}</div>
-    ${p ? `<div class="play"><h2>${esc(p.name)} <span class="small">${esc(p.version)}</span></h2><p class="metaline">${esc(p.meta)}</p><p class="body">${esc(p.objective)}</p></div>
+  const link = (id) => `#plays?sop=${encodeURIComponent(id)}`;
+  const picker = d.groups.map((g) => `<div class="lab pk-group">${esc(g)}</div>` + d.tabs.filter((t) => t.group === g).map((t) =>
+    `<a href="${link(t.id)}" class="row pk ${t.id === d.selected ? 'on' : ''}" data-q="${esc((t.name + ' ' + g).toLowerCase())}"><span class="grow">${esc(t.short)}</span><span class="small">${t.steps} step${t.steps === 1 ? '' : 's'} · ${esc(t.version)}</span><span class="verb">${t.id === d.selected ? 'IN FRONT' : 'OPEN →'}</span></a>`).join('')).join('');
+  $('#main').innerHTML = `${p ? `<section class="sec play">
+      <div class="tagline"><span class="lab" style="margin:0">Playbook · ${esc(p.position)}</span>
+        <span class="switch">${p.prev ? `<a href="${link(p.prev)}">← PREVIOUS</a>` : ''}${p.next ? `<a href="${link(p.next)}">NEXT →</a>` : ''}<a href="#picker" data-jump="picker">ALL PLAYBOOKS ↓</a></span></div>
+      <h2>${esc(p.name)} <span class="small">${esc(p.version)}</span></h2><p class="metaline">${esc(p.meta)}</p><p class="body">${esc(p.objective)}</p>
       <div class="steps">${p.steps.map((s) => `<div class="row step"><span class="n">${s.n}</span><span class="st"><b>${esc(s.title)}</b><span class="small">${esc(s.detail)}</span></span><span class="gate ${s.gate === 'automatic' ? 'green' : 'amber'}">${esc(s.gate)}</span>${verbLink(s.action)}</div>`).join('')}</div>
-      <div class="rules" style="margin-top:34px">${p.rules.map((r) => `<div class="row"><span class="k">${esc(r.k)}</span><span class="v">${esc(r.v)}</span></div>`).join('')}</div>
-      <p style="margin-top:30px"><a href="#" class="bordered" data-ask="${esc(p.run.ask)}">${esc(p.run.label)}</a></p>` : ''}</section>`;
+      <div class="rules">${p.rules.map((r) => `<div class="row"><span class="k">${esc(r.k)}</span><span class="v">${esc(r.v)}</span></div>`).join('')}</div>
+      <p class="runline"><a href="#" class="bordered" data-ask="${esc(p.run.ask)}">${esc(p.run.label)}</a></p></section>` : ''}
+    <section class="sec picker" id="picker"><div class="lab">All playbooks</div><p class="lead">${esc(d.lead)}</p>
+      <div class="pk-find"><input id="pk-find" type="text" placeholder="type to narrow · deposit, winback, funding…" aria-label="Find a playbook" autocomplete="off"><span class="small" id="pk-count">${d.tabs.length} of ${d.tabs.length}</span></div>
+      <div id="pk-list">${picker}</div></section>`;
+  const find = $('#pk-find');
+  if (find) find.addEventListener('input', () => {
+    const q = find.value.trim().toLowerCase(); let n = 0;
+    $$('#pk-list .pk').forEach((a) => { const hit = !q || a.dataset.q.includes(q); a.hidden = !hit; n += hit ? 1 : 0; });
+    $$('#pk-list .pk-group').forEach((g) => { let e = g.nextElementSibling, any = false; while (e && !e.classList.contains('pk-group')) { any = any || !e.hidden; e = e.nextElementSibling; } g.hidden = !any; });
+    $('#pk-count').textContent = `${n} of ${d.tabs.length}`;
+  });
+  const jump = $('[data-jump="picker"]');
+  if (jump) jump.addEventListener('click', (e) => { e.preventDefault(); $('#picker').scrollIntoView({block: 'start', behavior: 'smooth'}); setTimeout(() => find && find.focus(), 350); });
+  if (S.params.sop) window.scrollTo(0, 0);
 }
 
 // ── Ask ──────────────────────────────────────────────────────────────────────

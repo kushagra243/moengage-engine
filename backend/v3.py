@@ -402,8 +402,12 @@ def running() -> Dict[str, Any]:
 def plays(selected: Optional[str] = None) -> Dict[str, Any]:
     from . import sops
     lib = [s for s in sops.list_sops() if s.get("active") != 0]
-    tabs = [{"id": s["id"], "name": plain(s["name"]), "version": f"v{s.get('version') or 1}"} for s in lib]
+    order = ["onboarding", "activation", "retention", "winback", "market", "competition", "education", "risk", "compliance"]
+    lib.sort(key=lambda s: (order.index(s.get("campaign_type")) if s.get("campaign_type") in order else len(order), plain(s["name"]).lower()))
+    tabs = [{"id": s["id"], "name": plain(s["name"]), "short": _short_name(plain(s["name"])), "version": f"v{s.get('version') or 1}",
+             "group": PLAY_GROUPS.get(s.get("campaign_type"), "Other"), "steps": s.get("steps_count") or len(s.get("steps") or [])} for s in lib]
     sid = selected if any(t["id"] == selected for t in tabs) else (tabs[0]["id"] if tabs else None)
+    idx = next((i for i, t in enumerate(tabs) if t["id"] == sid), 0)
     detail = None
     if sid:
         s = sops.get_sop(sid) or {}
@@ -423,6 +427,20 @@ def plays(selected: Optional[str] = None) -> Dict[str, Any]:
                  {"k": "SUCCESS IS", "v": plain(f"{s.get('primary_kpi', '')} {s.get('target', '')}".strip())}]
         detail = {"id": sid, "name": plain(s.get("name") or sid), "version": f"v{s.get('version') or 1}", "meta": plain(f"{s.get('campaign_type', '')} · {str(s.get('transition', '')).replace('_', ' → ')} · {(s.get('audience') or {}).get('segment_family', '')}"),
                   "objective": plain(s.get("objective") or ""), "steps": steps, "rules": rules,
+                  "position": f"{idx + 1} of {len(tabs)}", "prev": tabs[idx - 1]["id"] if idx > 0 else None, "next": tabs[idx + 1]["id"] if idx + 1 < len(tabs) else None,
                   "run": {"label": "RUN THIS PLAYBOOK NOW", "ask": f"run_sop('{sid}') as a dry run first, then propose the steps for approval with two compliant variants each; respect the caps and the holdout."}}
-    lead = f"{len(tabs)} playbooks in the library, each with its cap, holdout and stop rule written down. Pick one to see every step and what it needs from you."
-    return {"lead": lead, "tabs": tabs, "selected": sid, "detail": detail}
+    lead = f"{len(tabs)} playbooks, each with its cap, holdout and stop rule written down. The one in front is complete on this screen; the rest are listed below it."
+    return {"lead": lead, "tabs": tabs, "selected": sid, "detail": detail, "groups": [g for g in dict.fromkeys(t["group"] for t in tabs)]}
+
+
+PLAY_GROUPS = {"onboarding": "Onboarding", "activation": "Activation", "retention": "Retention", "winback": "Winback", "market": "Market moments",
+               "competition": "Competition", "education": "Education", "risk": "Risk", "compliance": "Compliance", "cohort_upload": "Cohorts", "newsletter": "Newsletter"}
+
+
+def _short_name(name: str, limit: int = 46) -> str:
+    """The tab label: the playbook name without its parenthetical, cut at a word if it is still long."""
+    n = re.sub(r"\s*\([^)]*\)", "", name).strip(" ·")
+    if len(n) <= limit:
+        return n
+    cut = n[:limit].rsplit(" ", 1)[0].rstrip(" ,;:·→")
+    return cut + "…"

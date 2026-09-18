@@ -62,7 +62,8 @@ class LocalTokenMiddleware(BaseHTTPMiddleware):
 
         resp = await call_next(request)
         resp.headers["X-Content-Type-Options"] = "nosniff"
-        resp.headers["X-Frame-Options"] = "DENY"
+        if "x-frame-options" not in resp.headers:                   # only /ops?embed=1 sets SAMEORIGIN, so the quiet terminal can host the operator modules
+            resp.headers["X-Frame-Options"] = "DENY"
         resp.headers["Permissions-Policy"] = "camera=(), microphone=(), geolocation=()"
         resp.headers["Cross-Origin-Opener-Policy"] = "same-origin"
         resp.headers["Cross-Origin-Resource-Policy"] = "same-origin"

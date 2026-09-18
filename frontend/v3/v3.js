@@ -4,7 +4,8 @@ const $ = (s) => document.querySelector(s);
 const $$ = (s) => Array.from(document.querySelectorAll(s));
 const esc = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => ({'&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;'}[c]));
 const S = {screen: 'today', focusKey: null, resolved: new Set(), selectedSop: null, toast: '', clock: '', data: {}, params: {}};
-const SCREENS = [['today', 'Today'], ['rivals', 'Rivals'], ['ideas', 'Ideas'], ['running', 'Running'], ['plays', 'Playbooks']];
+const SCREENS = [['today', 'Today'], ['asks', 'Asks'], ['rivals', 'Rivals'], ['ideas', 'Ideas'], ['running', 'Running'], ['plays', 'Playbooks'], ['alerts', 'Alerts'], ['engine', 'Engine'], ['bench', 'Workbench']];
+const HIDDEN = ['tool'];            // routable, shown under Workbench in the nav
 
 async function api(path, opts = {}) {
   const r = await fetch(path, {method: opts.method || 'GET', headers: {'Content-Type': 'application/json', 'X-Local-Token': TOKEN}, body: opts.body ? JSON.stringify(opts.body) : undefined});
@@ -18,13 +19,14 @@ function toast(msg) {
 function tick() { const d = new Date(); const hm = [d.getHours(), d.getMinutes()].map((x) => String(x).padStart(2, '0')).join(':'); S.clock = hm; const s = $('#synced'); if (s) s.textContent = `synced ${S.syncedAt || hm} · next ${S.next || '09:00'}`; }
 function route() {
   const h = (location.hash || '#today').slice(1); const [scr, q] = h.split('?'); S.params = Object.fromEntries(new URLSearchParams(q || ''));
-  S.screen = SCREENS.some(([k]) => k === scr) ? scr : 'today';
+  S.screen = SCREENS.some(([k]) => k === scr) || HIDDEN.includes(scr) ? scr : 'today';
   if (S.params.decision) S.focusKey = S.params.decision;
   if (S.params.sop) S.selectedSop = S.params.sop;
   render();
 }
 function nav(open) {
-  $('#nav').innerHTML = SCREENS.map(([k, l]) => `<a href="#${k}" class="${S.screen === k ? 'on' : ''}">${l}${k === 'today' && open ? `<span class="count">${open}</span>` : ''}</a>`).join('');
+  const asksOpen = S.data.asks ? S.data.asks.open : (S.data.today || {}).asks_open;
+  $('#nav').innerHTML = SCREENS.map(([k, l]) => `<a href="#${k}" class="${S.screen === k || (k === 'bench' && S.screen === 'tool') ? 'on' : ''}">${l}${k === 'today' && open ? `<span class="count">${open}</span>` : ''}${k === 'asks' && asksOpen ? `<span class="count">${asksOpen}</span>` : ''}</a>`).join('');
 }
 function verbLink(m, cls = 'verb accent') {
   if (!m) return '';
@@ -47,7 +49,8 @@ async function renderToday() {
       <p class="fbody">${esc(focus.body)}</p>
       <div class="facts">${focus.facts.map((f) => `<div class="fact"><span class="k">${esc(f.k)}</span><span class="v ${esc(f.tone)}">${esc(f.v)}</span></div>`).join('')}</div>
       <div class="plan"><div class="k">IF YOU APPROVE</div><ul>${focus.plan.map((p) => `<li>${esc(p)}</li>`).join('')}</ul></div>
-      <div class="acts"><button class="primary" data-resolve="approve" data-id="${esc(focus.id)}">${esc(focus.primary.label)}</button>${verbLink(focus.evidence, 'evidence')}<button class="defer" data-resolve="defer" data-id="${esc(focus.id)}">${esc(focus.defer.label)}</button></div>
+      ${focus.blocked ? `<p class="blocked"><span class="k">BEFORE THIS CAN RUN</span>${esc(focus.blocked)}</p>` : ''}
+      <div class="acts">${focus.primary.go ? `<a class="primary" href="${esc(focus.primary.go)}">${esc(focus.primary.label)}</a>` : `<button class="primary" data-resolve="approve" data-id="${esc(focus.id)}">${esc(focus.primary.label)}</button>`}${verbLink(focus.evidence, 'evidence')}<button class="defer" data-resolve="defer" data-id="${esc(focus.id)}">${esc(focus.defer.label)}</button></div>
     </section>` : `<section class="sec clear"><p class="line">${esc(d.all_clear.line)}</p><p class="body">${esc(d.all_clear.context)}</p><p><a class="bordered" href="${esc(d.all_clear.button.go)}">${esc(d.all_clear.button.label)}</a></p></section>`;
   const thenHtml = rest.length ? `<section class="sec then"><div class="lab">Then</div>${rest.map((x) => `<div class="row" data-focus="${esc(x.id)}"><span class="tag ${esc(x.tone)}">${esc(x.tag)}</span><span class="title">${esc(x.title)}</span><span class="val">${esc((x.facts[0] || {}).v || '')}</span><a class="verb accent" href="#today?decision=${encodeURIComponent(x.id)}">${x.kind === 'anomaly' ? 'FIX IT →' : x.kind === 'proposal' ? 'REVIEW →' : 'DECIDE →'}</a></div>`).join('')}</section>` : '';
   const movedHtml = `<section class="sec moved"><div class="lab">What moved · and what to do</div>${d.moved.length ? d.moved.map((m) => `<div class="row"><span class="delta ${esc(m.tone)}">${esc(m.delta)}</span><span class="what body">${esc(m.what)}</span><span class="do">${esc(m.do)}</span>${verbLink(m)}</div>`).join('') : '<div class="row"><span class="body">Nothing moved outside its own range today.</span></div>'}</section>`;
@@ -119,6 +122,114 @@ async function renderPlays() {
   if (S.params.sop) window.scrollTo(0, 0);
 }
 
+
+// ── Asks: every missing input as one question with its own field ─────────────
+function fieldHtml(f) {
+  const id = `f-${f.key.replace(/[^a-z0-9]/gi, '-')}`;
+  const common = `id="${id}" name="${esc(f.key)}" aria-label="${esc(f.label)}" autocomplete="${f.type === 'secret' ? 'new-password' : 'off'}" spellcheck="false"`;
+  let input;
+  if (f.type === 'choice') input = `<select ${common}>${f.value ? '' : '<option value="">choose…</option>'}${f.options.map((o) => `<option value="${esc(o)}" ${String(f.value) === o ? 'selected' : ''}>${esc(o.replace(/_/g, ' '))}</option>`).join('')}</select>`;
+  else if (f.type === 'list' || f.type === 'long') input = `<textarea ${common} rows="${f.type === 'list' ? 4 : 2}" placeholder="${esc(f.placeholder)}">${esc(f.value || '')}</textarea>`;
+  else input = `<input ${common} type="${{secret: 'password', email: 'email', number: 'number'}[f.type] || 'text'}" value="${esc(f.value || '')}" placeholder="${esc(f.placeholder)}">`;
+  return `<label class="fld" for="${id}">${f.q ? `<span class="q">${esc(f.q)}</span>` : ''}<span class="k">${esc(f.label)}${f.set === true ? ' <span class="green">· saved</span>' : f.set === false ? ' <span class="dim">· not set</span>' : ''}</span>${input}</label>`;
+}
+function formValues(form) { const v = {}; form.querySelectorAll('[name]').forEach((el) => { if (el.value !== '') v[el.name] = el.value; }); return v; }
+async function renderAsks() {
+  const d = S.data.asks || (S.data.asks = await api('/api/v3/asks')); nav((S.data.today || {}).open);
+  const next = S.askNext ? `<p class="nextline"><a class="bordered" href="${esc(S.askNext.go)}">${esc(S.askNext.label)}</a></p>` : '';
+  const cards = d.asks.map((a) => `<form class="askcard" data-ask-form="${esc(a.id)}" id="ask-${esc(a.id.replace(/[^a-z0-9]/gi, '-'))}">
+      <div class="tagline"><span class="tag ${esc(a.tone)}">${esc(a.group)}</span><span class="counter">${a.n} of ${d.open}</span></div>
+      <h3>${esc(a.title)}</h3><p class="body">${esc(a.why)}</p>
+      <p class="where"><span class="k">WHERE TO FIND IT</span>${esc(a.where)}</p>
+      ${a.command ? `<pre class="cmdline">${esc(a.command)}</pre>` : ''}
+      ${a.fields.length ? `<div class="flds">${a.fields.map(fieldHtml).join('')}</div>` : ''}
+      <div class="acts">${a.button ? `<button type="submit" class="primary">${esc(a.button)}</button>` : ''}${a.link ? verbLink(a.link, 'evidence') : ''}${a.evidence ? verbLink(a.evidence, 'evidence') : ''}<span class="unblocks">UNBLOCKS · ${esc(a.unblocks)}</span></div>
+    </form>`).join('');
+  const waiting = d.waiting.length ? `<section class="sec"><div class="lab">Waiting on other teams · not yours to answer</div>${d.waiting.map((w) => `<div class="row"><div class="grow"><span class="text">${esc(w.title)}</span><p class="small">${esc(w.why)}${w.unblocks ? ' · unblocks ' + esc(w.unblocks) : ''}</p></div><a class="verb accent" href="#" data-delivered="${esc(w.id)}">${esc(w.verb)}</a></div>`).join('')}</section>` : '';
+  $('#main').innerHTML = `<section class="sec"><div class="lab">Asks</div><p class="lead">${esc(d.lead)}</p>${next}</section>
+    ${d.asks.length ? `<section class="sec asks">${cards}</section>` : `<section class="sec clear"><p class="line">Nothing is missing.</p><p><a class="bordered" href="#today">GO TO TODAY'S DECISIONS</a></p></section>`}${waiting}`;
+  if (S.params.focus) { const el = $(`#ask-${CSS.escape(S.params.focus.replace(/[^a-z0-9]/gi, '-'))}`); if (el) { el.scrollIntoView({block: 'start'}); const i = el.querySelector('input,select,textarea'); if (i) i.focus({preventScroll: true}); } }
+}
+async function answerAsk(id, values, btn) {
+  if (btn) btn.disabled = true;
+  try {
+    const r = await api(`/api/v3/asks/${encodeURIComponent(id)}/answer`, {method: 'POST', body: {values}});
+    toast(r.toast || (r.ok ? 'Saved' : 'Not saved'));
+    if (r.asks) S.data.asks = r.asks;
+    S.askNext = r.ok ? (r.next || null) : S.askNext;
+    if (r.ok) { S.data.today = null; S.data.alerts = null; S.data.engine = null; S.params = {}; }
+    if (r.ok || r.asks) await renderAsks(); else if (btn) btn.disabled = false;
+  } catch (e) { toast(`Not saved · ${e.message}`); if (btn) btn.disabled = false; }
+}
+
+// ── Alerts: market alerts in rows and verbs ──────────────────────────────────
+async function apiText(path) { const r = await fetch(path, {headers: {'X-Local-Token': TOKEN}}); if (!r.ok) throw new Error(String(r.status)); return r.text(); }
+async function renderAlerts() {
+  const d = S.data.alerts || (S.data.alerts = await api('/api/v3/alerts')); nav((S.data.today || {}).open);
+  const rows = (label, html) => `<section class="sec"><div class="lab">${label}</div>${html}</section>`;
+  $('#main').innerHTML = `<section class="sec"><div class="lab">Market alerts</div><p class="lead">${esc(d.lead)}</p>
+      <p class="small" style="margin-top:14px">${esc(d.launch.note)} ${esc(d.autonomy)}</p>
+      <div class="acts" style="margin-top:22px"><button class="primary" data-al="brief">${esc(d.launch.label)}</button><button class="bordered" data-al="dry">SEE WHAT WOULD GO OUT NOW</button><button class="${d.kill ? 'bordered' : 'defer'}" data-al="kill" data-on="${d.kill ? '0' : '1'}">${d.kill ? 'LIFT THE STOP' : 'STOP ALL ALERTS'}</button></div>
+      <div id="al-out"></div></section>
+    ${d.blockers.length ? rows('Before it can really run', d.blockers.map((b) => `<div class="row"><span class="tag amber" style="flex:0 0 190px">${esc(b.check)}</span><span class="grow body">${esc(b.detail)}</span><a class="verb accent" href="${esc(b.go)}">${esc(b.verb)}</a></div>`).join('')) : ''}
+    ${rows('The plan in one look', d.summary.map((r) => `<div class="row rules"><span class="k">${esc(r.k)}</span><span class="v">${esc(r.v)}</span></div>`).join(''))}
+    ${rows(`What it will say · word for word${d.copy_blocking ? ` · ${d.copy_blocking} blocked by the copy rules` : ''}`, d.copy.map((c) => `<div class="row"><span class="tag dim" style="flex:0 0 150px">${esc(c.signal)}</span><div class="grow"><span class="text">${esc(c.title)}</span><p class="small">${esc(c.body)}</p></div><span class="verb ${c.ok ? 'green' : 'magenta'}">${c.ok ? 'PASSES THE RULES' : esc(c.lint).toUpperCase()}</span></div>`).join(''))}
+    ${rows('When it fires', d.signals.map((g) => `<div class="row"><div class="grow"><span class="text">${esc(g.label)}</span><p class="small">${esc(g.when)}</p></div><span class="small" style="flex:0 0 230px">${esc(g.cap)} · goes out ${esc(g.lane)}</span></div>`).join(''))}
+    ${rows('Who gets it · one MoEngage campaign per cohort', d.cohorts.map((c) => `<div class="row"><div class="grow"><span class="text">${esc(c.label)}</span><p class="small">${esc(c.segment)} · ${esc(c.control)} · ${esc(c.why)}</p></div><span class="verb ${esc(c.tone)}">${esc(c.state)}</span></div>`).join('') + `<p class="small" style="margin-top:14px">Wider rollout · ${esc(d.promotion.progress)} · ${esc(d.promotion.line)}</p>`)}
+    ${rows('Sent today', d.fires.length ? d.fires.map((f) => `<div class="row"><span class="small" style="flex:0 0 60px">${esc(f.at)}</span><div class="grow"><span class="text">${esc(f.title)}</span><p class="small">${esc(f.body)}</p></div><span class="small">${esc(f.to)} · by ${esc(f.source)}</span></div>`).join('') : '<div class="row"><span class="body">Nothing has gone out today.</span></div>')}
+    <section class="sec"><p>${verbLink(d.ops, 'bordered')}</p></section>`;
+}
+async function alertsAction(what, btn) {
+  const out = $('#al-out'); btn.disabled = true;
+  try {
+    if (what === 'kill') { const on = btn.dataset.on === '1'; await api('/api/alerts2/kill', {method: 'POST', body: {on}}); toast(on ? 'Stopped · nothing goes out until you lift it' : 'Stop lifted'); S.data.alerts = null; return renderAlerts(); }
+    if (what === 'dry') {
+      out.innerHTML = '<p class="small" style="margin-top:20px">Reading the market…</p>';
+      const r = await api('/api/alerts2/discovery/run', {method: 'POST', body: {mode: 'dry_run'}});
+      const dec = (r.summary.decisions || []);
+      out.innerHTML = `<div class="inline"><div class="lab">Right now · ${r.detected} market facts seen · ${r.would_send} would go out · ${r.suppressed} held back</div>${dec.map((x) => `<div class="row"><div class="grow"><span class="text">${esc(x.title)}</span><p class="small">${esc(x.body)}</p></div><span class="verb ${x.reason ? 'dim' : 'green'}">${x.reason ? 'HELD · ' + esc(String(x.reason).replace(/_/g, ' ')) : 'WOULD GO OUT'}</span></div>`).join('') || '<p class="small">The market is quiet: nothing crossed a threshold.</p>'}<p class="small">A practice run. Nothing was sent and nothing was recorded.</p></div>`;
+    }
+    if (what === 'brief') {
+      out.innerHTML = '<p class="small" style="margin-top:20px">Writing the brief…</p>';
+      const md = await apiText('/api/alerts2/discovery/brief?format=md&cohorts=internal');
+      out.innerHTML = `<div class="inline"><div class="lab">The launch brief · read it before anything is queued</div><pre class="brief">${esc(md)}</pre>
+        <label class="readit"><input type="checkbox" id="al-read"> I have read the copy, the audience, the caps and the stop rules.</label>
+        <div class="acts"><button class="primary" data-al="launch" disabled id="al-launch">QUEUE THE EMPLOYEE LAUNCH</button><span class="small">Queues the MoEngage draft and the permission to fire. Both still wait for your approval on Today.</span></div></div>`;
+      $('#al-read').addEventListener('change', (e) => { $('#al-launch').disabled = !e.target.checked; });
+    }
+    if (what === 'launch') {
+      const r = await api('/api/alerts2/discovery/launch', {method: 'POST', body: {reviewed: true, cohort_ids: ['internal']}});
+      toast(r.needs_review ? 'Read the brief first' : 'Queued · two approvals are waiting on Today'); S.data.alerts = null; S.data.today = null; S.data.asks = null; location.hash = '#today';
+    }
+  } catch (e) { toast(`Not done · ${e.message}`); }
+  finally { btn.disabled = false; }
+}
+
+// ── Engine: connection, model, rhythm, background jobs ───────────────────────
+async function renderEngine() {
+  const d = S.data.engine || (S.data.engine = await api('/api/v3/engine')); nav((S.data.today || {}).open);
+  $('#main').innerHTML = `<section class="sec"><div class="lab">Engine</div><p class="lead">${esc(d.lead)}</p>
+      <div class="facts" style="margin-top:26px">${d.state.map((f) => `<div class="fact"><span class="k">${esc(f.k)}</span><span class="v ${esc(f.tone)}">${esc(f.v)}</span><span class="small" style="display:block;margin-top:4px">${esc(f.note)}</span></div>`).join('')}</div>
+      <div class="acts">${d.asks_open ? `<a class="primary" href="#asks">ANSWER THE ${d.asks_open} MISSING</a>` : ''}<button class="bordered" data-en="verify">CHECK THE MOENGAGE CONNECTION</button></div><div id="en-out"></div></section>
+    ${d.groups.map((g, i) => `<section class="sec"><div class="lab">${esc(g.title)}</div><p class="small" style="margin:-6px 0 12px">${esc(g.note)}</p><form class="askcard plain" data-settings-form="${i}"><div class="flds two">${g.fields.map(fieldHtml).join('')}</div><div class="acts"><button type="submit" class="bordered">SAVE ${esc(g.title.toUpperCase())}</button></div></form></section>`).join('')}
+    <section class="sec"><div class="lab">Background jobs</div>${d.jobs.map((j) => `<div class="row"><span class="text" style="flex:0 0 230px">${esc(j.name)}</span><span class="grow small ${j.tone === 'green' ? '' : esc(j.tone)}">${esc(j.status)}</span><a class="verb accent" href="#" data-job="${esc(j.job)}">${esc(j.verb)}</a></div>`).join('')}</section>
+    <section class="sec"><div class="lab">Skills the brain really read · last 7 days</div><p class="small" style="margin:-6px 0 12px">${esc(d.skills_note || '')}</p>${(d.skills || []).map((k) => `<div class="row"><span class="text" style="flex:0 0 230px">${esc(k.name)}</span><span class="grow small">${esc(k.status)}</span>${verbLink(k)}</div>`).join('') || '<div class="row"><span class="body">No skill has been read yet. The next question or draft will show up here.</span></div>'}</section>
+    <section class="sec"><div class="lab">More of the engine</div>${d.more.map((m) => `<div class="row"><span class="grow"></span>${verbLink(m)}</div>`).join('')}</section>`;
+}
+
+// ── Workbench: every operator module, opened inside this shell ───────────────
+async function renderBench() {
+  const d = S.data.bench || (S.data.bench = await api('/api/v3/workbench')); nav((S.data.today || {}).open);
+  $('#main').innerHTML = `<section class="sec"><div class="lab">Workbench</div><p class="lead">${esc(d.lead)}</p></section>
+    <section class="sec">${d.modules.map((m) => `<div class="row"><div class="grow"><span class="text">${esc(m.name)}</span><p class="small">${esc(m.what)}</p></div>${verbLink(m)}</div>`).join('')}</section>`;
+}
+async function renderTool() {
+  const d = S.data.bench || (S.data.bench = await api('/api/v3/workbench')); nav((S.data.today || {}).open);
+  const m = d.modules.find((x) => x.m === S.params.m) || d.modules[0];
+  $('#main').innerHTML = `<div class="toolbar"><a href="#bench">← WORKBENCH</a><span class="text">${esc(m.name)}</span><span class="small">${d.modules.map((x) => `<a href="#tool?m=${x.m}" class="${x.m === m.m ? 'on' : ''}">${esc(x.name)}</a>`).join('')}</span></div>
+    <iframe class="tool" title="${esc(m.name)}" src="/ops?embed=1#${esc(m.m)}"></iframe>`;
+}
+
 // ── Ask ──────────────────────────────────────────────────────────────────────
 async function ask(q, silent) {
   q = (q || '').trim(); if (!q) return;
@@ -132,7 +243,9 @@ async function ask(q, silent) {
 
 // ── render / events ──────────────────────────────────────────────────────────
 async function render() {
-  const fn = {today: renderToday, rivals: renderRivals, ideas: renderIdeas, running: renderRunning, plays: renderPlays}[S.screen] || renderToday;
+  const fn = {today: renderToday, asks: renderAsks, rivals: renderRivals, ideas: renderIdeas, running: renderRunning, plays: renderPlays, alerts: renderAlerts, engine: renderEngine, bench: renderBench, tool: renderTool}[S.screen] || renderToday;
+  document.body.classList.toggle('wide', S.screen === 'tool');
+  if (S.screen !== 'asks') S.askNext = null;
   nav((S.data.today || {}).open);
   try { if (S.screen !== 'today' && !S.data.today) api('/api/v3/today').then((d) => { S.data.today = d; nav(d.open); }).catch(() => {}); await fn(); }
   catch (e) { $('#main').innerHTML = `<section class="sec"><p class="lead">The brain is not answering.</p><p class="body">${esc(e.message)} · the engine may be restarting; this page retries when you switch screens.</p></section>`; }
@@ -140,11 +253,33 @@ async function render() {
 document.addEventListener('click', async (e) => {
   const rs = e.target.closest('[data-resolve]'); if (rs) { e.preventDefault(); return resolve(rs.dataset.id, rs.dataset.resolve, rs); }
   const a = e.target.closest('[data-ask]'); if (a) { e.preventDefault(); return ask(a.dataset.ask, true); }
+  const al = e.target.closest('[data-al]'); if (al) { e.preventDefault(); return alertsAction(al.dataset.al, al); }
+  const dl = e.target.closest('[data-delivered]'); if (dl) { e.preventDefault(); return answerAsk(dl.dataset.delivered, {}, null); }
+  const jb = e.target.closest('[data-job]'); if (jb) {
+    e.preventDefault(); jb.textContent = 'RUNNING…';
+    try { const r = await api(`/api/refresh/run/${encodeURIComponent(jb.dataset.job)}`, {method: 'POST', body: {}}); toast(r.ok === false ? `It failed · ${r.error || ''}` : 'Done · refreshed just now'); } catch (err) { toast(`Not done · ${err.message}`); }
+    S.data.engine = null; return renderEngine();
+  }
+  const en = e.target.closest('[data-en]'); if (en) {
+    e.preventDefault(); en.disabled = true; const out = $('#en-out'); out.innerHTML = '<p class="small" style="margin-top:16px">Checking…</p>';
+    try { const r = await api('/api/auth/test', {method: 'POST', body: {}}); const s = r.session || {}; const p = r.public_api || {};
+      out.innerHTML = `<p class="small" style="margin-top:16px">${esc(s.mock_mode || s.mode === 'mock' ? 'Practice mode: there is no live connection to check. Answer the Asks and go live first.' : (p.ok ? 'MoEngage answered: the keys work.' : `MoEngage did not accept the keys · ${p.detail || s.detail || 'no detail'}`))}</p>`; }
+    catch (err) { out.innerHTML = `<p class="small magenta" style="margin-top:16px">${esc(err.message)}</p>`; }
+    en.disabled = false; return;
+  }
   const pr = e.target.closest('[data-promote]'); if (pr) {
     e.preventDefault(); pr.disabled = true;
     try { const r = await api(`/api/v3/ideas/${encodeURIComponent(pr.dataset.promote)}/promote`, {method: 'POST', body: {}}); toast(r.toast || 'Handed to the brain'); if (r.ask) ask(r.ask, true); S.data.ideas = null; renderIdeas(); }
     catch (err) { toast(`Not done · ${err.message}`); pr.disabled = false; }
     return;
+  }
+});
+document.addEventListener('submit', async (e) => {
+  const f = e.target.closest('[data-ask-form]'); if (f) { e.preventDefault(); return answerAsk(f.dataset.askForm, formValues(f), f.querySelector('[type=submit]')); }
+  const g = e.target.closest('[data-settings-form]'); if (g) {
+    e.preventDefault(); const btn = g.querySelector('[type=submit]'); btn.disabled = true;
+    try { const r = await api('/api/settings', {method: 'POST', body: {values: formValues(g)}}); toast(`Saved · ${(r.saved || []).length} setting${(r.saved || []).length === 1 ? '' : 's'}${(r.rejected || []).length ? ' · ' + r.rejected.length + ' refused' : ''}`); S.data.engine = null; S.data.asks = null; S.data.today = null; S.data.alerts = null; await renderEngine(); }
+    catch (err) { toast(`Not saved · ${err.message}`); btn.disabled = false; }
   }
 });
 window.addEventListener('hashchange', route);

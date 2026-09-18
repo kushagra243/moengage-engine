@@ -1861,6 +1861,55 @@ def v3_plays(sop: Optional[str] = None):
     return v3.plays(sop)
 
 
+class V3AnswerPayload(BaseModel):
+    values: Dict[str, Any] = {}
+
+
+@app.get("/api/v3/asks")
+def v3_asks():
+    """Every input the engine is missing, each as one question with its own field."""
+    from . import v3_ops
+    return v3_ops.asks()
+
+
+@app.post("/api/v3/asks/{aid:path}/answer")
+def v3_answer(aid: str, payload: V3AnswerPayload, request: Request):
+    """Put the answer where it belongs (settings, encrypted when secret, or the pending draft), re-check, say what it unblocked. Sends nothing."""
+    from . import v3_ops
+
+    def _save(values: Dict[str, Any]) -> Dict[str, Any]:
+        try:
+            return update_settings(SettingsPayload(values=values))
+        except HTTPException as e:
+            raise ValueError(str(e.detail))
+    return v3_ops.answer(aid, payload.values, _save, actor=request_actor(request))
+
+
+@app.get("/api/v3/alerts")
+def v3_alerts():
+    from . import v3_ops
+    return v3_ops.alerts()
+
+
+@app.get("/api/v3/engine")
+def v3_engine():
+    from . import v3_ops
+    return v3_ops.engine(status())
+
+
+@app.get("/api/skills/usage")
+def skills_usage(days: int = 7):
+    """Which skills really entered the agent's context, how (placed by the engine or asked for by the model), and which were never opened."""
+    from . import skill_router
+    return skill_router.usage(days)
+
+
+@app.get("/api/v3/workbench")
+def v3_workbench():
+    from . import v3_ops
+    return v3_ops.workbench()
+
+
 @app.get("/api/brain/compliance")
 def brain_compliance(force: bool = False):
     from . import compliance_sweep
@@ -2059,7 +2108,11 @@ if os.path.exists(FRONTEND_DIR):
         return HTMLResponse(_index_html(os.path.join("v3", "index.html")), headers={"Content-Security-Policy": CSP})
 
     @app.get("/ops", response_class=HTMLResponse)
-    def ops_page():
+    def ops_page(embed: int = 0):
+        """The full operator console. With ?embed=1 it may be framed, by this same origin only, so every module opens inside the quiet terminal."""
+        if embed:
+            return HTMLResponse(_index_html(os.path.join("terminal", "index.html")),
+                                headers={"Content-Security-Policy": CSP.replace("frame-ancestors 'none'", "frame-ancestors 'self'"), "X-Frame-Options": "SAMEORIGIN"})
         return HTMLResponse(_index_html(os.path.join("terminal", "index.html")), headers={"Content-Security-Policy": CSP})
 
     @app.get("/terminal", response_class=HTMLResponse)

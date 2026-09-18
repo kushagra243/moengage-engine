@@ -300,7 +300,25 @@ def headline(decs: List[Dict[str, Any]], moved: List[Dict[str, Any]]) -> str:
 def today() -> Dict[str, Any]:
     now = datetime.now(IST)
     decs = decisions(); moved = _moved()
-    return {"dateline": now.strftime("%A %d %B").upper(), "headline": headline(decs, moved), "decisions": decs, "open": len(decs),
+    asks_open = 0
+    try:                                           # a decision whose draft is missing an input cannot run: send the reader to the question instead of a button that fails
+        from . import v3_ops
+        a = v3_ops.asks(); asks_open = a["open"]
+        blocked = {x["id"].split(":")[1]: x for x in a["asks"] if x["id"].startswith("proposal:")}
+        live_blockers = [x for x in a["asks"] if x["group"] == "CONNECTION" and x["tone"] == "magenta"]
+        for d in decs:
+            pid = d["id"].split(":")[1] if d["id"].startswith("proposal:") else None
+            hit = blocked.get(pid) if pid else None
+            if not hit and pid and d.get("kind") in ("create_campaign", "create_segment", "create_flow", "custom_segment_upload") and live_blockers:
+                hit = live_blockers[0]
+            if hit:
+                d["blocked"] = plain(hit["title"])
+                d["primary"] = {"label": "FILL IN WHAT IS MISSING", "go": f"#asks?focus={hit['id']}"}
+                d["facts"][2] = {"k": "YOUR EFFORT", "v": "One answer, then one click", "tone": "text"}
+    except Exception:
+        pass
+    return {"dateline": now.strftime("%A %d %B").upper(), "headline": headline(decs, moved) + (f" {asks_open} answer{'s are' if asks_open != 1 else ' is'} still missing before everything can run." if asks_open and decs else ""),
+            "asks_open": asks_open, "decisions": decs, "open": len(decs),
             "moved": moved, "handled": _handled(), "synced": now.strftime("%H:%M"), "next": str(get_setting("schedule_time", "09:00") or "09:00"),
             "all_clear": {"line": "Nothing left to decide today.", "context": headline([], moved).replace("Everything is decided. ", ""), "button": {"label": "OPEN THE IDEAS QUEUE", "go": "#ideas"}}}
 

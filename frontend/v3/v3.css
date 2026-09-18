@@ -20,7 +20,6 @@ button{font:inherit;color:inherit;background:none;border:0;cursor:pointer;paddin
 .nav a.on::after{content:"";position:absolute;left:0;right:0;bottom:-3px;height:1px;background:var(--accent)}
 .nav .count{color:var(--amber);font-size:11px;margin-left:6px}
 .meta{font-size:12px;color:#516b78;white-space:nowrap}
-.meta .ops{color:#3f5663;margin-left:12px;font-size:11px;letter-spacing:.1em}
 
 /* column */
 .col{max-width:920px;margin:0 auto;padding:44px 34px 110px;display:flex;flex-direction:column;gap:56px}
@@ -125,6 +124,47 @@ a.pk .verb{color:var(--text-dim)}
 a.pk:hover .grow,a.pk:hover .verb{color:var(--accent)}
 a.pk.on .grow{color:var(--text-hi)}
 a.pk.on .verb{color:var(--green)}
+
+/* asks, alerts, engine: questions with their own field */
+a.primary{display:inline-block}
+.blocked{margin:0 0 22px;color:var(--amber);font-size:14px}
+.blocked .k,.where .k{display:block;font-size:11px;letter-spacing:.2em;color:var(--text-mute);margin-bottom:6px}
+.askcard{padding:26px 0 30px;border-top:1px solid var(--hairline);margin:0}
+.askcard:last-child{border-bottom:1px solid var(--hairline)}
+.askcard.plain{padding:0;border:0}
+.askcard .tagline{display:flex;gap:18px;align-items:baseline;margin-bottom:10px}
+.askcard .counter{font-size:12px;letter-spacing:.2em;color:var(--text-mute)}
+.askcard h3{font:500 21px/1.35 var(--display);color:var(--text-hi);max-width:40ch;margin:0 0 10px}
+.askcard .body{margin:0 0 14px}
+.where{font-size:13px;color:var(--text-dim);margin:0 0 18px;max-width:64ch}
+.cmdline,.brief{font:400 13px/1.6 var(--mono);color:var(--text-hi);border:1px solid var(--hairline-hi);padding:12px 14px;margin:0 0 18px;white-space:pre-wrap;overflow-wrap:anywhere}
+.brief{color:var(--text-body);max-height:56vh;overflow:auto}
+.flds{display:flex;flex-direction:column;gap:16px;margin:0 0 22px;max-width:560px}
+.flds.two{flex-direction:row;flex-wrap:wrap;max-width:none;gap:18px 28px}
+.flds.two .fld{flex:1 1 250px;max-width:400px}
+.fld{display:flex;flex-direction:column;gap:6px}
+.fld .q{color:var(--text-body);font-size:14px}
+.fld .k{font-size:11px;letter-spacing:.2em;color:var(--text-mute)}
+.fld input,.fld select,.fld textarea{background:transparent;border:0;border-bottom:1px solid rgba(127,216,236,.28);color:var(--text-hi);font:400 15px/1.5 var(--mono);padding:6px 0;width:100%;resize:vertical}
+.fld select{appearance:none;-webkit-appearance:none;cursor:pointer}
+.fld select option{background:#0b121a;color:var(--text-hi)}
+.fld input:focus,.fld select:focus,.fld textarea:focus{outline:0;border-bottom-color:var(--accent)}
+.fld input::placeholder,.fld textarea::placeholder{color:var(--text-ghost)}
+.unblocks{font-size:12px;letter-spacing:.12em;color:var(--text-mute)}
+.nextline{margin:24px 0 0}
+.inline{margin-top:30px}
+.readit{display:flex;gap:10px;align-items:center;color:var(--text-body);font-size:14px;margin:0 0 18px;cursor:pointer}
+button.bordered{background:none}
+.bordered:disabled,.primary:disabled{opacity:.45;cursor:default}
+
+/* workbench: the operator modules inside this shell */
+body.wide .col{max-width:none;padding:0 0 0;gap:0}
+body.wide .ask,body.wide #ask-out{display:none}
+.toolbar{display:flex;flex-wrap:wrap;gap:8px 22px;align-items:baseline;padding:4px 34px 14px;font-size:12px;letter-spacing:.12em}
+.toolbar .small{display:flex;flex-wrap:wrap;gap:6px 16px;margin-left:auto;letter-spacing:.06em}
+.toolbar .small a{color:var(--text-mute)}
+.toolbar .small a.on{color:var(--text-hi)}
+iframe.tool{display:block;width:100%;height:calc(100vh - 118px);border:0;border-top:1px solid var(--hairline-hi);background:var(--bg)}
 
 /* ask */
 .ask{position:fixed;left:0;right:0;bottom:0;background:rgba(7,11,16,.94);display:flex;align-items:center;gap:16px;padding:16px 34px;max-width:920px;margin:0 auto;z-index:4}

@@ -1,6 +1,7 @@
 /* Boot guard: if the runtime script does not start (server restarting, token rotated), show a reconnect notice and retry instead of a blank page. */
 (() => {
   'use strict';
+  if (/[?&]embed=1/.test(location.search)) document.documentElement.classList.add('embed');   // hosted inside the quiet terminal: module only, no chrome
   const start = Date.now();
   const check = () => {
     if (window.__terminalReady) return;

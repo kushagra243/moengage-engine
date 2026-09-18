@@ -170,3 +170,8 @@ body.text-lg .xcard .tt, body.text-lg .sub { font-size:14.5px; } body.text-lg .c
 .fresh { display:flex; align-items:center; gap:8px; padding:0 14px; border-left:1px solid var(--line-soft); font-size:11px; } .fresh .k { font-size:10px; letter-spacing:.18em; color:var(--text-mute); } .fresh .v { font-weight:600; }
 
 .ice { font-size:10px; letter-spacing:.08em; color:var(--cyan-dim); border:1px solid var(--line); padding:1px 5px; white-space:nowrap; }
+
+/* embedded in the quiet terminal (/ops?embed=1): the module only, the host page carries the chrome */
+.embed .top, .embed .rail, .embed .scan, .embed .vignette, .embed #cmd, .embed .crumb { display:none !important; }
+.embed .content { padding:14px 34px 60px; }
+.embed body { background:#070b10; }

@@ -337,16 +337,22 @@ def propose_segment(name: str, criteria: Dict[str, Any], rationale: str, descrip
 def propose_campaign(name: str, channel: str, target_segment: str, variants: List[Dict[str, Any]], rationale: str, goal: Dict[str, Any],
                      schedule: Optional[Dict[str, Any]] = None, ttl_hours: Optional[int] = None, market_hook_id: Optional[str] = None,
                      exclusions: Optional[List[str]] = None, frequency_cap: Optional[str] = None, ice: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
+    goal = goal or {}; variants = variants or []
     check = campaign_brief_check(goal, variants, channel, market_linked=bool(market_hook_id), ttl_hours=ttl_hours)
-    if not check["ok"]:
+    gaps = [x for x in check["problems"] if re.fullmatch(r"goal\.\w+ missing", x)]            # an input nobody supplied, as opposed to a rule the copy breaks
+    if [x for x in check["problems"] if x not in gaps]:
         return {"error": "brief rejected", "problems": check["problems"], "warnings": check["warnings"], "hint": "Fix the goal brief and call propose_campaign again."}
     from .. import ice as ice_mod
     ice_in = ice or {}
     ice_row = {**ice_mod.score(ice_in.get("impact", 6), ice_in.get("confidence", 6), ice_in.get("ease", 6)), "tagline": str(ice_in.get("tagline") or ice_mod.tagline(name, goal.get("primary_kpi") or "", target_segment, goal.get("hypothesis") or ""))[:220]}
     payload = {"name": name, "channel": channel, "target_segment": target_segment, "variants": variants, "schedule": schedule, "ttl_hours": ttl_hours,
                "market_hook_id": market_hook_id, "goal": goal, "exclusions": exclusions or [], "frequency_cap": frequency_cap, "ice": ice_row}
-    p = approvals.propose("create_campaign", f"Campaign draft: {name}", payload, rationale, risk="medium")
+    p = approvals.propose("create_campaign", f"Campaign draft: {name}", payload, rationale, risk="medium", allow_incomplete=True)
     _capture_proposal_idea("create_campaign", f"Campaign: {name}", payload, rationale, p["id"])
+    need = (p.get("preview") or {}).get("incomplete") or ("; ".join(gaps) if gaps else "")
+    if need:
+        return {"proposal_id": p["id"], "status": "pending_incomplete", "needs_from_operator": need, "brief_warnings": check["warnings"],
+                "note": "Saved as an incomplete draft. The operator is asked for the missing inputs on the Asks screen; it cannot be approved until they are filled. Do not invent the missing values."}
     return {"proposal_id": p["id"], "status": p["status"], "preview": p.get("preview"), "brief_warnings": check["warnings"], "note": "Draft only. A human must approve before anything reaches MoEngage."}
 
 
@@ -452,10 +458,14 @@ def moengage_api_read(method: str, path: str, path_vars: Optional[Dict[str, str]
     return c.api().call_documented(method, path, path_vars=path_vars, params=params, body=body)
 
 
-def skill(name: str) -> Dict[str, Any]:
-    """Load one of the shared skills (.claude/skills) into context: moengage, moengage-api, moengage-engine, clm-operator."""
+def skill(name: str, part: str = "", section: str = "") -> Dict[str, Any]:
+    """Load a shared skill (.claude/skills): its body, one of its reference files (`part`, e.g. moengage → official-skill), or one heading of either (`section`)."""
     from ..skills import read_skill
-    return read_skill(name)
+    from .. import skill_router
+    r = read_skill(name, part=part, section=section)
+    if not r.get("error"):
+        skill_router.record(r["name"], "tool", part=r.get("part") or "SKILL", section=section)
+    return r
 
 
 def remember_guidance(text: str, scope: str = "general") -> Dict[str, Any]:
@@ -1168,8 +1178,8 @@ TOOL_SCHEMAS: List[Dict[str, Any]] = [
         {"query": STR, "method": STR, "path": STR}),
     _fn("moengage_api_read", "Call a documented READ-SAFE MoEngage API directly (any GET, or POST search/meta/stats endpoints), e.g. GET /v5/flows/{flow_id}, POST /v5/campaigns/search, GET /v5/analytics/dashboards. Writes are refused — propose them. Live mode only.",
         {"method": STR, "path": STR, "path_vars": OBJ, "params": OBJ, "body": OBJ}, ["method", "path"]),
-    _fn("skill", "Load a shared skill into context before specialised work: 'moengage' (product + when-to-use), 'moengage-api' (auth, endpoints, key scopes, limits, how this engine calls them), 'moengage-engine' (this codebase: views, CLI, tools, how to change it), 'clm-operator' (goal discipline, brief format, compliance).",
-        {"name": STR}, ["name"]),
+    _fn("skill", "Load a shared skill before specialised work. Every skill in the system prompt's list can be loaded by name. `part` opens a reference file that ships with a skill and `section` returns one heading only, e.g. skill('moengage', part='official-skill', section='Common Gotchas') for MoEngage's own agent skill (channel matrix, delivery types, campaign and flow workflows, gotchas, verification checklist); skill('moengage-api') for auth, endpoints, key scopes and limits. The result lists the headings you can ask for next.",
+        {"name": STR, "part": STR, "section": STR}, ["name"]),
     _fn("remember_guidance", "Save a standing instruction from the operator so it applies to every future conversation (brand voice, exclusions, channel rules, cadence, process). Use whenever the operator says 'from now on', 'always', 'never', 'remember'. scope: general|copy|audience|channel|measurement|market|process|ui.",
         {"text": STR, "scope": STR}, ["text"]),
     _fn("set_engine_setting", "Change an engine knob right now (allowlisted, non-secret): autopilot_enabled, autopilot_max_actions, schedule_enabled, schedule_time, refresh_interval_hours, analysis_batch, market_universe_mode, market_top_n, taxonomy_codes (merge), llm_temperature, llm_max_tokens, llm_model_bulk, mock_scenario, devagent_enabled. Returns before/after.",

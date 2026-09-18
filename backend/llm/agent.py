@@ -132,6 +132,14 @@ class MarketerAgent:
         if len(text) > budget:
             text = text[:budget] + f'… [truncated {len(text) - budget} chars; ask a narrower question or use a detail tool]'
         self._seen_calls[key] = text
+        try:
+            from .. import skill_router
+            chk = skill_router.checklist_for_tool(name, getattr(self, "_skills_loaded", []))
+            if chk:
+                self._skills_loaded = list(getattr(self, "_skills_loaded", [])) + ["moengage/official-skill § Verification Checklist"]
+                text += "\n\nMoEngage verification checklist (loaded by the engine because this builds something in MoEngage; check the draft against it and revise if it fails):\n" + chk
+        except Exception:
+            pass
         # Data boundary: everything a tool returns (campaign names, headlines, segment
         # descriptions) is untrusted content. It is wrapped so the model treats any
         # instruction-like text inside as data, never as a directive.
@@ -144,6 +152,18 @@ class MarketerAgent:
         for h in history:
             if h.get("role") in ("user", "assistant") and h.get("content"):
                 messages.append({"role": h["role"], "content": redact(h["content"])[:2500]})
+        loaded: List[str] = []
+        try:                                          # the skills this task calls for go into context without waiting for the model to ask
+            from .. import skill_router
+            sk_text, loaded = skill_router.block(user_message, self.persona, self.purpose)
+            if sk_text:
+                messages.append({"role": "user", "content": sk_text})
+                messages.append({"role": "assistant", "content": "Read. I will follow these."})
+                for n in loaded:
+                    self._seen_calls["skill:" + json.dumps({"name": n.split("/")[0].split(" ")[0]}, sort_keys=True)] = "its key sections are already in this conversation (placed by the engine); for any other heading call skill(name, part=..., section=...)"
+        except Exception:
+            loaded = []
+        self._skills_loaded = loaded
         messages.append({"role": "user", "content": redact(user_message)})
         if persist:
             save_chat_message("user", user_message)
@@ -182,7 +202,7 @@ class MarketerAgent:
         except Exception:
             pass
         if persist:
-            save_chat_message("assistant", final_text, tool_calls={"tools": [t["tool"] for t in trace], "model": model})
+            save_chat_message("assistant", final_text, tool_calls={"tools": [t["tool"] for t in trace], "model": model, "skills": getattr(self, "_skills_loaded", [])})
         audit("agent.chat", {"tools": [t["tool"] for t in trace], "model": model, "chars": len(final_text), "qa_unverified": len((qa_res or {}).get("unverified") or [])}, actor="agent")
         return {"reply": final_text, "model": model, "tool_used": [t["tool"] for t in trace], "trace": trace, "usage": usage_total, "qa": qa_res, "persona": self.persona}
 

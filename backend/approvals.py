@@ -9,6 +9,7 @@ MoEngage layer; unknown kinds cannot be approved.
 """
 from __future__ import annotations
 import json
+import re
 from datetime import datetime
 from typing import Any, Callable, Dict, List, Optional
 
@@ -179,7 +180,12 @@ def add_comment(pid: int, text: str, actor: str = "user") -> Dict[str, Any]:
     return get_proposal(pid)  # type: ignore[return-value]
 
 
-def propose(kind: str, title: str, payload: Dict[str, Any], rationale: str = "", risk: str = "medium", created_by: str = "agent") -> Dict[str, Any]:
+MISSING_INPUT = re.compile(r"missing fields|brief incomplete|provide variants|needs schedule\.business_event|moengage_created_by|dashboard email", re.I)
+
+
+def propose(kind: str, title: str, payload: Dict[str, Any], rationale: str = "", risk: str = "medium", created_by: str = "agent", allow_incomplete: bool = False) -> Dict[str, Any]:
+    """allow_incomplete keeps a draft that is only short of an input (a cohort, a holdout, its copy) as pending and marked incomplete, so the
+    operator is asked for it instead of the draft being thrown away. It can never run like that: approval re-validates first."""
     init_approval_tables()
     if kind not in KINDS:
         raise ApprovalError(f"unknown proposal kind {kind}")
@@ -192,10 +198,16 @@ def propose(kind: str, title: str, payload: Dict[str, Any], rationale: str = "",
         return row
     ex = _executors.get(kind)
     preview: Dict[str, Any] = {}
+    incomplete = ""
     if ex:
-        ex["validate"](payload)          # raises on bad payload
         try:
-            preview = ex["preview"](payload)
+            ex["validate"](payload)      # raises on bad payload
+        except Exception as e:
+            if not (allow_incomplete and MISSING_INPUT.search(str(e))):
+                raise
+            incomplete = redact(str(e))[:400]
+        try:
+            preview = {"incomplete": incomplete} if incomplete else ex["preview"](payload)
         except Exception as e:           # preview failure must not block proposing
             preview = {"preview_error": redact(str(e))}
     else:

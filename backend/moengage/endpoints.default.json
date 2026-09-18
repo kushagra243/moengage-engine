@@ -129,6 +129,15 @@
       "doc": "https://www.moengage.com/docs/api/campaigns/campaigns-overview",
       "note": "Creates a DRAFT; build incrementally with PATCH."
     },
+    "campaign_test_v5": {
+      "method": "POST",
+      "path": "/v5/campaigns/test",
+      "key": "campaigns",
+      "appkey_header": true,
+      "status": "documented",
+      "doc": "https://www.moengage.com/docs/api/campaigns/campaigns-overview",
+      "note": "Test send (Push or Email) to at most 10 recipients by email, unique id or device id; inline content or draft_id."
+    },
     "campaign_get_v5": {
       "method": "GET",
       "path": "/v5/campaigns/{id}",

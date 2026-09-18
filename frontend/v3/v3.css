@@ -157,6 +157,10 @@ a.primary{display:inline-block}
 button.bordered{background:none}
 .bordered:disabled,.primary:disabled{opacity:.45;cursor:default}
 
+.pick{flex:0 0 22px}
+.pick input{accent-color:#7fd8ec;width:15px;height:15px;cursor:pointer}
+.pick input:disabled{opacity:.3;cursor:default}
+
 /* workbench: the operator modules inside this shell */
 body.wide .col{max-width:none;padding:0 0 0;gap:0}
 body.wide .ask,body.wide #ask-out{display:none}

@@ -16,7 +16,7 @@ from typing import Any, Callable, Dict, List, Optional
 from .database import get_db
 from .security import audit, redact
 
-KINDS = ("create_segment", "create_campaign", "create_flow", "pause_campaign", "resume_campaign", "update_segment", "custom_segment_upload", "code_change", "signal_rule", "skill_update", "sop_change", "sop_new", "ma2_pilot", "ma2_discovery")
+KINDS = ("create_segment", "create_campaign", "create_flow", "pause_campaign", "resume_campaign", "update_segment", "custom_segment_upload", "code_change", "signal_rule", "skill_update", "sop_change", "sop_new", "ma2_pilot", "ma2_discovery", "test_send")
 
 _executors: Dict[str, Dict[str, Callable[..., Dict[str, Any]]]] = {}
 
@@ -309,6 +309,14 @@ def approve_and_execute(pid: int, decided_by: str = "user", note: str = "") -> D
         conn.commit(); conn.close()
         audit("proposal.executed", {"id": pid, "kind": p["kind"], "ok": result.get("success", True)}, actor=decided_by)
         if p["kind"] == "create_campaign" and result.get("success", True):
+            try:                                  # by default the saved test users see every draft the moment it exists
+                from . import test_sends
+                t = test_sends.after_draft_created(p, result, actor=decided_by)
+                if t is not None:
+                    result["test_send"] = {k: t.get(k) for k in ("ok", "sent_to", "status", "error")}
+                    conn = get_db(); conn.execute("UPDATE proposals SET result_json=? WHERE id=?", (json.dumps(result, default=str), pid)); conn.commit(); conn.close()
+            except Exception as ex:
+                audit("test_send.after_create_failed", {"id": pid, "error": redact(str(ex))}, actor="system")
             try:
                 from .experiments import register_from_proposal
                 from .database import get_setting as _gs
@@ -336,7 +344,11 @@ def expire_stale() -> Dict[str, int]:
         except Exception:
             age_h = 0
         ttl = pl.get("ttl_hours")
-        sched = ((pl.get("schedule") or {}).get("date")) if isinstance(pl.get("schedule"), dict) else None
+        sch = pl.get("schedule") if isinstance(pl.get("schedule"), dict) else {}
+        standing = str(sch.get("type") or sch.get("delivery_type") or "").lower() in ("business_event_triggered", "business_event", "event_triggered", "event", "periodic", "recurring")
+        if standing:
+            continue                      # an always-on campaign: ttl_hours is how long each message lives, not how long the draft may wait for approval
+        sched = sch.get("date")
         stale = (ttl and age_h > 2 * float(ttl)) or (sched and sched < (datetime.utcnow().date() - __import__("datetime").timedelta(days=1)).isoformat())
         if stale:
             conn = get_db()

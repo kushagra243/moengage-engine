@@ -68,7 +68,7 @@ if _migrated:
 register_executors()
 from . import devagent as _devagent
 _devagent.register()
-for _mod in ("signals", "research", "sop_improve", "sop_requests", "alerts2.service", "alerts2.discovery"):     # approval executors: signal_rule, skill_update, sop_change, sop_new, ma2_pilot, ma2_discovery
+for _mod in ("signals", "research", "sop_improve", "sop_requests", "alerts2.service", "alerts2.discovery", "test_sends"):     # approval executors: signal_rule, skill_update, sop_change, sop_new, ma2_pilot, ma2_discovery, test_send
     try:
         __import__("importlib").import_module(f"backend.{_mod}").register()
     except Exception as _e:
@@ -1895,6 +1895,57 @@ def v3_alerts():
 def v3_engine():
     from . import v3_ops
     return v3_ops.engine(status())
+
+
+class TestUsersPayload(BaseModel):
+    users: str = ""
+
+
+class TestSendPayload(BaseModel):
+    title: str = ""
+    body: str = ""
+    name: str = "Test send"
+    proposal_id: Optional[int] = None
+    users: str = ""                      # optional: replace the saved list first (emails or customer ids, up to ten)
+
+
+@app.get("/api/test-users")
+def test_users_get():
+    """Count and masked values only; the addresses never leave the encrypted store."""
+    from . import test_sends
+    return test_sends.meta()
+
+
+@app.post("/api/test-users")
+def test_users_save(payload: TestUsersPayload, request: Request):
+    from . import test_sends
+    try:
+        return test_sends.save_users(payload.users, actor=request_actor(request))
+    except test_sends.TestSendError as e:
+        raise HTTPException(400, str(e))
+
+
+@app.post("/api/test-send")
+def test_send(payload: TestSendPayload, request: Request):
+    """The operator's own click: a MoEngage test send to the saved test users, recorded as a test_send proposal. No agent tool reaches this."""
+    from . import test_sends
+    actor = request_actor(request)
+    if payload.users.strip():
+        try:
+            test_sends.save_users(payload.users, actor=actor)
+        except test_sends.TestSendError as e:
+            raise HTTPException(400, str(e))
+    title, body, name = payload.title, payload.body, payload.name
+    if payload.proposal_id:
+        pr = approvals.get_proposal(payload.proposal_id)
+        if not pr:
+            raise HTTPException(404, "no such draft")
+        v = ((pr.get("payload") or {}).get("variants") or [{}])[0]
+        title, body, name = title or str(v.get("title") or ""), body or str(v.get("body") or ""), str((pr.get("payload") or {}).get("name") or name)
+    r = test_sends.send(title, body, name=name, actor=actor, source=f"proposal:{payload.proposal_id}" if payload.proposal_id else "alerts")
+    if not r.get("ok"):
+        raise HTTPException(400, r.get("error") or "the test could not be sent")
+    return r
 
 
 @app.get("/api/skills/usage")

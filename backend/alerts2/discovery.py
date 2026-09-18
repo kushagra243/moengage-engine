@@ -884,7 +884,7 @@ def _campaign_state() -> Dict[str, Any]:
         props = []
     if not props:
         return {"state": "not proposed", "detail": "propose it below: the draft is created in MoEngage on approval", "proposal_id": None, "experiment_id": None}
-    p = props[0]
+    p = next((x for x in props if x.get("status") in ("pending", "approved", "executed")), props[0])      # an old expired or rejected draft never hides a newer live one
     exp_id = None
     try:
         conn = get_db(); row = conn.execute("SELECT id FROM experiments WHERE proposal_id=?", (p["id"],)).fetchone(); conn.close()
@@ -892,7 +892,8 @@ def _campaign_state() -> Dict[str, Any]:
     except Exception:
         pass
     detail = {"pending": "waiting for approval on the Ideas board", "executed": "draft created in MoEngage — publish it there to start receiving fires",
-              "failed": "creation failed, see the proposal", "approved": "approved"}.get(p.get("status"), p.get("status") or "")
+              "failed": "creation failed, see the proposal", "approved": "approved", "rejected": "the draft was rejected; launch again when ready",
+              "expired": "the draft waited too long for approval and was expired by housekeeping; launch again (standing campaigns no longer expire)"}.get(p.get("status"), p.get("status") or "")
     return {"state": p.get("status"), "detail": detail, "proposal_id": p["id"], "experiment_id": exp_id, "name": (p.get("payload") or {}).get("name")}
 
 
@@ -919,17 +920,48 @@ def preflight() -> List[Dict[str, Any]]:
                 "fix": "" if cb or mock else "Engine → Settings → moengage_created_by = your MoEngage dashboard login email"})
     ev_ok, ev_detail = None, "cannot be checked in mock mode"
     ev_fix = f"create {EVENT} in MoEngage → Business Events with the attributes below before going live"
+    wanted = sorted({c["event"] for c in cohorts() if c.get("stage") == "internal"} or {EVENT})
+    confirmed = [x for x in (get_setting("ma2_business_events_confirmed", "") or "").split(",") if x]
+    camp_ok = None; ev_cause = ""
     if not mock and api:
         try:
             r = api.business_events_list()
             names = json.dumps(r.get("data") or r)
-            ev_ok = EVENT in names
-            ev_detail = f"{EVENT} exists in MoEngage" if ev_ok else f"{EVENT} is not defined in this workspace yet"
-            ev_fix = "" if ev_ok else f"MoEngage → Business Events → create {EVENT} with the attributes listed below, then propose the campaign again"
+            missing = [w for w in wanted if w not in names]
+            ev_ok = not missing
+            ev_detail = f"{', '.join(wanted)} exist{'s' if len(wanted) == 1 else ''} in MoEngage" if ev_ok else f"{', '.join(missing)} {'is' if len(missing) == 1 else 'are'} not defined in this workspace yet"
+            ev_cause = "" if ev_ok else "missing"
+            ev_fix = "" if ev_ok else f"MoEngage → Settings → Business Events → create {', '.join(missing)} with the attributes title, body, token, product, signal, deep_link"
         except Exception as e:
-            ev_ok, ev_detail = False, f"could not list business events: {redact(str(e))[:110]}"
-            ev_fix = "the business-events API needs its key; the event can also be created in the dashboard"
-    out.append({"check": "Business event", "ok": ev_ok, "detail": ev_detail, "fix": ev_fix})
+            msg = redact(str(e))
+            if "401" in msg or "403" in msg:                      # which of workspace id, data centre and key is wrong? two cheap calls tell them apart
+                data_ok = None
+                try:
+                    api.campaigns_search(page_size=1); camp_ok = True
+                except Exception:
+                    camp_ok = False
+                try:
+                    api.test_connection(); data_ok = True
+                except Exception:
+                    data_ok = False if api.has("data") else None
+                ev_cause = "key_permission" if camp_ok else "campaigns_key" if data_ok else "workspace_or_dc"
+                if camp_ok:
+                    ev_detail = "the Campaigns key works for campaigns, but MoEngage will not let it read Business Events: the key lacks that permission"
+                    ev_fix = "MoEngage → Settings → Account → API keys → open the Campaigns key → enable Business Events (read and trigger); or confirm here that the event exists"
+                elif data_ok:
+                    ev_detail = f"the Workspace ID and data centre api-{api.dc} are right (the Data key is accepted), but MoEngage rejects the Campaigns key"
+                    ev_fix = "paste the Campaigns API key again: MoEngage → Settings → Account → API keys → Campaigns. A Data or Segmentation key in that field is rejected exactly like this"
+                else:
+                    ev_detail = f"MoEngage rejects every key on api-{api.dc}: the Workspace ID or the data centre is wrong"
+                    ev_fix = "check the Workspace ID (the LIVE one, not the TEST one ending _DEBUG) and the data centre number in the dashboard address (dashboard-0X)"
+                ev_ok = False
+            else:
+                ev_cause = "unknown"
+                ev_ok, ev_detail = False, f"could not list business events: {msg[:300]}"
+                ev_fix = "the business-events list could not be read; create the event in the dashboard and confirm it here"
+            if camp_ok and all(w in confirmed for w in wanted):   # the key can create the draft; only the list is closed to it, and a human has said the event is there
+                ev_ok, ev_detail, ev_fix = True, f"{', '.join(wanted)} confirmed by you; MoEngage's list could not be read with this key", ""
+    out.append({"check": "Business event", "ok": ev_ok, "detail": ev_detail, "fix": ev_fix, "cause": "" if ev_ok else ev_cause, "events": wanted})
     camp = _campaign_state()
     ok = camp["state"] == "executed" and not mock
     detail = {"not proposed": "no campaign proposal exists yet — press Launch", "pending": f"proposal #{camp['proposal_id']} is waiting for approval on the Ideas board",
@@ -943,9 +975,10 @@ def preflight() -> List[Dict[str, Any]]:
             err = str(pr.get("error") or "")[:300]
         except Exception:
             pass
-    out.append({"check": "Campaign draft", "ok": ok, "detail": detail + (f" — {err}" if err else ""),
+    out.append({"check": "Campaign draft", "ok": ok, "state": camp["state"], "proposal_id": camp.get("proposal_id"), "detail": (camp.get("detail") if camp["state"] in ("expired", "rejected") else detail) + (f" — {err}" if err else ""),
                 "fix": "" if ok else {"pending": "approve it on the Ideas board", "not proposed": "press Launch below",
-                                      "executed": "switch mock_mode off, then launch again to create the real draft"}.get(camp["state"], "fix the cause above and launch again")})
+                                      "executed": "switch mock_mode off, then launch again to create the real draft", "expired": "read the launch brief and queue the launch again",
+                                      "rejected": "read the launch brief and queue the launch again"}.get(camp["state"], "fix the cause above and launch again")})
     st = is_live()
     out.append({"check": "Engine firing", "ok": st["live"], "detail": st["why"] or "approved and firing", "fix": "" if st["live"] else "approve the discovery experiment on the Ideas board"})
     try:

@@ -50,7 +50,7 @@ async function renderToday() {
       <div class="facts">${focus.facts.map((f) => `<div class="fact"><span class="k">${esc(f.k)}</span><span class="v ${esc(f.tone)}">${esc(f.v)}</span></div>`).join('')}</div>
       <div class="plan"><div class="k">IF YOU APPROVE</div><ul>${focus.plan.map((p) => `<li>${esc(p)}</li>`).join('')}</ul></div>
       ${focus.blocked ? `<p class="blocked"><span class="k">BEFORE THIS CAN RUN</span>${esc(focus.blocked)}</p>` : ''}
-      <div class="acts">${focus.primary.go ? `<a class="primary" href="${esc(focus.primary.go)}">${esc(focus.primary.label)}</a>` : `<button class="primary" data-resolve="approve" data-id="${esc(focus.id)}">${esc(focus.primary.label)}</button>`}${verbLink(focus.evidence, 'evidence')}<button class="defer" data-resolve="defer" data-id="${esc(focus.id)}">${esc(focus.defer.label)}</button></div>
+      <div class="acts">${focus.primary.go ? `<a class="primary" href="${esc(focus.primary.go)}">${esc(focus.primary.label)}</a>` : `<button class="primary" data-resolve="approve" data-id="${esc(focus.id)}">${esc(focus.primary.label)}</button>`}${verbLink(focus.evidence, 'evidence')}${focus.test ? `<a class="evidence" href="#" data-test-proposal="${focus.test.proposal_id}">${esc(focus.test.label)}</a>` : ''}<button class="defer" data-resolve="defer" data-id="${esc(focus.id)}">${esc(focus.defer.label)}</button></div>
     </section>` : `<section class="sec clear"><p class="line">${esc(d.all_clear.line)}</p><p class="body">${esc(d.all_clear.context)}</p><p><a class="bordered" href="${esc(d.all_clear.button.go)}">${esc(d.all_clear.button.label)}</a></p></section>`;
   const thenHtml = rest.length ? `<section class="sec then"><div class="lab">Then</div>${rest.map((x) => `<div class="row" data-focus="${esc(x.id)}"><span class="tag ${esc(x.tone)}">${esc(x.tag)}</span><span class="title">${esc(x.title)}</span><span class="val">${esc((x.facts[0] || {}).v || '')}</span><a class="verb accent" href="#today?decision=${encodeURIComponent(x.id)}">${x.kind === 'anomaly' ? 'FIX IT →' : x.kind === 'proposal' ? 'REVIEW →' : 'DECIDE →'}</a></div>`).join('')}</section>` : '';
   const movedHtml = `<section class="sec moved"><div class="lab">What moved · and what to do</div>${d.moved.length ? d.moved.map((m) => `<div class="row"><span class="delta ${esc(m.tone)}">${esc(m.delta)}</span><span class="what body">${esc(m.what)}</span><span class="do">${esc(m.do)}</span>${verbLink(m)}</div>`).join('') : '<div class="row"><span class="body">Nothing moved outside its own range today.</span></div>'}</section>`;
@@ -169,13 +169,13 @@ async function renderAlerts() {
   const rows = (label, html) => `<section class="sec"><div class="lab">${label}</div>${html}</section>`;
   $('#main').innerHTML = `<section class="sec"><div class="lab">Market alerts</div><p class="lead">${esc(d.lead)}</p>
       <p class="small" style="margin-top:14px">${esc(d.launch.note)} ${esc(d.autonomy)}</p>
-      <div class="acts" style="margin-top:22px"><button class="primary" data-al="brief">${esc(d.launch.label)}</button><button class="bordered" data-al="dry">SEE WHAT WOULD GO OUT NOW</button><button class="${d.kill ? 'bordered' : 'defer'}" data-al="kill" data-on="${d.kill ? '0' : '1'}">${d.kill ? 'LIFT THE STOP' : 'STOP ALL ALERTS'}</button></div>
+      <div class="acts" style="margin-top:22px"><button class="primary" data-al="brief">${esc(d.launch.label)}</button><button class="bordered" data-al="dry">SEE WHAT WOULD GO OUT NOW</button><button class="bordered" data-al="test">SEND A TEST TO THE TEST USERS</button><button class="${d.kill ? 'bordered' : 'defer'}" data-al="kill" data-on="${d.kill ? '0' : '1'}">${d.kill ? 'LIFT THE STOP' : 'STOP ALL ALERTS'}</button></div>
       <div id="al-out"></div></section>
-    ${d.blockers.length ? rows('Before it can really run', d.blockers.map((b) => `<div class="row"><span class="tag amber" style="flex:0 0 190px">${esc(b.check)}</span><span class="grow body">${esc(b.detail)}</span><a class="verb accent" href="${esc(b.go)}">${esc(b.verb)}</a></div>`).join('')) : ''}
+    ${d.blockers.length ? rows('Before it can really run', d.blockers.map((b) => `<div class="row"><span class="tag amber" style="flex:0 0 190px">${esc(b.check)}</span><div class="grow"><span class="body">${esc(b.detail)}</span>${b.fix ? `<p class="small" style="margin:6px 0 0"><span class="dim">TO FIX · </span>${esc(b.fix)}</p>` : ''}</div><a class="verb accent" href="${esc(b.go)}">${esc(b.verb)}</a></div>`).join('')) : ''}
     ${rows('The plan in one look', d.summary.map((r) => `<div class="row rules"><span class="k">${esc(r.k)}</span><span class="v">${esc(r.v)}</span></div>`).join(''))}
     ${rows(`What it will say · word for word${d.copy_blocking ? ` · ${d.copy_blocking} blocked by the copy rules` : ''}`, d.copy.map((c) => `<div class="row"><span class="tag dim" style="flex:0 0 150px">${esc(c.signal)}</span><div class="grow"><span class="text">${esc(c.title)}</span><p class="small">${esc(c.body)}</p></div><span class="verb ${c.ok ? 'green' : 'magenta'}">${c.ok ? 'PASSES THE RULES' : esc(c.lint).toUpperCase()}</span></div>`).join(''))}
     ${rows('When it fires', d.signals.map((g) => `<div class="row"><div class="grow"><span class="text">${esc(g.label)}</span><p class="small">${esc(g.when)}</p></div><span class="small" style="flex:0 0 230px">${esc(g.cap)} · goes out ${esc(g.lane)}</span></div>`).join(''))}
-    ${rows('Who gets it · one MoEngage campaign per cohort', d.cohorts.map((c) => `<div class="row"><div class="grow"><span class="text">${esc(c.label)}</span><p class="small">${esc(c.segment)} · ${esc(c.control)} · ${esc(c.why)}</p></div><span class="verb ${esc(c.tone)}">${esc(c.state)}</span></div>`).join('') + `<p class="small" style="margin-top:14px">Wider rollout · ${esc(d.promotion.progress)} · ${esc(d.promotion.line)}</p>`)}
+    ${rows('Who gets it · tick the cohorts to launch · one MoEngage campaign each', d.cohorts.map((c) => `<div class="row"><label class="pick"><input type="checkbox" data-cohort="${esc(c.id)}" ${c.locked ? 'disabled' : ''} ${c.id === 'internal' || c.active ? 'checked' : ''}></label><div class="grow"><span class="text">${esc(c.label)}</span><p class="small">${esc(c.segment)} · ${esc(c.control)} · ${esc(c.why)}</p></div><span class="verb ${esc(c.tone)}">${esc(c.state)}</span></div>`).join('') + `<p class="small" style="margin-top:14px">Wider rollout · ${esc(d.promotion.progress)} · ${esc(d.promotion.line)}</p>`)}
     ${rows('Sent today', d.fires.length ? d.fires.map((f) => `<div class="row"><span class="small" style="flex:0 0 60px">${esc(f.at)}</span><div class="grow"><span class="text">${esc(f.title)}</span><p class="small">${esc(f.body)}</p></div><span class="small">${esc(f.to)} · by ${esc(f.source)}</span></div>`).join('') : '<div class="row"><span class="body">Nothing has gone out today.</span></div>')}
     <section class="sec"><p>${verbLink(d.ops, 'bordered')}</p></section>`;
 }
@@ -189,16 +189,32 @@ async function alertsAction(what, btn) {
       const dec = (r.summary.decisions || []);
       out.innerHTML = `<div class="inline"><div class="lab">Right now · ${r.detected} market facts seen · ${r.would_send} would go out · ${r.suppressed} held back</div>${dec.map((x) => `<div class="row"><div class="grow"><span class="text">${esc(x.title)}</span><p class="small">${esc(x.body)}</p></div><span class="verb ${x.reason ? 'dim' : 'green'}">${x.reason ? 'HELD · ' + esc(String(x.reason).replace(/_/g, ' ')) : 'WOULD GO OUT'}</span></div>`).join('') || '<p class="small">The market is quiet: nothing crossed a threshold.</p>'}<p class="small">A practice run. Nothing was sent and nothing was recorded.</p></div>`;
     }
+    const picked = () => { const c = $$('[data-cohort]:checked').map((x) => x.dataset.cohort); return c.length ? c : ['internal']; };
+    if (what === 'test') {
+      const d = S.data.alerts; const t = d.test_users;
+      out.innerHTML = `<form class="inline askcard plain" id="al-test"><div class="lab">A test send · only the test users get it</div>
+        <div class="flds"><label class="fld"><span class="k">WHICH ALERT</span><select name="copy">${d.copy.filter((c) => c.ok).map((c, i) => `<option value="${i}">${esc(c.signal)} · ${esc(c.title)}</option>`).join('')}</select></label>
+        <label class="fld"><span class="k">TEST USERS · EMAIL OR CUSTOMER ID · ONE PER LINE · UP TO ${t.max}</span><textarea name="users" rows="3" placeholder="${t.count ? esc('saved: ' + t.masked.join(', ') + ' · leave empty to use them') : 'you@coindcx.com'}"></textarea></label></div>
+        <div class="acts"><button type="submit" class="primary">SEND THE TEST NOW</button><span class="small">Goes through MoEngage's test API to these people only. The list is stored encrypted and shown masked.</span></div></form>`;
+      $('#al-test').addEventListener('submit', async (ev) => {
+        ev.preventDefault(); const f = ev.target; const b = f.querySelector('[type=submit]'); b.disabled = true;
+        const c = d.copy.filter((x) => x.ok)[Number(f.copy.value) || 0];
+        try { const r = await api('/api/test-send', {method: 'POST', body: {title: c.title, body: c.body, name: `MA2 test · ${c.signal}`, users: f.users.value}}); toast(`Test sent to ${r.sent_to} · ${r.status}`); S.data.alerts = null; S.data.asks = null; }
+        catch (e) { toast(`Not sent · ${e.message}`); }
+        b.disabled = false;
+      });
+    }
     if (what === 'brief') {
       out.innerHTML = '<p class="small" style="margin-top:20px">Writing the brief…</p>';
-      const md = await apiText('/api/alerts2/discovery/brief?format=md&cohorts=internal');
+      S.pickedCohorts = picked();
+      const md = await apiText('/api/alerts2/discovery/brief?format=md&cohorts=' + encodeURIComponent(S.pickedCohorts.join(',')));
       out.innerHTML = `<div class="inline"><div class="lab">The launch brief · read it before anything is queued</div><pre class="brief">${esc(md)}</pre>
         <label class="readit"><input type="checkbox" id="al-read"> I have read the copy, the audience, the caps and the stop rules.</label>
-        <div class="acts"><button class="primary" data-al="launch" disabled id="al-launch">QUEUE THE EMPLOYEE LAUNCH</button><span class="small">Queues the MoEngage draft and the permission to fire. Both still wait for your approval on Today.</span></div></div>`;
+        <div class="acts"><button class="primary" data-al="launch" disabled id="al-launch">QUEUE THE LAUNCH FOR ${S.pickedCohorts.length} COHORT${S.pickedCohorts.length === 1 ? '' : 'S'}</button><span class="small">Queues the MoEngage draft and the permission to fire. Both still wait for your approval on Today.</span></div></div>`;
       $('#al-read').addEventListener('change', (e) => { $('#al-launch').disabled = !e.target.checked; });
     }
     if (what === 'launch') {
-      const r = await api('/api/alerts2/discovery/launch', {method: 'POST', body: {reviewed: true, cohort_ids: ['internal']}});
+      const r = await api('/api/alerts2/discovery/launch', {method: 'POST', body: {reviewed: true, cohort_ids: S.pickedCohorts || ['internal']}});
       toast(r.needs_review ? 'Read the brief first' : 'Queued · two approvals are waiting on Today'); S.data.alerts = null; S.data.today = null; S.data.asks = null; location.hash = '#today';
     }
   } catch (e) { toast(`Not done · ${e.message}`); }
@@ -212,6 +228,8 @@ async function renderEngine() {
       <div class="facts" style="margin-top:26px">${d.state.map((f) => `<div class="fact"><span class="k">${esc(f.k)}</span><span class="v ${esc(f.tone)}">${esc(f.v)}</span><span class="small" style="display:block;margin-top:4px">${esc(f.note)}</span></div>`).join('')}</div>
       <div class="acts">${d.asks_open ? `<a class="primary" href="#asks">ANSWER THE ${d.asks_open} MISSING</a>` : ''}<button class="bordered" data-en="verify">CHECK THE MOENGAGE CONNECTION</button></div><div id="en-out"></div></section>
     ${d.groups.map((g, i) => `<section class="sec"><div class="lab">${esc(g.title)}</div><p class="small" style="margin:-6px 0 12px">${esc(g.note)}</p><form class="askcard plain" data-settings-form="${i}"><div class="flds two">${g.fields.map(fieldHtml).join('')}</div><div class="acts"><button type="submit" class="bordered">SAVE ${esc(g.title.toUpperCase())}</button></div></form></section>`).join('')}
+    <section class="sec"><div class="lab">Test users · every draft is test-sent to them</div><p class="small" style="margin:-6px 0 12px">${d.test_users.count ? esc(`${d.test_users.count} saved: ${d.test_users.masked.join(', ')}`) : 'None saved yet.'} Stored encrypted; saving replaces the list.</p>
+      <form class="askcard plain" id="en-testers"><div class="flds"><label class="fld"><span class="k">EMAIL OR CUSTOMER ID · ONE PER LINE · UP TO ${d.test_users.max}</span><textarea name="users" rows="3" placeholder="you@coindcx.com"></textarea></label></div><div class="acts"><button type="submit" class="bordered">SAVE THE TEST USERS</button></div></form></section>
     <section class="sec"><div class="lab">Background jobs</div>${d.jobs.map((j) => `<div class="row"><span class="text" style="flex:0 0 230px">${esc(j.name)}</span><span class="grow small ${j.tone === 'green' ? '' : esc(j.tone)}">${esc(j.status)}</span><a class="verb accent" href="#" data-job="${esc(j.job)}">${esc(j.verb)}</a></div>`).join('')}</section>
     <section class="sec"><div class="lab">Skills the brain really read · last 7 days</div><p class="small" style="margin:-6px 0 12px">${esc(d.skills_note || '')}</p>${(d.skills || []).map((k) => `<div class="row"><span class="text" style="flex:0 0 230px">${esc(k.name)}</span><span class="grow small">${esc(k.status)}</span>${verbLink(k)}</div>`).join('') || '<div class="row"><span class="body">No skill has been read yet. The next question or draft will show up here.</span></div>'}</section>
     <section class="sec"><div class="lab">More of the engine</div>${d.more.map((m) => `<div class="row"><span class="grow"></span>${verbLink(m)}</div>`).join('')}</section>`;
@@ -254,6 +272,12 @@ document.addEventListener('click', async (e) => {
   const rs = e.target.closest('[data-resolve]'); if (rs) { e.preventDefault(); return resolve(rs.dataset.id, rs.dataset.resolve, rs); }
   const a = e.target.closest('[data-ask]'); if (a) { e.preventDefault(); return ask(a.dataset.ask, true); }
   const al = e.target.closest('[data-al]'); if (al) { e.preventDefault(); return alertsAction(al.dataset.al, al); }
+  const tp = e.target.closest('[data-test-proposal]'); if (tp) {
+    e.preventDefault(); tp.textContent = 'SENDING…';
+    try { const r = await api('/api/test-send', {method: 'POST', body: {proposal_id: Number(tp.dataset.testProposal)}}); toast(`Test sent to ${r.sent_to} · ${r.status}`); }
+    catch (err) { toast(/no test users/.test(err.message) ? 'No test users yet · add them on Asks' : `Not sent · ${err.message}`); if (/no test users/.test(err.message)) location.hash = '#asks?focus=setting:test_users'; }
+    tp.textContent = 'SEND A TEST TO THE TEST USERS'; return;
+  }
   const dl = e.target.closest('[data-delivered]'); if (dl) { e.preventDefault(); return answerAsk(dl.dataset.delivered, {}, null); }
   const jb = e.target.closest('[data-job]'); if (jb) {
     e.preventDefault(); jb.textContent = 'RUNNING…';
@@ -276,6 +300,12 @@ document.addEventListener('click', async (e) => {
 });
 document.addEventListener('submit', async (e) => {
   const f = e.target.closest('[data-ask-form]'); if (f) { e.preventDefault(); return answerAsk(f.dataset.askForm, formValues(f), f.querySelector('[type=submit]')); }
+  const tu = e.target.closest('#en-testers'); if (tu) {
+    e.preventDefault();
+    try { const r = await api('/api/test-users', {method: 'POST', body: {users: tu.users.value}}); toast(`Saved · ${r.count} test user${r.count === 1 ? '' : 's'}`); S.data.engine = null; S.data.asks = null; await renderEngine(); }
+    catch (err) { toast(`Not saved · ${err.message}`); }
+    return;
+  }
   const g = e.target.closest('[data-settings-form]'); if (g) {
     e.preventDefault(); const btn = g.querySelector('[type=submit]'); btn.disabled = true;
     try { const r = await api('/api/settings', {method: 'POST', body: {values: formValues(g)}}); toast(`Saved · ${(r.saved || []).length} setting${(r.saved || []).length === 1 ? '' : 's'}${(r.rejected || []).length ? ' · ' + r.rejected.length + ' refused' : ''}`); S.data.engine = null; S.data.asks = null; S.data.today = null; S.data.alerts = null; await renderEngine(); }

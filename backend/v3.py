@@ -126,7 +126,8 @@ def _proposal_decision(d: Dict[str, Any]) -> Dict[str, Any]:
             "facts": [{"k": "WORTH", "v": worth, "tone": "green"}, {"k": "CONFIDENCE", "v": confidence_word(ice.get("confidence", 6)), "tone": "text"},
                       {"k": "YOUR EFFORT", "v": "One click", "tone": "text"}],
             "plan": plan, "primary": {"label": primary, "action": "approve"},
-            "evidence": {"label": "READ THE DRAFT", "go": f"#running?focus={pid}"}, "defer": {"label": "DECIDE TOMORROW"}, "rank": d.get("rank", 70)}
+            "evidence": {"label": "READ THE DRAFT", "go": f"#running?focus={pid}"}, "defer": {"label": "DECIDE TOMORROW"}, "rank": d.get("rank", 70),
+            **({"test": {"label": "SEND A TEST TO THE TEST USERS", "proposal_id": pid}} if kind == "create_campaign" and "{{" not in json.dumps(pl.get("variants") or []) else {})}
 
 
 def _anomaly_decision(d: Dict[str, Any], anomaly_rows: List[Dict[str, Any]]) -> Dict[str, Any]:

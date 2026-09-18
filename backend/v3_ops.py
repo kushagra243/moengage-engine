@@ -76,6 +76,15 @@ def _connection_asks(settings: Dict[str, str]) -> List[Dict[str, Any]]:
     if provider != "claude_cli" and not _has(settings, "llm_api_key"):
         out.append({"id": "setting:llm_api_key", "group": "CONNECTION", "tone": "amber", "title": "Add a model key so the brain can write and reason", "why": "Drafting copy, answering questions and the daily brief all need a model. Free models are used wherever they are good enough.",
                     "where": "openrouter.ai → Keys → Create key (starts with sk-or-)", "unblocks": "Ask, copy drafts, the daily brief and the alerts agent", "fields": [_f("llm_api_key", "MODEL KEY", "secret", "sk-or-…")], "button": "SAVE AND CHECK"})
+    try:
+        from . import test_sends
+        if not test_sends.meta()["count"]:
+            out.append({"id": "setting:test_users", "group": "CONNECTION", "tone": "dim", "title": "Name the people who should receive every test send",
+                        "why": "Up to ten testers. Every campaign draft is test-sent to them when it is created, and the Alerts screen can send them any alert on demand, so copy is seen on a real phone before anyone else gets it.",
+                        "where": "Their email as MoEngage knows it, or their customer id. Stored encrypted; the page only ever shows them masked.", "unblocks": "test sends on every campaign",
+                        "fields": [_f("test_users", "TEST USERS · ONE PER LINE · UP TO 10", "list", "you@coindcx.com")], "button": "SAVE THE TEST USERS"})
+    except Exception:
+        pass
     if mock:
         missing = [a["field"]["label"].title() for a in SETTING_ASKS if a["key"] not in ("moengage_segmentation_key", "moengage_dc") and not _has(settings, a["key"])]
         out.append({"id": "setting:mock_mode", "group": "CONNECTION", "tone": "amber", "title": "Leave practice mode and work on the real workspace",
@@ -95,11 +104,32 @@ def _alerts_asks(settings: Dict[str, str]) -> List[Dict[str, Any]]:
         d = discovery.internal_delivery()
         ev = pre.get("Business event") or {}
         if ev.get("ok") is False:
-            names = ", ".join(c["event"] for c in discovery.cohorts()[:1]) or discovery.EVENT
-            out.append({"id": "alerts:business_event", "group": "MARKET ALERTS", "tone": "magenta", "title": f"Create the business event {names} in MoEngage",
-                        "why": plain(ev.get("detail") or "") + ". The engine fires this event and MoEngage's campaign listens for it, so it has to exist before the draft can be created.",
-                        "where": "MoEngage → Settings → Business Events → Create. Attributes: title, body, token, product, signal, deep_link (all text).",
-                        "unblocks": "the market alerts campaign draft", "fields": [], "confirm": True, "button": "I HAVE CREATED IT · CHECK AGAIN"})
+            names = ", ".join(ev.get("events") or [discovery.EVENT])
+            cause = ev.get("cause") or "missing"
+            base = {"group": "MARKET ALERTS", "tone": "magenta", "why": plain(ev.get("detail") or "") + ".", "unblocks": "the market alerts campaign draft and every alert after it"}
+            if cause == "workspace_or_dc":
+                out.append({**base, "id": "alerts:workspace", "title": "MoEngage rejects every key: correct the workspace id or the data centre", "where": plain(ev.get("fix") or ""),
+                            "fields": [_f("moengage_app_id", "WORKSPACE ID · THE LIVE ONE", placeholder="leave empty to keep the saved one"), _f("moengage_dc", "DATA CENTRE", placeholder="03", value=str(settings.get("moengage_dc") or ""))], "button": "SAVE AND CHECK AGAIN"})
+            elif cause == "campaigns_key":
+                out.append({**base, "id": "alerts:campaigns_key", "title": "MoEngage rejects the Campaigns API key: paste it again", "where": plain(ev.get("fix") or ""),
+                            "fields": [_f("moengage_campaign_key", "CAMPAIGNS API KEY", "secret")], "button": "SAVE AND CHECK AGAIN"})
+            elif cause in ("key_permission", "unknown"):
+                out.append({**base, "id": "alerts:business_event_confirm", "tone": "amber", "title": f"Confirm that the business event {names} exists in MoEngage",
+                            "where": plain(ev.get("fix") or "") + f". To create it: MoEngage → Settings → Business Events → Create → name {names}; attributes title, body, token, product, signal, deep_link (all text).",
+                            "fields": [], "confirm": True, "button": "IT EXISTS · I HAVE CHECKED"})
+            else:
+                out.append({**base, "id": "alerts:business_event", "title": f"Create the business event {names} in MoEngage",
+                            "why": plain(ev.get("detail") or "") + ". The engine fires this event and MoEngage's campaign listens for it, so it has to exist before the draft can be created.",
+                            "where": "MoEngage → Settings → Business Events → Create. Attributes: title, body, token, product, signal, deep_link (all text).",
+                            "fields": [], "confirm": True, "button": "I HAVE CREATED IT · CHECK AGAIN"})
+        cd = pre.get("Campaign draft") or {}
+        if cd.get("state") in ("expired", "rejected", "failed"):
+            out.append({"id": "alerts:launch", "group": "MARKET ALERTS", "tone": "amber", "title": "Queue the market alerts launch again",
+                        "why": plain(cd.get("detail") or "") + ".", "where": "The Alerts screen: read the launch brief, tick that you read it, queue the employee launch. Then approve the two drafts on Today.",
+                        "unblocks": "the campaign draft in MoEngage and the engine's permission to fire", "fields": [], "link": {"label": "READ THE BRIEF AND QUEUE IT →", "go": "#alerts"}})
+        elif cd.get("state") == "pending" and cd.get("proposal_id"):
+            out.append({"id": "alerts:approve", "group": "MARKET ALERTS", "tone": "amber", "title": "Approve the market alerts campaign draft", "why": "It is queued and complete. It creates the draft in MoEngage the moment you approve it.",
+                        "where": "Today, as its own decision.", "unblocks": "the campaign draft in MoEngage", "fields": [], "link": {"label": "REVIEW IT ON TODAY →", "go": f"#today?decision=proposal:{cd['proposal_id']}"}})
         if d.get("requested") == "inform":
             if not _has(settings, "moengage_inform_key"):
                 out.append({"id": "setting:moengage_inform_key", "group": "MARKET ALERTS", "tone": "amber", "title": "Add the Inform API key for direct alerts to employees",
@@ -288,7 +318,7 @@ def answer(aid: str, values: Dict[str, Any], save: SaveFn, actor: str = "user") 
     toast = "Saved"
     nxt: Optional[Dict[str, Any]] = None
     try:
-        if kind == "setting":
+        if kind == "setting" and rest != "test_users":
             key = rest
             if key == "mock_mode":
                 s = get_all_settings()
@@ -307,6 +337,12 @@ def answer(aid: str, values: Dict[str, Any], save: SaveFn, actor: str = "user") 
                 if key in (r.get("rejected") or []):
                     return {"ok": False, "toast": "The engine does not accept that setting"}
                 toast = "Saved · encrypted on this Mac and never shown again" if key.endswith("_key") else "Saved"
+        elif aid == "setting:test_users":
+            from . import test_sends
+            m = test_sends.save_users(values.get("test_users") or "", actor=actor)
+            if not m["count"]:
+                return {"ok": False, "toast": "Nothing was typed"}
+            toast = f"Saved · {m['count']} test user{'s' if m['count'] != 1 else ''}, encrypted; shown only masked from now on"
         elif aid == "alerts:employee_ids":
             from .alerts2 import cohort
             ids = _coerce("user_ids", values.get("user_ids"), "list")
@@ -314,6 +350,19 @@ def answer(aid: str, values: Dict[str, Any], save: SaveFn, actor: str = "user") 
                 return {"ok": False, "toast": "Nothing was typed"}
             r = cohort.save_internal_users(ids, actor=actor)
             toast = f"Saved · {r.get('count', len(ids))} employee id(s); only a keyed hash is ever shown"
+        elif aid in ("alerts:workspace", "alerts:campaigns_key"):
+            vals = {k: str(v).strip() for k, v in values.items() if k in ("moengage_app_id", "moengage_dc", "moengage_campaign_key") and str(v or "").strip()}
+            if not vals:
+                return {"ok": False, "toast": "Nothing was typed"}
+            save(vals)
+            toast = "Saved · checking MoEngage again"
+        elif aid == "alerts:business_event_confirm":
+            from .alerts2 import discovery
+            from .database import set_setting
+            names = sorted({c["event"] for c in discovery.cohorts() if c.get("stage") == "internal"} or {discovery.EVENT})
+            set_setting("ma2_business_events_confirmed", ",".join(sorted(set(names) | set(x for x in get_setting("ma2_business_events_confirmed", "").split(",") if x))))
+            audit("ma2.business_event_confirmed", {"events": names}, actor=actor)
+            toast = "Noted · the draft can be created; the engine re-checks the list whenever MoEngage allows it"
         elif kind == "alerts":
             toast = "Checked again"                                   # confirm-type asks: the re-check below is the answer
         elif kind == "request":
@@ -394,13 +443,27 @@ def alerts() -> Dict[str, Any]:
     else:
         lead = "Market alerts are built and waiting. Nothing has been sent; the engine starts only after you read the launch brief and approve it."
     blockers = []
+    focus = {"Business event": {"workspace_or_dc": "alerts:workspace", "campaigns_key": "alerts:campaigns_key", "key_permission": "alerts:business_event_confirm", "unknown": "alerts:business_event_confirm"},
+             "Campaign draft": "alerts:launch", "Engine as a service": "alerts:service", "Mode": "setting:mock_mode", "Campaigns API key": "setting:moengage_campaign_key", "Creator email": "setting:moengage_created_by"}
     for r in st.get("preflight") or []:
         if r.get("ok") is False:
-            blockers.append({"check": r["check"], "detail": plain(r.get("detail") or ""), "fix": plain(r.get("fix") or ""), "verb": "ANSWER IT →", "go": "#asks"})
+            f = focus.get(r["check"])
+            f = f.get(r.get("cause") or "", "alerts:business_event") if isinstance(f, dict) else f
+            if r["check"] == "Campaign draft" and r.get("state") == "pending":
+                f = "alerts:approve"
+            if r["check"] == "Campaign draft" and r.get("state") == "not proposed":
+                blockers.append({"check": r["check"], "detail": "Nothing has been queued yet.", "fix": "Read the launch brief above and queue the employee launch.", "verb": "READ THE BRIEF ↑", "go": "#alerts"})
+                continue
+            blockers.append({"check": r["check"], "detail": plain(r.get("detail") or ""), "fix": plain(r.get("fix") or ""), "verb": "ANSWER IT →", "go": f"#asks?focus={f}" if f else "#asks"})
     b = brief_mod.build(0, None, "", 10, with_dry_run=False)
     copy = [{"signal": str(c["signal"]).replace("_", " "), "title": c["sample_title"], "body": c["sample_body"], "ok": not c.get("blocks"), "lint": plain(c.get("lint") or "")} for c in b.get("copy") or []]
     signals = [{"label": s["label"], "when": plain(s["when"]), "cap": f"up to {s['daily_cap']} a day", "lane": "at once" if s.get("lane") == "now" else "in the day's send window"} for s in b.get("signals") or []]
-    cohorts = [{"id": c["id"], "label": c["label"], "segment": c["segment"], "state": "RUNNING" if c.get("active") else "LOCKED" if c.get("locked") else "READY", "tone": "green" if c.get("active") else "dim" if c.get("locked") else "amber",
+    try:
+        from . import test_sends
+        testers = test_sends.meta()
+    except Exception:
+        testers = {"count": 0, "masked": [], "max": 10}
+    cohorts = [{"id": c["id"], "locked": bool(c.get("locked")), "active": bool(c.get("active")), "label": c["label"], "segment": c["segment"], "state": "RUNNING" if c.get("active") else "LOCKED" if c.get("locked") else "READY", "tone": "green" if c.get("active") else "dim" if c.get("locked") else "amber",
                 "why": plain(c.get("why") or ""), "control": f"{c['control_pct']}% held back"} for c in st.get("cohorts") or []]
     fires = [{"at": str(f.get("created_at") or f.get("at") or "")[11:16], "title": plain(f.get("title") or ""), "body": plain(f.get("body") or ""), "to": str(f.get("cohort") or f.get("event") or ""),
               "source": "the agent" if f.get("source") == "agent" else "the rules"} for f in (st.get("fires") or [])[:12]]
@@ -410,7 +473,7 @@ def alerts() -> Dict[str, Any]:
               "note": plain({"pending": f"The campaign draft is waiting for your approval on Today (draft {camp.get('proposal_id')}).", "executed": "The campaign draft was created.",
                              "failed": "The last campaign draft failed; see Asks."}.get(camp.get("state"), "Nothing has been queued yet."))}
     return {"lead": lead, "live": live, "kill": kill, "stage": stage, "blockers": blockers, "summary": [{"k": k.upper(), "v": plain(v)} for k, v in summary.items()],
-            "signals": signals, "copy": copy, "copy_blocking": len(b.get("copy_blocking") or []), "cohorts": cohorts, "fires": fires, "launch": launch,
+            "test_users": testers, "signals": signals, "copy": copy, "copy_blocking": len(b.get("copy_blocking") or []), "cohorts": cohorts, "fires": fires, "launch": launch,
             "promotion": {"ready": bool(promo.get("ready")), "line": plain(promo.get("why") or ""), "progress": f"{promo.get('fires', 0)} of {promo.get('need_fires', 5)} alerts · {promo.get('days', 0):.0f} of {promo.get('need_days', 3)} days"},
             "experiment": (st.get("experiment") or {}).get("name") if isinstance(st.get("experiment"), dict) else None,
             "autonomy": plain((st.get("autonomy") or {}).get("note") or ""), "ops": {"label": "OPEN EVERY ALERTS CONTROL →", "go": "#tool?m=alerts"}}
@@ -421,7 +484,8 @@ ENGINE_GROUPS: List[Dict[str, Any]] = [
     {"title": "MoEngage workspace", "note": "Keys are encrypted on this Mac and never shown again.", "fields": [
         ("moengage_app_id", "WORKSPACE ID", "text", ""), ("moengage_dc", "DATA CENTRE", "text", "03"), ("moengage_created_by", "CREATOR EMAIL", "email", "you@coindcx.com"),
         ("moengage_data_api_key", "DATA API KEY", "secret", ""), ("moengage_campaign_key", "CAMPAIGNS API KEY", "secret", ""), ("moengage_segmentation_key", "SEGMENTATION API KEY", "secret", ""),
-        ("moengage_inform_key", "INFORM API KEY", "secret", ""), ("moengage_push_platforms", "PUSH PLATFORMS", "text", "ANDROID,IOS"), ("mock_mode", "PRACTICE MODE", "choice:true,false", "")]},
+        ("moengage_inform_key", "INFORM API KEY", "secret", ""), ("moengage_push_platforms", "PUSH PLATFORMS", "text", "ANDROID,IOS"), ("mock_mode", "PRACTICE MODE", "choice:true,false", ""),
+        ("moengage_test_on_create", "TEST-SEND EVERY NEW DRAFT", "choice:true,false", "")]},
     {"title": "Market alerts", "note": "How the employee cohort receives its alerts.", "fields": [
         ("ma2_internal_delivery", "EMPLOYEE DELIVERY", "choice:event,inform", ""), ("ma2_inform_alert_id", "INFORM ALERT ID", "text", ""), ("ma2_inform_alert_name", "INFORM ALERT NAME", "text", "MA2_Discovery_Internal"),
         ("ma2_agent_autonomy", "AGENT WRITES ITS OWN ALERTS", "choice:true,false", "")]},
@@ -494,7 +558,12 @@ def engine(status: Dict[str, Any]) -> Dict[str, Any]:
                        + ("" if u["enabled"] else " Automatic loading is switched off."))
     except Exception:
         pass
-    return {"lead": lead, "state": state, "groups": groups, "jobs": jobs, "asks_open": n_asks, "skills": skills_rows, "skills_note": skills_note,
+    try:
+        from . import test_sends
+        testers = test_sends.meta()
+    except Exception:
+        testers = {"count": 0, "masked": [], "max": 10}
+    return {"lead": lead, "state": state, "groups": groups, "jobs": jobs, "asks_open": n_asks, "test_users": testers, "skills": skills_rows, "skills_note": skills_note,
             "more": [{"label": "TEACH THE BRAIN A RULE →", "go": "#tool?m=engine"}, {"label": "ASK FOR AN ENGINE CHANGE →", "go": "#tool?m=engine"}, {"label": "SEE EVERY TOOL AND SKILL →", "go": "#tool?m=skills"},
                      {"label": "OPEN THE WHOLE WORKBENCH →", "go": "#bench"}]}
 

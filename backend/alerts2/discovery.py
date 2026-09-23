@@ -1012,6 +1012,15 @@ def preflight() -> List[Dict[str, Any]]:
         out.append({"check": "Inform (internal cohort)", "ok": bool(has_i and d["alert_id_set"] and d["users"]) or (mock and d["users"] > 0),
                     "detail": f"direct sends to {d['users']} employee id(s)" + ("" if d["alert_id_set"] else " · alert id missing") + ("" if has_i or mock else " · Inform API key missing"),
                     "fix": "" if (has_i or mock) and d["alert_id_set"] and d["users"] else "Engine → Settings: moengage_inform_key and ma2_inform_alert_id; POST /api/alerts2/internal-users with the employee customer ids"})
+    try:
+        from .. import telegram_out
+        tg = telegram_out.status()
+        out.append({"check": "Telegram mirror", "ok": True if tg["on"] else None,
+                    "detail": (f"on · chat {tg['chat_masked']} · {tg['sent_today']} posted today" + (f" · last error: {tg['last_error']}" if tg["last_error"] and not tg["sent_today"] else "")) if tg["on"]
+                    else "set up but switched off" if tg["configured"] else "bot token saved, chat not chosen yet" if tg["token_set"] else "not set up: no bot token saved on this machine",
+                    "fix": "" if tg["on"] else "Asks → Get every alert in Telegram: paste the bot token, message the bot once, save again and pick the chat (this machine only)"})
+    except Exception:
+        pass
     hb = state_all_safe().get("heartbeat_last")
     out.append({"check": "Heartbeat", "ok": bool(hb) if st["live"] else None, "detail": f"last {HEARTBEAT_EVENT} at {str(hb)[11:16]}" if hb else ("no heartbeat yet" if st["live"] else "starts when the experiment is live"),
                 "fix": f"create a MoEngage flow: entry on {HEARTBEAT_EVENT}, wait 30 min for the next one, else push the ops cohort — MoEngage then pages you if the engine goes silent"})

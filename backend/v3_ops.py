@@ -85,6 +85,24 @@ def _connection_asks(settings: Dict[str, str]) -> List[Dict[str, Any]]:
                         "fields": [_f("test_users", "TEST USERS · ONE PER LINE · UP TO 10", "list", "you@coindcx.com")], "button": "SAVE THE TEST USERS"})
     except Exception:
         pass
+    try:
+        from . import telegram_out
+        tg = telegram_out.status()
+        if not tg["configured"]:
+            fields = [] if tg["token_set"] else [_f("bot_token", "BOT TOKEN · FROM @BOTFATHER", "secret", "123456789:AA…")]
+            chats = telegram_out.discover_chats() if tg["token_set"] else []
+            if chats:
+                fields.append(_f("chat_id", "WHICH CHAT", "choice", options=[f"{c['id']} · {c['name']} ({c['type']})" for c in chats]))
+            else:
+                fields.append(_f("chat_id", "CHAT ID · LEAVE EMPTY TO LET THE ENGINE FIND IT", placeholder="-1001234567890"))
+            why = ("Every alert the engine fires is also posted to one Telegram chat, so the team sees alerts working now, before MoEngage is fully wired, and as a live mirror afterwards. "
+                   + ("The bot is saved. Send it any message (or add it to your group and say hi), then save here and the engine lists the chats it has seen." if tg["token_set"] and not chats
+                      else "The bot is saved and has heard from these chats; pick one." if chats else "Create a bot with @BotFather in Telegram and paste its token here; then message the bot once so the engine can find your chat."))
+            out.append({"id": "setting:telegram", "group": "CONNECTION", "tone": "dim", "title": "Get every alert in Telegram as well", "why": why,
+                        "where": "Telegram → @BotFather → /newbot → the token. The chat: your own chat with the bot, or a group you add it to.", "unblocks": "seeing every alert on your phone today",
+                        "fields": fields, "button": "SAVE AND SEND A HELLO"})
+    except Exception:
+        pass
     if mock:
         missing = [a["field"]["label"].title() for a in SETTING_ASKS if a["key"] not in ("moengage_segmentation_key", "moengage_dc") and not _has(settings, a["key"])]
         out.append({"id": "setting:mock_mode", "group": "CONNECTION", "tone": "amber", "title": "Leave practice mode and work on the real workspace",
@@ -318,7 +336,7 @@ def answer(aid: str, values: Dict[str, Any], save: SaveFn, actor: str = "user") 
     toast = "Saved"
     nxt: Optional[Dict[str, Any]] = None
     try:
-        if kind == "setting" and rest != "test_users":
+        if kind == "setting" and rest not in ("test_users", "telegram"):
             key = rest
             if key == "mock_mode":
                 s = get_all_settings()
@@ -337,6 +355,20 @@ def answer(aid: str, values: Dict[str, Any], save: SaveFn, actor: str = "user") 
                 if key in (r.get("rejected") or []):
                     return {"ok": False, "toast": "The engine does not accept that setting"}
                 toast = "Saved · encrypted on this Mac and never shown again" if key.endswith("_key") else "Saved"
+        elif aid == "setting:telegram":
+            from . import telegram_out
+            tok, cid = str(values.get("bot_token") or ""), str(values.get("chat_id") or "")
+            if not tok and not cid and not telegram_out.token():
+                return {"ok": False, "toast": "Nothing was typed"}
+            telegram_out.save(tok, cid, actor=actor)
+            h = telegram_out.hello(actor=actor)
+            if h.get("step") == "bot":
+                return {"ok": False, "toast": f"Telegram rejects the token · {h.get('error')}", "asks": asks()}
+            if h.get("step") == "chat" and not h.get("ok"):
+                n = len(h.get("chats") or [])
+                return {"ok": False, "toast": (f"Bot @{(h.get('bot') or {}).get('username')} works · {n} chat{'s' if n != 1 else ''} found, pick one" if n else
+                                              f"Bot @{(h.get('bot') or {}).get('username')} works · now message it once, then save again"), "asks": asks()}
+            toast = f"Connected · a hello landed in the chat from @{(h.get('bot') or {}).get('username')}"
         elif aid == "setting:test_users":
             from . import test_sends
             m = test_sends.save_users(values.get("test_users") or "", actor=actor)
@@ -463,6 +495,13 @@ def alerts() -> Dict[str, Any]:
         testers = test_sends.meta()
     except Exception:
         testers = {"count": 0, "masked": [], "max": 10}
+    try:
+        from . import telegram_out
+        tg = telegram_out.status()
+        tg["line"] = (f"Telegram mirror on · every alert also goes to chat {tg['chat_masked']} · {tg['sent_today']} sent there today" + (f" · last failed: {tg['last_error']}" if tg["last_error"] and not tg["sent_today"] else "")
+                      if tg["on"] else "Telegram mirror is set up but switched off" if tg["configured"] else "Not in Telegram yet: set it up on Asks to see every alert on your phone today")
+    except Exception:
+        tg = {"on": False, "configured": False, "line": ""}
     cohorts = [{"id": c["id"], "locked": bool(c.get("locked")), "active": bool(c.get("active")), "label": c["label"], "segment": c["segment"], "state": "RUNNING" if c.get("active") else "LOCKED" if c.get("locked") else "READY", "tone": "green" if c.get("active") else "dim" if c.get("locked") else "amber",
                 "why": plain(c.get("why") or ""), "control": f"{c['control_pct']}% held back"} for c in st.get("cohorts") or []]
     fires = [{"at": str(f.get("created_at") or f.get("at") or "")[11:16], "title": plain(f.get("title") or ""), "body": plain(f.get("body") or ""), "to": str(f.get("cohort") or f.get("event") or ""),
@@ -473,7 +512,7 @@ def alerts() -> Dict[str, Any]:
               "note": plain({"pending": f"The campaign draft is waiting for your approval on Today (draft {camp.get('proposal_id')}).", "executed": "The campaign draft was created.",
                              "failed": "The last campaign draft failed; see Asks."}.get(camp.get("state"), "Nothing has been queued yet."))}
     return {"lead": lead, "live": live, "kill": kill, "stage": stage, "blockers": blockers, "summary": [{"k": k.upper(), "v": plain(v)} for k, v in summary.items()],
-            "test_users": testers, "signals": signals, "copy": copy, "copy_blocking": len(b.get("copy_blocking") or []), "cohorts": cohorts, "fires": fires, "launch": launch,
+            "test_users": testers, "telegram": tg, "signals": signals, "copy": copy, "copy_blocking": len(b.get("copy_blocking") or []), "cohorts": cohorts, "fires": fires, "launch": launch,
             "promotion": {"ready": bool(promo.get("ready")), "line": plain(promo.get("why") or ""), "progress": f"{promo.get('fires', 0)} of {promo.get('need_fires', 5)} alerts · {promo.get('days', 0):.0f} of {promo.get('need_days', 3)} days"},
             "experiment": (st.get("experiment") or {}).get("name") if isinstance(st.get("experiment"), dict) else None,
             "autonomy": plain((st.get("autonomy") or {}).get("note") or ""), "ops": {"label": "OPEN EVERY ALERTS CONTROL →", "go": "#tool?m=alerts"}}
@@ -489,6 +528,8 @@ ENGINE_GROUPS: List[Dict[str, Any]] = [
     {"title": "Market alerts", "note": "How the employee cohort receives its alerts.", "fields": [
         ("ma2_internal_delivery", "EMPLOYEE DELIVERY", "choice:event,inform", ""), ("ma2_inform_alert_id", "INFORM ALERT ID", "text", ""), ("ma2_inform_alert_name", "INFORM ALERT NAME", "text", "MA2_Discovery_Internal"),
         ("ma2_agent_autonomy", "AGENT WRITES ITS OWN ALERTS", "choice:true,false", "")]},
+    {"title": "Telegram mirror", "note": "Every alert the engine fires is also posted to one Telegram chat for the team.", "fields": [
+        ("telegram_bot_token", "BOT TOKEN", "secret", "from @BotFather"), ("telegram_chat_id", "CHAT ID", "text", "-1001234567890"), ("telegram_alerts", "MIRROR ALERTS", "choice:on,off", "")]},
     {"title": "The brain's model", "note": "Free models do the heavy reading; the main model writes and reviews.", "fields": [
         ("llm_provider", "PROVIDER", "choice:openrouter,openai_compatible,claude_cli", ""), ("llm_model", "MAIN MODEL", "text", "anthropic/claude-sonnet-4.5"), ("llm_model_bulk", "BULK MODEL", "text", "auto-free"),
         ("llm_api_key", "MODEL KEY", "secret", "sk-or-…"), ("llm_data_collection", "PROVIDERS MAY KEEP PROMPTS", "choice:deny,allow", ""),

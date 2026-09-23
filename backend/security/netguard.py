@@ -129,7 +129,7 @@ def _llm_hosts() -> list:
 
 def guarded_session(scope: str, extra_hosts: Optional[Iterable[str]] = None, fresh: bool = False) -> GuardedSession:
     """
-    scope: 'moengage' | 'llm' | 'market'
+    scope: 'moengage' | 'llm' | 'market' | 'research' | 'telegram'
     Sessions are cached per scope except when fresh=True (used when credentials
     change so stale cookies are dropped).
     """
@@ -145,6 +145,10 @@ def guarded_session(scope: str, extra_hosts: Optional[Iterable[str]] = None, fre
         hosts = list(RESEARCH_HOSTS) + list(extra_hosts or [])
         if fresh or scope not in _sessions:
             _sessions[scope] = GuardedSession(scope, hosts, allow_http_loopback=False, default_timeout=20.0)
+        return _sessions[scope]
+    if scope == "telegram":                                    # team mirror of every alert: one host, nothing read back but the API's own reply
+        if fresh or scope not in _sessions:
+            _sessions[scope] = GuardedSession(scope, ["api.telegram.org"], allow_http_loopback=False, default_timeout=15.0)
         return _sessions[scope]
     if scope == "market":
         hosts = list(MARKET_HOSTS) + list(extra_hosts or [])

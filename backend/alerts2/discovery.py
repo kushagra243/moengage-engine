@@ -322,6 +322,16 @@ def _level_recent(token: str, level: Any, now: datetime, cfg: Dict[str, Any]) ->
     return bool(r or q)
 
 
+def _mirror(copy: Dict[str, Any], c: Dict[str, Any], cohort_ids: List[str], moengage_status: str) -> Dict[str, Any]:
+    """The team's Telegram copy of every alert that went out. Never raises and never changes the alert's own outcome."""
+    try:
+        from .. import telegram_out
+        return telegram_out.mirror_alert(copy["title"], copy["body"], {"signal": c.get("signal"), "token": c.get("token"), "product": c.get("product"), "cohorts": cohort_ids,
+                                                                        "source": c.get("source"), "moengage": moengage_status})
+    except Exception as e:
+        return {"ok": False, "error": redact(str(e))[:120]}
+
+
 def _write_fire(run_id, now, c, copy, status, error=None) -> None:
     """One row per delivery, written the moment it happens — a crash after this line can never double-send."""
     conn = get_db()
@@ -467,6 +477,7 @@ def run(mode: str = "dry_run", actor: str = "user", now: Optional[datetime] = No
                 failed += 1; row["error"] = r.get("error"); outcome(c, "failed")
             else:
                 sent += 1; _count(counts, c, key); outcome(c, "sent")
+                row["telegram"] = _mirror(copy, c, ok, r["status"])
         else:
             sent += 1
             _count(counts, c, key)          # a dry run counts against the caps too, so it shows what live would really send
@@ -546,6 +557,8 @@ def release(now: datetime, actor: str = "engine", regime: Optional[str] = None) 
                                        "source": it.get("source"), "window": it["window_id"], "queued_at": it["created_at"]}, f"q{it['id']}|{it['signal']}|{it['token']}") for t in targets]
         r = next((x for x in results if x["status"] != "failed"), results[0])
         timing.mark(it["id"], "sent" if r["status"] != "failed" else "failed", now)
+        if r["status"] != "failed":
+            _mirror({"title": it["title"], "body": it["body"]}, it, [t["id"] for t in targets], r["status"])
         conn = get_db()
         conn.execute("""INSERT INTO ma2_discovery_fires (run_id, day_ist, week_ist, signal, token, product, direction, value, title, body, status, error, created_at)
                         VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)""",

@@ -169,6 +169,7 @@ async function renderAlerts() {
   const rows = (label, html) => `<section class="sec"><div class="lab">${label}</div>${html}</section>`;
   $('#main').innerHTML = `<section class="sec"><div class="lab">Market alerts</div><p class="lead">${esc(d.lead)}</p>
       <p class="small" style="margin-top:14px">${esc(d.launch.note)} ${esc(d.autonomy)}</p>
+      <p class="small ${d.telegram.on ? 'green' : ''}" style="margin-top:8px">${esc(d.telegram.line)}${d.telegram.configured ? '' : ' <a href="#asks?focus=setting:telegram" class="accent">SET IT UP →</a>'}</p>
       <div class="acts" style="margin-top:22px"><button class="primary" data-al="brief">${esc(d.launch.label)}</button><button class="bordered" data-al="dry">SEE WHAT WOULD GO OUT NOW</button><button class="bordered" data-al="test">SEND A TEST TO THE TEST USERS</button><button class="${d.kill ? 'bordered' : 'defer'}" data-al="kill" data-on="${d.kill ? '0' : '1'}">${d.kill ? 'LIFT THE STOP' : 'STOP ALL ALERTS'}</button></div>
       <div id="al-out"></div></section>
     ${d.blockers.length ? rows('Before it can really run', d.blockers.map((b) => `<div class="row"><span class="tag amber" style="flex:0 0 190px">${esc(b.check)}</span><div class="grow"><span class="body">${esc(b.detail)}</span>${b.fix ? `<p class="small" style="margin:6px 0 0"><span class="dim">TO FIX · </span>${esc(b.fix)}</p>` : ''}</div><a class="verb accent" href="${esc(b.go)}">${esc(b.verb)}</a></div>`).join('')) : ''}
@@ -194,12 +195,16 @@ async function alertsAction(what, btn) {
       const d = S.data.alerts; const t = d.test_users;
       out.innerHTML = `<form class="inline askcard plain" id="al-test"><div class="lab">A test send · only the test users get it</div>
         <div class="flds"><label class="fld"><span class="k">WHICH ALERT</span><select name="copy">${d.copy.filter((c) => c.ok).map((c, i) => `<option value="${i}">${esc(c.signal)} · ${esc(c.title)}</option>`).join('')}</select></label>
+        <label class="fld"><span class="k">SEND IT TO</span><select name="dest"><option value="moengage">MoEngage test users (push on their phones)</option><option value="telegram" ${d.telegram.on ? 'selected' : ''} ${d.telegram.configured ? '' : 'disabled'}>Telegram chat${d.telegram.configured ? '' : ' (not set up yet)'}</option></select></label>
         <label class="fld"><span class="k">TEST USERS · EMAIL OR CUSTOMER ID · ONE PER LINE · UP TO ${t.max}</span><textarea name="users" rows="3" placeholder="${t.count ? esc('saved: ' + t.masked.join(', ') + ' · leave empty to use them') : 'you@coindcx.com'}"></textarea></label></div>
         <div class="acts"><button type="submit" class="primary">SEND THE TEST NOW</button><span class="small">Goes through MoEngage's test API to these people only. The list is stored encrypted and shown masked.</span></div></form>`;
       $('#al-test').addEventListener('submit', async (ev) => {
         ev.preventDefault(); const f = ev.target; const b = f.querySelector('[type=submit]'); b.disabled = true;
         const c = d.copy.filter((x) => x.ok)[Number(f.copy.value) || 0];
-        try { const r = await api('/api/test-send', {method: 'POST', body: {title: c.title, body: c.body, name: `MA2 test · ${c.signal}`, users: f.users.value}}); toast(`Test sent to ${r.sent_to} · ${r.status}`); S.data.alerts = null; S.data.asks = null; }
+        try {
+          if (f.dest.value === 'telegram') { await api('/api/telegram/send', {method: 'POST', body: {title: c.title, body: c.body, signal: c.signal}}); toast('Test posted to the Telegram chat'); }
+          else { const r = await api('/api/test-send', {method: 'POST', body: {title: c.title, body: c.body, name: `MA2 test · ${c.signal}`, users: f.users.value}}); toast(`Test sent to ${r.sent_to} · ${r.status}`); }
+          S.data.alerts = null; S.data.asks = null; }
         catch (e) { toast(`Not sent · ${e.message}`); }
         b.disabled = false;
       });

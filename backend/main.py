@@ -155,7 +155,7 @@ def status():
 
 
 # ── settings ───────────────────────────────────────────────────────────────────
-ALLOWED_SETTING_PREFIXES = ("moengage_", "llm_", "market_", "schedule_", "refresh_", "analysis_", "taxonomy_", "autopilot_", "devagent_", "web3_", "competitor", "mock_mode", "ma2_", "sop_", "sopqa_", "usd_inr")
+ALLOWED_SETTING_PREFIXES = ("moengage_", "llm_", "market_", "schedule_", "refresh_", "analysis_", "taxonomy_", "autopilot_", "devagent_", "web3_", "competitor", "mock_mode", "ma2_", "sop_", "sopqa_", "usd_inr", "telegram_")
 
 
 @app.get("/api/settings")
@@ -1945,6 +1945,55 @@ def test_send(payload: TestSendPayload, request: Request):
     r = test_sends.send(title, body, name=name, actor=actor, source=f"proposal:{payload.proposal_id}" if payload.proposal_id else "alerts")
     if not r.get("ok"):
         raise HTTPException(400, r.get("error") or "the test could not be sent")
+    return r
+
+
+class TelegramPayload(BaseModel):
+    bot_token: str = ""
+    chat_id: str = ""
+
+
+class TelegramSendPayload(BaseModel):
+    title: str
+    body: str
+    signal: str = ""
+    token: str = ""
+
+
+@app.get("/api/telegram")
+def telegram_status():
+    """Set up or not, masked chat id, sent today; the token never comes back."""
+    from . import telegram_out
+    st = telegram_out.status()
+    if st["token_set"] and not st["chat_set"]:
+        st["chats"] = telegram_out.discover_chats()
+    return st
+
+
+@app.post("/api/telegram")
+def telegram_save(payload: TelegramPayload, request: Request):
+    """Save the bot token and/or chat id, then prove it with one hello message (or list the chats the bot has seen when the chat is still unknown)."""
+    from . import telegram_out
+    try:
+        telegram_out.save(payload.bot_token, payload.chat_id, actor=request_actor(request))
+    except ValueError as e:
+        raise HTTPException(400, str(e))
+    return {**telegram_out.hello(actor=request_actor(request)), "status": telegram_out.status()}
+
+
+@app.post("/api/telegram/hello")
+def telegram_hello(request: Request):
+    from . import telegram_out
+    return telegram_out.hello(actor=request_actor(request))
+
+
+@app.post("/api/telegram/send")
+def telegram_send(payload: TelegramSendPayload, request: Request):
+    """The operator's click: one alert's copy to the Telegram chat, labelled as a test. No agent tool reaches this."""
+    from . import telegram_out
+    r = telegram_out.send_test(payload.title, payload.body, {"signal": payload.signal, "token": payload.token}, actor=request_actor(request))
+    if not r.get("ok"):
+        raise HTTPException(400, r.get("error") or "not sent")
     return r
 
 

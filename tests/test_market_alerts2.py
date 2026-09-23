@@ -601,7 +601,7 @@ def test_preflight_names_every_reason_nothing_reached_moengage():
     from backend.database import set_setting
     set_setting("mock_mode", "true")
     checks = {c["check"]: c for c in discovery.preflight()}
-    assert set(checks) == {"Mode", "Campaigns API key", "Creator email", "Business event", "Campaign draft", "Engine firing", "Engine as a service", "Heartbeat"}
+    assert set(checks) == {"Mode", "Campaigns API key", "Creator email", "Business event", "Campaign draft", "Engine firing", "Engine as a service", "Telegram mirror", "Heartbeat"}
     assert checks["Mode"]["ok"] is False and "nothing reaches MoEngage" in checks["Mode"]["detail"]
     assert all(c["ok"] or c["fix"] for c in checks.values()), "anything blocked says how to unblock it"
 

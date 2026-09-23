@@ -155,7 +155,7 @@ def status():
 
 
 # ── settings ───────────────────────────────────────────────────────────────────
-ALLOWED_SETTING_PREFIXES = ("moengage_", "llm_", "market_", "schedule_", "refresh_", "analysis_", "taxonomy_", "autopilot_", "devagent_", "web3_", "competitor", "mock_mode", "ma2_", "sop_", "sopqa_", "usd_inr", "telegram_")
+from .settings_policy import ALLOWED_SETTING_PREFIXES  # shared with the CLI
 
 
 @app.get("/api/settings")

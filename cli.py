@@ -55,8 +55,16 @@ def cmd_set_key(a):
 
 
 def cmd_set(a):
-    if not a.key.startswith(("moengage_", "llm_", "market_", "schedule_", "refresh_", "mock_mode")):
+    from backend.settings_policy import allowed, normalise
+    from backend.security import is_secret_key
+    if not allowed(a.key):
         sys.exit("refusing unknown setting")
+    if is_secret_key(a.key):
+        sys.exit(f"{a.key} is a secret: use ./cli.py secret {a.key} (hidden prompt, never an argument)")
+    try:
+        a.value = normalise(a.key, a.value)
+    except ValueError as e:
+        sys.exit(str(e))
     set_setting(a.key, a.value)
     if a.key in ("llm_provider", "llm_model", "llm_base_url"):
         from backend.llm.provider import reconcile_llm_settings
@@ -408,6 +416,8 @@ def main():
     s = sp.add_parser("mock", help="demo data: seed"); s.add_argument("action", choices=["seed"]); s.add_argument("--days", type=int, default=30); s.add_argument("--clean", action="store_true", help="no injected faults"); s.set_defaults(fn=cmd_mock)
     sp.add_parser("housekeeping", help="expire stale ideas/proposals, archive past flight plans").set_defaults(fn=cmd_housekeeping)
     s = sp.add_parser("selfheal", help="engine health: report | rollback (revert last agent merge)"); s.add_argument("action", nargs="?", default="report", choices=["report", "rollback"]); s.add_argument("--tests", action="store_true"); s.set_defaults(fn=cmd_selfheal)
+    from backend import cli_ops
+    cli_ops.add_parsers(sp)
     s = sp.add_parser("audit-log"); s.add_argument("-n", type=int, default=30); s.set_defaults(fn=cmd_audit_log)
     s = sp.add_parser("alerts", help="Market Alerts 2.0: preflight (why nothing reaches MoEngage) | detect | brief | coverage")
     s.add_argument("action", choices=["preflight", "detect", "brief", "coverage"]); s.add_argument("--cohorts"); s.add_argument("--day"); s.add_argument("--no-dry-run", action="store_true"); s.set_defaults(fn=cmd_alerts)

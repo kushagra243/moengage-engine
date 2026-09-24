@@ -57,6 +57,7 @@ OPERATING DOCTRINE
 12. Write like an operator: short headers, bullets, numbers in tables, the source tool named when a number matters. End strategic answers with a prioritised action list (owner: you via proposals, or the human).
 13. Know the whole API. moengage_api_reference is the complete documented MoEngage API catalog; use it before saying something is impossible, and moengage_api_read to fetch any read-safe endpoint (flows, templates, content blocks, dashboards, business events, segment definitions…) in live mode. Writes still go through proposals.
 14. You can change the engine, not just MoEngage. set_engine_setting flips allowlisted knobs immediately; remember_guidance stores standing instructions from the operator (say back what you saved); propose_code_change queues a code/UI/CLI change that Claude Code implements on a branch for the operator to approve — use it when the operator wants a view, column, report, command, rule or tool that does not exist. Describe the change precisely (where, what, acceptance check).
+15b. Challenges. When you cannot finish a task because the engine lacks a tool, data or permission, a rule blocks it, or a call keeps failing, call log_challenge (task, what blocked you, what you tried, what would help) and then continue with the best path you do have. A build session reads these and changes the engine.
 15. Skills. Load skill('moengage-api') before API-specific work, skill('moengage-engine') before proposing code changes, skill('clm-operator') for brief detail, skill('moengage') for product capabilities; for anything touching perps, spot pairs, tokenised markets or market-linked sends load skill('crypto-derivatives-marketing'); before approving copy load skill('crypto-compliance-copy') and skill('crypto-copywriting'); for weekly reviews skill('trader-analytics-playbook'); for timing skill('crypto-growth-calendar'); when a segment cannot be built, skill('trading-event-taxonomy'); for campaign ideas and what works/doesn't skill('clm-campaign-playbook'); for launches, positioning and messaging skill('product-marketing'); for cohort reads skill('cohort-studies'); before defining or running an SOP skill('campaign-sops'); for the flight-plan template, north star and limits policy skill('flight-plans-and-guardrails'); for product cohorts, Tier-0 announcements and web3 rules skill('product-cohort-playbook'). Load only what the task needs.
 
 16. Cohorts and SOPs. The team uploads cohorts monthly as segments whose names carry meaning (HVT_Sep26 = high-value traders, September upload). Use segment_study to read families, versions and month-over-month change; when a code is unknown, ask once and save it with define_nomenclature. Run programmes through SOPs (list_sops / sop_detail / run_sop): resolve the cohort, dry-run, write the copy for each step, then queue. Never improvise a multi-step programme when an SOP exists; propose a new SOP with define_sop when none fits, and it must pass the framework.
@@ -121,6 +122,11 @@ class MarketerAgent:
     def _run_tool(self, name: str, args: Dict[str, Any]) -> str:
         fn = TOOLS.get(name)
         if not fn:
+            try:
+                from .. import challenges
+                challenges.log("unknown_tool", f"the model called a tool named {name}", "no such tool exists in the engine", tried=json.dumps(args or {})[:200], source="agent", persona=self.persona or "", purpose=self.purpose)
+            except Exception:
+                pass
             return json.dumps({"error": f"unknown tool {name}"})
         key = name + ":" + json.dumps(args or {}, sort_keys=True, default=str)
         if key in self._seen_calls and not name.startswith("propose_") and name not in ("record_ideas", "run_sop", "define_sop", "write_flight_plan", "set_engine_setting", "set_comms_limits", "remember_guidance", "define_nomenclature"):
@@ -192,6 +198,11 @@ class MarketerAgent:
             break
         if final_text is None:
             final_text = "I ran out of tool steps before finishing. Here is what I gathered:\n" + "\n".join(f"- {t['tool']}: {t['result_preview'][:120]}" for t in trace)
+            try:
+                from .. import challenges
+                challenges.log("out_of_steps", user_message[:200], f"{rounds} tool rounds were not enough", tried=" → ".join(t["tool"] for t in trace)[:400], source="agent", persona=self.persona or "", purpose=self.purpose)
+            except Exception:
+                pass
         qa_res = None
         try:
             from .. import qa as qa_mod

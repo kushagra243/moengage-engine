@@ -16,7 +16,7 @@ import json
 import re
 from typing import Any, Dict, List, Optional
 
-READ_COMMON = ["list_campaigns", "campaign_content", "segment_detail", "campaign_history", "campaign_taxonomy", "clm_program_audit", "rule_based_audit", "anomaly_report", "campaign_diagnosis", "campaign_deep_dive", "segment_study",
+READ_COMMON = ["log_challenge", "list_campaigns", "campaign_content", "segment_detail", "campaign_history", "campaign_taxonomy", "clm_program_audit", "rule_based_audit", "anomaly_report", "campaign_diagnosis", "campaign_deep_dive", "segment_study",
                "experiment_readouts", "experiment_plan", "market_snapshot", "market_news", "market_campaign_hooks", "money_flow", "market_moving_news", "market_flash", "competitor_intel", "competitor_benchmarks", "competitor_campaigns", "onchain_vs_cex", "competitor_dossier", "pair_battle",
                "workspace_analysis", "structural_audit", "qa_report", "verify_claims", "sop_india_review", "list_sops", "sop_detail", "ask_sops", "sop_ownership", "sop_knowledge_gaps", "sop_improvements", "sop_catalog", "sop_teams", "sop_requests", "data_gaps", "market_alerts_status", "market_alerts_rules", "market_alerts_discovery", "market_alerts_coverage", "market_alerts_brief", "skill", "flight_plans", "north_star", "comms_limits", "peace_index", "sop_monitor", "proposal_detail", "list_proposals", "token_usage", "model_routes",
                "signal_catalog", "signal_fires", "compliance_sweep", "campaign_brief_check", "announcement_lenses", "product_treatment", "research_radar"]

@@ -1997,6 +1997,28 @@ def telegram_send(payload: TelegramSendPayload, request: Request):
     return r
 
 
+class ChallengeStatusPayload(BaseModel):
+    status: str
+    note: str = ""
+    commit: str = ""
+
+
+@app.get("/api/challenges")
+def challenges_list(status: str = "open"):
+    """What the operating agent could not do, as build prompts. Redacted; never workspace data."""
+    from . import challenges
+    return {"summary": challenges.summary(), "items": challenges.list_open(status, 100)}
+
+
+@app.post("/api/challenges/{cid}/status")
+def challenges_status(cid: int, payload: ChallengeStatusPayload, request: Request):
+    from . import challenges
+    r = challenges.set_status(cid, payload.status, payload.note, payload.commit, actor=request_actor(request))
+    if not r:
+        raise HTTPException(400, "bad status or id")
+    return r
+
+
 @app.get("/api/skills/usage")
 def skills_usage(days: int = 7):
     """Which skills really entered the agent's context, how (placed by the engine or asked for by the model), and which were never opened."""

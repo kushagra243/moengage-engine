@@ -95,7 +95,12 @@ def doctor(a):
     d = {"mock_mode": get_setting("mock_mode", "true"), "model": {"provider": cfg["provider"], "model": cfg["model"], "configured": bool(cfg["api_key"]) or cfg["provider"] == "claude_cli"},
          "asks": [{"id": x["id"], "title": x["title"]} for x in v3_ops.asks()["asks"]], "preflight": discovery.preflight(), "telegram": telegram_out.status(),
          "skills_never_opened": skill_router.usage(7)["never_opened"]}
-    lines = [f"mode: {'practice (mock)' if d['mock_mode'] == 'true' else 'LIVE'}   model: {cfg['provider']} · {cfg['model']} · {'ready' if d['model']['configured'] else 'NO KEY'}", ""]
+    from . import challenges as ch
+    d["challenges"] = ch.summary()
+    from .llm.provider import bulk_models
+    d["model"]["heavy_lifting"] = bulk_models(cfg)[0]
+    d["model"]["data_use"] = {"anthropic": "enterprise API: inputs and outputs are not used for training", "claude_cli": "this machine's Claude Code login", "openrouter": "provider data collection " + get_setting("llm_data_collection", "deny")}.get(cfg["provider"], cfg["provider"])
+    lines = [f"mode: {'practice (mock)' if d['mock_mode'] == 'true' else 'LIVE'}   model: {cfg['provider']} · {cfg['model']} · heavy lifting on {d['model']['heavy_lifting']} · {'ready' if d['model']['configured'] else 'NO KEY'} · {d['model']['data_use']}", ""]
     lines.append("missing answers:" if d["asks"] else "missing answers: none")
     lines += [f"  {x['id']:36} {x['title']}" for x in d["asks"]]
     lines.append(""); lines.append("alerts preflight:")
@@ -103,6 +108,7 @@ def doctor(a):
         mark = "OK " if c["ok"] else ("?? " if c["ok"] is None else "XX ")
         lines.append(f"  {mark}{c['check']}: {c['detail']}" + (f"\n       fix: {c['fix']}" if c.get("fix") and not c["ok"] else ""))
     tg = d["telegram"]
+    lines.append(""); lines.append(f"challenges: {d['challenges']['open']} open, {d['challenges']['building']} building, {d['challenges']['resolved']} resolved" + ("  → ./cli.py challenges list" if d['challenges']['open'] else ""))
     lines.append(""); lines.append(f"telegram: {'on · ' + str(tg['sent_today']) + ' posted today' if tg['on'] else 'set up, off' if tg['configured'] else 'bot saved, chat missing' if tg['token_set'] else 'not set up'}" + (f" · last error {tg['last_error']}" if tg.get("last_error") else ""))
     _out(a, d, "\n".join(lines))
 
@@ -285,10 +291,119 @@ def _booted(fn):
     return run
 
 
+def challenges_cmd(a):
+    from . import challenges as ch
+    if a.action == "list":
+        rows = ch.list_open(a.status or "open", 100)
+        _out(a, rows, "\n".join(f"#{c['id']:<4} {c['status']:9} {c['kind']:17} {c['count']:>3}×  {c['task'][:60]:60}  {c['blocked_by'][:70]}" for c in rows) or "no challenges")
+    elif a.action == "show":
+        c = ch.get(a.id) or sys.exit("no such challenge")
+        _out(a, c, ch.prompt(c))
+    elif a.action == "prompt":
+        text = ch.prompt(ch.get(a.id)) if a.id else ch.prompts(a.limit)
+        if a.out:
+            open(a.out, "w").write(text); print(f"wrote {a.out}")
+        else:
+            print(text)
+    elif a.action in ("resolve", "building", "wontfix", "reopen"):
+        st = {"resolve": "resolved", "reopen": "open"}.get(a.action, a.action)
+        c = ch.set_status(a.id, st, a.note or "", a.commit or "", actor="cli") or sys.exit("no such challenge")
+        _out(a, c, f"#{c['id']} → {c['status']}" + (f" · {c['commit_sha'][:12]}" if c.get("commit_sha") else ""))
+    elif a.action == "export":
+        rows = ch.export(a.status or "all")
+        if a.out:
+            json.dump(rows, open(a.out, "w"), indent=1, default=str); print(f"wrote {len(rows)} challenge(s) to {a.out} (redacted; no workspace data)")
+        else:
+            print(json.dumps(rows, indent=1, default=str))
+    elif a.action == "import":
+        rows = json.load(open(a.file)) if a.file else json.load(sys.stdin)
+        _out(a, ch.import_rows(rows, actor="cli"), None)
+    elif a.action == "push":
+        r = ch.push_issues(); _out(a, r, f"issues: {r.get('created', 0)} created, {r.get('updated', 0)} updated" + (f" · errors: {r.get('errors') or r.get('error')}" if not r.get("ok") else ""))
+    elif a.action == "pull":
+        r = ch.pull_issues(); _out(a, r, f"pulled {r.get('issues', 0)} issue(s): {r.get('new', 0)} new, {r.get('updated', 0)} updated" if r.get("ok") else f"could not pull · {r.get('error')}")
+    elif a.action == "log":
+        r = ch.log("agent", a.task or "", a.blocked or "", tried=a.tried or "", suggestion=a.note or "", source="cli")
+        _out(a, r, f"logged #{r.get('id')}" if r.get("ok") else f"not logged · {r.get('error')}")
+
+
+def watch(a):
+    """A live feed for a test day: every audit event, tool error, challenge, telegram post, job failure and proposal change as it happens.
+    --push-every N sends new challenges to GitHub issues every N seconds so the build machine can pull them while you test."""
+    import time
+    from .database import get_db
+    from .security.audit import AUDIT_FILE
+    from . import challenges as ch
+    ch.init_tables()
+    conn = get_db()
+    last = {"chal": conn.execute("SELECT COALESCE(MAX(id),0) FROM challenges").fetchone()[0], "err": 0, "tg": 0, "prop": ""}
+    try:
+        last["err"] = conn.execute("SELECT COALESCE(MAX(id),0) FROM tool_errors").fetchone()[0]
+    except Exception:
+        pass
+    try:
+        last["tg"] = conn.execute("SELECT COALESCE(MAX(id),0) FROM telegram_log").fetchone()[0]
+    except Exception:
+        pass
+    last["prop"] = conn.execute("SELECT COALESCE(MAX(COALESCE(executed_at, decided_at, created_at)),'') FROM proposals").fetchone()[0] or ""
+    conn.close()
+    pos = os.path.getsize(AUDIT_FILE) if os.path.exists(AUDIT_FILE) else 0
+    if a.since:
+        pos = max(0, pos - a.since * 4000)
+    quiet = set((a.quiet or "").split(",")) | {"", "agent.chat_turn", "refresh.tick"}
+    pushed_at = time.time()
+    line = (lambda o: print(json.dumps(o, default=str, ensure_ascii=False), flush=True)) if a.json else (lambda o: print(f"{str(o.get('at', ''))[11:19]}  {o['kind']:10} {o.get('what', '')}", flush=True))
+    print(f"watching · audit {AUDIT_FILE} · challenges, tool errors, telegram, jobs, proposals · Ctrl-C to stop" + (f" · pushing new challenges to GitHub every {a.push_every}s" if a.push_every else ""), file=sys.stderr)
+    try:
+        while True:
+            if os.path.exists(AUDIT_FILE):
+                with open(AUDIT_FILE, "r", encoding="utf-8", errors="replace") as f:
+                    f.seek(pos)
+                    for raw in f:
+                        pos += len(raw.encode("utf-8", "replace"))
+                        try:
+                            e = json.loads(raw)
+                        except Exception:
+                            continue
+                        ev = str(e.get("event") or e.get("action") or "")
+                        if ev in quiet:
+                            continue
+                        d = e.get("detail") or e.get("details") or {}
+                        line({"at": e.get("ts") or e.get("at") or e.get("time"), "kind": "audit", "event": ev, "actor": e.get("actor"), "what": f"{ev} · {e.get('actor', '')} · {json.dumps(d, default=str)[:160]}"})
+            conn = get_db()
+            for r in conn.execute("SELECT * FROM challenges WHERE id>? ORDER BY id", (last["chal"],)).fetchall():
+                r = dict(r); last["chal"] = r["id"]
+                line({"at": r["created_at"], "kind": "CHALLENGE", "id": r["id"], "event": r["kind"], "what": f"#{r['id']} {r['kind']} · {r['task'][:80]} · blocked: {r['blocked_by'][:120]}"})
+            try:
+                for r in conn.execute("SELECT * FROM tool_errors WHERE id>? ORDER BY id", (last["err"],)).fetchall():
+                    r = dict(r); last["err"] = r["id"]
+                    line({"at": r["created_at"], "kind": "tool_error", "event": r["name"], "what": f"{r['name']} · {r['error_type']}: {r['error'][:140]}"})
+            except Exception:
+                pass
+            try:
+                for r in conn.execute("SELECT * FROM telegram_log WHERE id>? ORDER BY id", (last["tg"],)).fetchall():
+                    r = dict(r); last["tg"] = r["id"]
+                    line({"at": r["at"], "kind": "telegram", "event": r["kind"], "what": f"{r['kind']} · {'ok' if r['ok'] else 'FAILED ' + str(r['error'])} · {r['title'][:80]}"})
+            except Exception:
+                pass
+            for r in conn.execute("SELECT id, kind, title, status, error, COALESCE(executed_at, decided_at, created_at) t FROM proposals WHERE COALESCE(executed_at, decided_at, created_at) > ? ORDER BY t", (last["prop"],)).fetchall():
+                r = dict(r); last["prop"] = max(last["prop"], str(r["t"]))
+                line({"at": r["t"], "kind": "proposal", "id": r["id"], "event": r["status"], "what": f"#{r['id']} {r['status']} · {r['kind']} · {r['title'][:70]}" + (f" · {r['error'][:100]}" if r.get("error") else "")})
+            conn.close()
+            if a.push_every and time.time() - pushed_at >= a.push_every:
+                pushed_at = time.time()
+                r = ch.push_issues()
+                if r.get("created") or r.get("updated") or not r.get("ok"):
+                    line({"at": time.strftime("%Y-%m-%dT%H:%M:%S"), "kind": "push", "what": f"github issues: {r.get('created', 0)} created, {r.get('updated', 0)} updated" + (f" · {r.get('errors') or r.get('error')}" if not r.get("ok") else "")})
+            time.sleep(a.interval)
+    except KeyboardInterrupt:
+        print("stopped", file=sys.stderr)
+
+
 def add_parsers(sp) -> None:
     def J(p):
         p.add_argument("--json", action="store_true", help="machine-readable output"); return p
-    for name in ("today", "asks", "doctor", "answer", "secret", "telegram", "test_users", "test_send", "launch", "decide", "alerts_run"):
+    for name in ("today", "asks", "doctor", "answer", "secret", "telegram", "test_users", "test_send", "launch", "decide", "alerts_run", "challenges_cmd", "watch"):
         globals()[name] = _booted(globals()[name])
     J(sp.add_parser("today", help="today's decisions, what moved, what was handled")).set_defaults(fn=today)
     J(sp.add_parser("asks", help="every input the engine is missing, each with the command that answers it")).set_defaults(fn=asks)
@@ -308,5 +423,12 @@ def add_parsers(sp) -> None:
     s.add_argument("--cohorts", default="internal"); s.add_argument("--control", type=int, default=10); s.add_argument("--yes", action="store_true"); s.set_defaults(fn=launch)
     s = J(sp.add_parser("decide", help="approve | defer a decision from Today (approve is the human click)"))
     s.add_argument("id"); s.add_argument("action", choices=["approve", "defer"]); s.add_argument("--yes", action="store_true"); s.add_argument("--actor"); s.set_defaults(fn=decide)
+    s = J(sp.add_parser("challenges", help="what the agent could not do, as build prompts: list | show ID | prompt [--id ID] [--out F] | resolve ID --commit SHA --note … | building ID | wontfix ID | reopen ID | export [--out F] | import --file F | push | pull | log --task … --blocked …"))
+    s.add_argument("action", choices=["list", "show", "prompt", "resolve", "building", "wontfix", "reopen", "export", "import", "push", "pull", "log"]); s.add_argument("id", nargs="?", type=int)
+    s.add_argument("--status"); s.add_argument("--limit", type=int, default=20); s.add_argument("--out"); s.add_argument("--file"); s.add_argument("--commit"); s.add_argument("--note"); s.add_argument("--task"); s.add_argument("--blocked"); s.add_argument("--tried")
+    s.set_defaults(fn=challenges_cmd)
+    s = J(sp.add_parser("watch", help="live feed for a test day: audit events, tool errors, challenges, telegram, proposals; --push-every 300 files new challenges as GitHub issues"))
+    s.add_argument("--interval", type=float, default=2.0); s.add_argument("--since", type=int, default=0, help="also print roughly the last N minutes of the audit log"); s.add_argument("--push-every", type=int, default=0); s.add_argument("--quiet", help="comma-separated audit events to hide")
+    s.set_defaults(fn=watch)
     s = J(sp.add_parser("alerts-run", help="run | kill | lift  (one live pass of the alerts engine; the stop switch)"))
     s.add_argument("action", choices=["run", "kill", "lift"]); s.set_defaults(fn=alerts_run)

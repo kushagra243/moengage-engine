@@ -28,6 +28,12 @@ DEFAULT_BASE_URL = "https://openrouter.ai/api/v1"
 DEFAULT_MODEL = "anthropic/claude-sonnet-4.5"
 FALLBACK_MODELS = ["openai/gpt-4o-mini", "google/gemini-2.5-flash", "meta-llama/llama-3.3-70b-instruct"]
 # Free-tier OpenRouter models tried in order for bulk analysis (per-campaign deep dives, idea generation).
+ANTHROPIC_BASE = "https://api.anthropic.com"
+ANTHROPIC_MAIN = "claude-sonnet-5"                     # judgement, copy, review
+ANTHROPIC_CHEAP = "claude-haiku-4-5-20251001"          # the heavy lifting: autopilot, analysis, briefs, classification, tests
+ANTHROPIC_ALIASES = {"sonnet": ANTHROPIC_MAIN, "haiku": ANTHROPIC_CHEAP, "opus": "claude-opus-5", "fable": "claude-fable-5-1"}
+# USD per million tokens (input, output, cache read). Haiku 4.5 is published; the others are estimates from the previous generation and are labelled so in the ledger.
+ANTHROPIC_PRICES = {"claude-haiku-4-5": (1.0, 5.0, 0.1), "claude-sonnet": (3.0, 15.0, 0.3), "claude-opus": (15.0, 75.0, 1.5), "claude-fable": (15.0, 75.0, 1.5)}
 FREE_BULK_MODELS = ["meta-llama/llama-3.3-70b-instruct:free", "deepseek/deepseek-chat-v3-0324:free", "qwen/qwen3-235b-a22b:free", "google/gemma-3-27b-it:free", "mistralai/mistral-small-3.2-24b-instruct:free"]
 
 
@@ -54,6 +60,9 @@ def cli_model(model: str) -> str:
 def normalise_model_for_provider(provider: str, model: str) -> str:
     if provider == "claude_cli":
         return cli_model(model)
+    if provider == "anthropic":
+        m = (model or "").split("/")[-1].strip()           # "anthropic/claude-sonnet-5" → "claude-sonnet-5"
+        return ANTHROPIC_ALIASES.get(m.lower(), m) or ANTHROPIC_MAIN
     if provider == "openrouter" and model and "/" not in model:
         return DEFAULT_MODEL
     return model or DEFAULT_MODEL
@@ -72,6 +81,10 @@ def reconcile_llm_settings(saved_keys) -> Dict[str, str]:
     prov = get_setting("llm_provider", "openrouter"); model = get_setting("llm_model", ""); key = get_setting("llm_api_key", "")
     base = get_setting("llm_base_url", DEFAULT_BASE_URL)
     changes: Dict[str, str] = {}
+    if "llm_api_key" in saved_keys and key.startswith("sk-ant-") and prov != "anthropic":     # an Anthropic key means the Anthropic API, whatever the provider was
+        prov = "anthropic"; set_setting("llm_provider", prov); changes["llm_provider"] = prov
+    if prov == "anthropic" and ANTHROPIC_BASE not in base:
+        set_setting("llm_base_url", ANTHROPIC_BASE); changes["llm_base_url"] = ANTHROPIC_BASE; base = ANTHROPIC_BASE
     if prov == "claude_cli" and (("llm_api_key" in saved_keys and key) or ("/" in (model or "") and "llm_model" in saved_keys)):
         prov = "openrouter" if ("openrouter" in base or not base) else "openai_compatible"
         set_setting("llm_provider", prov); changes["llm_provider"] = prov
@@ -84,9 +97,13 @@ def reconcile_llm_settings(saved_keys) -> Dict[str, str]:
 
 
 def llm_settings() -> Dict[str, Any]:
+    provider = get_setting("llm_provider", "openrouter")              # openrouter | openai_compatible | claude_cli | anthropic
+    base = get_setting("llm_base_url", DEFAULT_BASE_URL).rstrip("/")
+    if provider == "anthropic" and "anthropic.com" not in base:
+        base = ANTHROPIC_BASE
     return {
-        "provider": get_setting("llm_provider", "openrouter"),        # openrouter | openai_compatible | claude_cli
-        "base_url": get_setting("llm_base_url", DEFAULT_BASE_URL).rstrip("/"),
+        "provider": provider,
+        "base_url": base,
         "model": get_setting("llm_model", DEFAULT_MODEL),
         "api_key": get_setting("llm_api_key", ""),
         "temperature": float(get_setting("llm_temperature", "0.3") or 0.3),
@@ -105,6 +122,9 @@ def bulk_models(cfg: Optional[Dict[str, Any]] = None) -> List[str]:
         return FREE_BULK_MODELS + [cfg["model"]]
     if cfg["provider"] == "claude_cli":
         return ["haiku" if mb in ("", "auto-free") else mb]
+    if cfg["provider"] == "anthropic":                              # the cheap model carries the volume; the main model is the fallback
+        cheap = normalise_model_for_provider("anthropic", mb) if mb and mb != "auto-free" else ANTHROPIC_CHEAP
+        return [cheap] + ([cfg["model"]] if cfg["model"] != cheap else [])
     return [mb] if mb and mb != "auto-free" else [cfg["model"]]
 
 
@@ -117,8 +137,9 @@ def route_defaults(cfg: Dict[str, Any]) -> Dict[str, List[str]]:
     main = cfg.get("model") or ""
     free = FREE_BULK_MODELS if cfg.get("provider") == "openrouter" else []
     bulk = bulk_models(cfg)
+    cls = (free[:2] + [main]) if free else (bulk if cfg.get("provider") == "anthropic" else [main])
     return {"chat": [main], "code": [main], "copy": [main], "review": [main],
-            "autopilot": bulk, "analysis": bulk, "brief": bulk, "classification": (free[:2] + [main]) if free else [main], "test": bulk}
+            "autopilot": bulk, "analysis": bulk, "brief": bulk, "classification": cls, "test": bulk}
 
 
 def routes(cfg: Optional[Dict[str, Any]] = None) -> Dict[str, List[str]]:
@@ -144,6 +165,9 @@ def route_models(purpose: str, cfg: Optional[Dict[str, Any]] = None) -> List[str
 
 def _headers(cfg: Dict[str, Any]) -> Dict[str, str]:
     h = {"Content-Type": "application/json", "Accept": "application/json"}
+    if cfg["provider"] == "anthropic":
+        h["x-api-key"] = cfg["api_key"]; h["anthropic-version"] = "2023-06-01"
+        return h
     if cfg["api_key"]:
         h["Authorization"] = f"Bearer {cfg['api_key']}"
     if "openrouter.ai" in cfg["base_url"]:
@@ -163,7 +187,7 @@ def list_models(limit: int = 400) -> Dict[str, Any]:
             {"id": "claude-haiku-4-5-20251001", "name": "claude-haiku-4-5-20251001", "context": None, "tools": True}]}
     s = guarded_session("llm")
     try:
-        r = s.get(cfg["base_url"] + "/models", headers=_headers(cfg), timeout=20)
+        r = s.get(cfg["base_url"] + ("/v1/models" if cfg["provider"] == "anthropic" else "/models"), headers=_headers(cfg), timeout=20)
     except NetworkPolicyError as e:
         return {"ok": False, "error": str(e)}
     except Exception as e:
@@ -178,7 +202,7 @@ def list_models(limit: int = 400) -> Dict[str, Any]:
             continue
         out.append({
             "id": m.get("id"),
-            "name": m.get("name") or m.get("id"),
+            "name": m.get("name") or m.get("display_name") or m.get("id"),
             "context": m.get("context_length") or m.get("top_provider", {}).get("context_length"),
             "tools": (m.get("supported_parameters") is None) or ("tools" in (m.get("supported_parameters") or [])),
             "prompt_price": (m.get("pricing") or {}).get("prompt"),
@@ -261,6 +285,8 @@ class LLMClient:
                 out = client.chat(messages, tools, tool_choice, max_tokens, temperature, response_format, model=None, tier="main")
                 out["fallback_from"] = "claude_cli"
                 return out
+        if self.cfg["provider"] == "anthropic":
+            return self._chat_anthropic(messages, tools, tool_choice, max_tokens, temperature, response_format, model)
         if not self.cfg["api_key"] and "openrouter.ai" in self.cfg["base_url"]:
             raise LLMError("No LLM API key configured. Add your OpenRouter key in Settings → LLM.")
         safe_messages = [_redact_message(m) for m in messages]
@@ -330,6 +356,57 @@ class LLMClient:
             }
         raise last_err or LLMError("LLM request failed")
 
+    # ── Anthropic Messages API (the enterprise path: the org's own key, no training on inputs or outputs) ──
+    def _chat_anthropic(self, messages, tools, tool_choice, max_tokens, temperature, response_format, model) -> Dict[str, Any]:
+        if not self.cfg["api_key"]:
+            raise LLMError("No Anthropic API key configured. Save it with ./cli.py secret llm_api_key or in Engine → The brain's model.")
+        use_model = normalise_model_for_provider("anthropic", model or self.cfg["model"])
+        system, convo = _to_anthropic(messages)
+        if response_format:
+            system = (system + "\n\n" if system else "") + "Respond with a single JSON object and nothing else."
+        payload: Dict[str, Any] = {"model": use_model, "messages": convo, "max_tokens": max_tokens or self.cfg["max_tokens"], "temperature": self.cfg["temperature"] if temperature is None else temperature}
+        if system:
+            payload["system"] = [{"type": "text", "text": redact(system), "cache_control": {"type": "ephemeral"}}]   # one breakpoint covers tools + system
+        if tools:
+            payload["tools"] = [_anthropic_tool(t) for t in tools]
+            payload["tool_choice"] = {"type": "any"} if tool_choice == "required" else {"type": "auto"}
+        url = self.cfg["base_url"] + "/v1/messages"
+        last_err = None
+        for attempt in range(3):
+            try:
+                r = self.session.post(url, headers=_headers(self.cfg), json=payload, timeout=120)
+            except NetworkPolicyError:
+                raise
+            except Exception as e:
+                last_err = LLMError(f"LLM request failed: {redact(str(e))}"); time.sleep(1.5 * (attempt + 1)); continue
+            if r.status_code == 429 or r.status_code >= 500 or r.status_code == 529:
+                last_err = LLMError(f"LLM HTTP {r.status_code}: {redact(r.text[:300])}"); time.sleep(2.0 * (attempt + 1)); continue
+            if r.status_code in (401, 403):
+                raise LLMError(f"LLM auth failed (HTTP {r.status_code}). Check the Anthropic API key.")
+            if r.status_code != 200:
+                raise LLMError(f"LLM HTTP {r.status_code}: {redact(r.text[:300])}")
+            data = r.json()
+            text_parts, tool_calls = [], []
+            for b in data.get("content") or []:
+                if b.get("type") == "text":
+                    text_parts.append(b.get("text") or "")
+                elif b.get("type") == "tool_use":
+                    tool_calls.append({"id": b.get("id") or f"call_{len(tool_calls)}", "name": b.get("name"), "arguments": b.get("input") if isinstance(b.get("input"), dict) else {"_raw": b.get("input")}})
+            u = data.get("usage") or {}
+            usage = {"prompt_tokens": int(u.get("input_tokens") or 0) + int(u.get("cache_read_input_tokens") or 0) + int(u.get("cache_creation_input_tokens") or 0),
+                     "completion_tokens": int(u.get("output_tokens") or 0), "cached_tokens": int(u.get("cache_read_input_tokens") or 0)}
+            usage["cost"] = _anthropic_cost(use_model, u)
+            try:
+                from .usage import record as _record
+                _record(getattr(self, "purpose", "chat"), "bulk" if use_model != normalise_model_for_provider("anthropic", self.cfg["model"]) else "main", data.get("model") or use_model, usage, usage.get("cost"))
+            except Exception:
+                pass
+            stop = data.get("stop_reason")
+            content = "\n".join(t for t in text_parts if t).strip() or None
+            return {"content": content, "tool_calls": tool_calls, "finish_reason": {"end_turn": "stop", "tool_use": "tool_calls", "max_tokens": "length"}.get(stop, stop),
+                    "usage": usage, "model": data.get("model") or use_model, "raw_message": {"role": "assistant", "content": content, "tool_calls": tool_calls}}
+        raise last_err or LLMError("LLM request failed")
+
     # ── Claude Code CLI (headless) ───────────────────────────────────────
     def _chat_claude_cli(self, messages: List[Dict[str, Any]], tools: Optional[List[Dict[str, Any]]], model: Optional[str] = None) -> Dict[str, Any]:
         binary = shutil.which("claude")
@@ -395,3 +472,63 @@ def _redact_message(m: Dict[str, Any]) -> Dict[str, Any]:
     if isinstance(out.get("content"), str):
         out["content"] = redact(out["content"])
     return out
+
+
+# ── OpenAI-shaped conversation → Anthropic Messages shape ─────────────────────
+def _anthropic_tool(t: Dict[str, Any]) -> Dict[str, Any]:
+    f = t.get("function") or t
+    schema = f.get("parameters") or {"type": "object", "properties": {}}
+    if schema.get("type") != "object":
+        schema = {"type": "object", "properties": {}}
+    return {"name": f["name"], "description": str(f.get("description") or "")[:1024], "input_schema": schema}
+
+
+def _text_of(content: Any) -> str:
+    if isinstance(content, list):
+        return "\n".join(str(b.get("text") or "") for b in content if isinstance(b, dict))
+    return str(content or "")
+
+
+def _to_anthropic(messages: List[Dict[str, Any]]):
+    """system text apart; tool calls as tool_use blocks; tool results as tool_result blocks in a user turn; same-role turns merged."""
+    system = "\n\n".join(_text_of(m.get("content")) for m in messages if m.get("role") == "system").strip()
+    out: List[Dict[str, Any]] = []
+
+    def push(role: str, blocks: List[Dict[str, Any]]):
+        if out and out[-1]["role"] == role:
+            out[-1]["content"].extend(blocks)
+        else:
+            out.append({"role": role, "content": blocks})
+    for m in messages:
+        role = m.get("role")
+        if role == "system":
+            continue
+        if role == "tool":
+            push("user", [{"type": "tool_result", "tool_use_id": str(m.get("tool_call_id") or "call_0"), "content": redact(_text_of(m.get("content")))}])
+        elif role == "assistant":
+            blocks: List[Dict[str, Any]] = []
+            txt = _text_of(m.get("content"))
+            if txt.strip():
+                blocks.append({"type": "text", "text": redact(txt)})
+            for tc in m.get("tool_calls") or []:
+                fn = tc.get("function") or {}
+                try:
+                    args = json.loads(fn.get("arguments") or "{}") if isinstance(fn.get("arguments"), str) else (fn.get("arguments") or {})
+                except Exception:
+                    args = {}
+                blocks.append({"type": "tool_use", "id": str(tc.get("id") or f"call_{len(blocks)}"), "name": fn.get("name") or tc.get("name"), "input": args if isinstance(args, dict) else {}})
+            if blocks:
+                push("assistant", blocks)
+        else:
+            push("user", [{"type": "text", "text": redact(_text_of(m.get("content"))) or "."}])
+    if out and out[0]["role"] != "user":
+        out.insert(0, {"role": "user", "content": [{"type": "text", "text": "."}]})
+    return system, out
+
+
+def _anthropic_cost(model: str, u: Dict[str, Any]) -> Optional[float]:
+    for k, (pi, po, pc) in ANTHROPIC_PRICES.items():
+        if model.startswith(k):
+            return round((int(u.get("input_tokens") or 0) * pi + int(u.get("output_tokens") or 0) * po + int(u.get("cache_read_input_tokens") or 0) * pc
+                          + int(u.get("cache_creation_input_tokens") or 0) * pi * 1.25) / 1e6, 6)
+    return None

@@ -297,6 +297,11 @@ def approve_and_execute(pid: int, decided_by: str = "user", note: str = "") -> D
     except ApprovalError:
         raise
     except Exception as e:
+        try:
+            from . import challenges
+            challenges.log("blocked_draft", f"{p['kind']}: {p['title'][:80]}", redact(str(e))[:400], tried="approve", source="approvals", context={"proposal_id": pid, "kind": p["kind"]})
+        except Exception:
+            pass
         raise ApprovalError(redact(str(e)))
     conn = get_db()
     conn.execute("UPDATE proposals SET status='approved', decided_at=CURRENT_TIMESTAMP, decided_by=?, decision_note=? WHERE id=?", (decided_by, note[:1000], pid))
@@ -329,6 +334,11 @@ def approve_and_execute(pid: int, decided_by: str = "user", note: str = "") -> D
         conn.execute("UPDATE proposals SET status='failed', executed_at=CURRENT_TIMESTAMP, error=? WHERE id=?", (err[:4000], pid))
         conn.commit(); conn.close()
         audit("proposal.failed", {"id": pid, "kind": p["kind"], "error": err}, actor=decided_by)
+        try:
+            from . import challenges
+            challenges.log("execution_failed", f"{p['kind']}: {p['title'][:80]}", err[:400], tried="approved and executed", source="approvals", context={"proposal_id": pid, "kind": p["kind"]})
+        except Exception:
+            pass
     return get_proposal(pid)  # type: ignore[return-value]
 
 

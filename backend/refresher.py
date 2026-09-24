@@ -230,6 +230,11 @@ def run_job(name: str) -> Dict[str, Any]:
         summary = job["fn"]()
     except Exception as e:
         ok, error = False, redact(str(e))[:300]
+        try:
+            from . import challenges
+            challenges.log("job_failed", f"background job {name}", error, source="refresher", context={"job": name})
+        except Exception:
+            pass
     finally:
         _running.pop(name, None)
     ms = int((time.time() - t0) * 1000); finished = datetime.now(timezone.utc)

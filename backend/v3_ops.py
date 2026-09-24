@@ -531,7 +531,7 @@ ENGINE_GROUPS: List[Dict[str, Any]] = [
     {"title": "Telegram mirror", "note": "Every alert the engine fires is also posted to one Telegram chat for the team.", "fields": [
         ("telegram_bot_token", "BOT TOKEN", "secret", "from @BotFather"), ("telegram_chat_id", "CHAT ID", "text", "-1001234567890"), ("telegram_alerts", "MIRROR ALERTS", "choice:on,off", "")]},
     {"title": "The brain's model", "note": "Free models do the heavy reading; the main model writes and reviews.", "fields": [
-        ("llm_provider", "PROVIDER", "choice:openrouter,openai_compatible,claude_cli", ""), ("llm_model", "MAIN MODEL", "text", "anthropic/claude-sonnet-4.5"), ("llm_model_bulk", "BULK MODEL", "text", "auto-free"),
+        ("llm_provider", "PROVIDER", "choice:anthropic,openrouter,openai_compatible,claude_cli", ""), ("llm_model", "MAIN MODEL", "text", "anthropic/claude-sonnet-4.5"), ("llm_model_bulk", "HEAVY-LIFTING MODEL", "text", "claude-haiku-4-5-20251001 or auto-free"),
         ("llm_api_key", "MODEL KEY", "secret", "sk-or-…"), ("llm_data_collection", "PROVIDERS MAY KEEP PROMPTS", "choice:deny,allow", ""),
         ("llm_autoload_skills", "LOAD THE RIGHT SKILLS AUTOMATICALLY", "choice:true,false", "")]},
     {"title": "Daily rhythm", "note": "When the brain does its morning run, and whether background refresh is on.", "fields": [
@@ -604,7 +604,15 @@ def engine(status: Dict[str, Any]) -> Dict[str, Any]:
         testers = test_sends.meta()
     except Exception:
         testers = {"count": 0, "masked": [], "max": 10}
-    return {"lead": lead, "state": state, "groups": groups, "jobs": jobs, "asks_open": n_asks, "test_users": testers, "skills": skills_rows, "skills_note": skills_note,
+    chal = {"open": 0, "top": []}
+    try:
+        from . import challenges
+        chal = challenges.summary()
+    except Exception:
+        pass
+    chal_rows = [{"id": c["id"], "name": f"{c['kind'].replace('_', ' ')} · {c['count']}×", "status": c["task"], "verb": "READ THE PROMPT →", "go": f"#tool?m=engine"} for c in chal.get("top") or []]
+    return {"lead": lead, "state": state, "groups": groups, "jobs": jobs, "asks_open": n_asks, "test_users": testers, "skills": skills_rows,
+            "challenges": {"open": chal.get("open", 0), "building": chal.get("building", 0), "resolved": chal.get("resolved", 0), "rows": chal_rows}, "skills_note": skills_note,
             "more": [{"label": "TEACH THE BRAIN A RULE →", "go": "#tool?m=engine"}, {"label": "ASK FOR AN ENGINE CHANGE →", "go": "#tool?m=engine"}, {"label": "SEE EVERY TOOL AND SKILL →", "go": "#tool?m=skills"},
                      {"label": "OPEN THE WHOLE WORKBENCH →", "go": "#bench"}]}
 

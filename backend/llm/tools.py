@@ -34,6 +34,11 @@ def _safe(fn: Callable[..., Any]) -> Callable[..., Dict[str, Any]]:
                 sig = record_error("tool", fn.__name__, e, kw)
             except Exception:
                 pass
+            try:
+                from .. import challenges
+                challenges.log("tool_error", f"tool {fn.__name__}", f"{type(e).__name__}: {e}", tried=f"{fn.__name__}({', '.join(sorted(kw))})", source="tool", context={"tool": fn.__name__, "signature": sig})
+            except Exception:
+                pass
             return {"error": redact(str(e)), "error_type": type(e).__name__, "error_signature": sig, "self_repair": "call self_diagnose, then propose_code_change with the fix_request for this signature"}
     return wrapper
 
@@ -341,6 +346,8 @@ def propose_campaign(name: str, channel: str, target_segment: str, variants: Lis
     check = campaign_brief_check(goal, variants, channel, market_linked=bool(market_hook_id), ttl_hours=ttl_hours)
     gaps = [x for x in check["problems"] if re.fullmatch(r"goal\.\w+ missing", x)]            # an input nobody supplied, as opposed to a rule the copy breaks
     if [x for x in check["problems"] if x not in gaps]:
+        from .. import challenges
+        challenges.log("brief_rejected", f"campaign draft {name}", "; ".join(check["problems"])[:400], tried=f"propose_campaign for {target_segment or 'no segment'} on {channel}", source="brief_check")
         return {"error": "brief rejected", "problems": check["problems"], "warnings": check["warnings"], "hint": "Fix the goal brief and call propose_campaign again."}
     from .. import ice as ice_mod
     ice_in = ice or {}
@@ -466,6 +473,12 @@ def skill(name: str, part: str = "", section: str = "") -> Dict[str, Any]:
     if not r.get("error"):
         skill_router.record(r["name"], "tool", part=r.get("part") or "SKILL", section=section)
     return r
+
+
+def log_challenge(task: str, blocked_by: str, tried: str = "", what_would_help: str = "") -> Dict[str, Any]:
+    """Write down a task you could not finish: what you were doing, what blocked you (a missing tool, data, permission, a rule, a failing call), what you tried, and what would let you finish. A build session reads these and changes the engine; then carry on with the best available path."""
+    from .. import challenges
+    return challenges.log("agent", task, blocked_by, tried=tried, suggestion=what_would_help, source="agent")
 
 
 def remember_guidance(text: str, scope: str = "general") -> Dict[str, Any]:
@@ -1180,6 +1193,8 @@ TOOL_SCHEMAS: List[Dict[str, Any]] = [
         {"method": STR, "path": STR, "path_vars": OBJ, "params": OBJ, "body": OBJ}, ["method", "path"]),
     _fn("skill", "Load a shared skill before specialised work. Every skill in the system prompt's list can be loaded by name. `part` opens a reference file that ships with a skill and `section` returns one heading only, e.g. skill('moengage', part='official-skill', section='Common Gotchas') for MoEngage's own agent skill (channel matrix, delivery types, campaign and flow workflows, gotchas, verification checklist); skill('moengage-api') for auth, endpoints, key scopes and limits. The result lists the headings you can ask for next.",
         {"name": STR, "part": STR, "section": STR}, ["name"]),
+    _fn("log_challenge", "Write down a task you could not finish and why (missing tool, data, permission, a rule, a failing call), what you tried and what would let you finish. A build session fixes the engine from these. Then continue with the best available path.",
+        {"task": STR, "blocked_by": STR, "tried": STR, "what_would_help": STR}, ["task", "blocked_by"]),
     _fn("remember_guidance", "Save a standing instruction from the operator so it applies to every future conversation (brand voice, exclusions, channel rules, cadence, process). Use whenever the operator says 'from now on', 'always', 'never', 'remember'. scope: general|copy|audience|channel|measurement|market|process|ui.",
         {"text": STR, "scope": STR}, ["text"]),
     _fn("set_engine_setting", "Change an engine knob right now (allowlisted, non-secret): autopilot_enabled, autopilot_max_actions, schedule_enabled, schedule_time, refresh_interval_hours, analysis_batch, market_universe_mode, market_top_n, taxonomy_codes (merge), llm_temperature, llm_max_tokens, llm_model_bulk, mock_scenario, devagent_enabled. Returns before/after.",
@@ -1198,7 +1213,7 @@ TOOLS: Dict[str, Callable[..., Dict[str, Any]]] = {
     "record_ideas": _safe(record_ideas), "growth_hacks": _safe(growth_hacks), "campaign_content": _safe(campaign_content), "segment_detail": _safe(segment_detail),
     "analytics_query": _safe(analytics_query), "experiment_readouts": _safe(experiment_readouts), "campaign_taxonomy": _safe(campaign_taxonomy), "campaign_deep_dive": _safe(campaign_deep_dive), "clm_program_audit": _safe(clm_program_audit), "experiment_plan": _safe(experiment_plan), "campaign_brief_check": _safe(campaign_brief_check),
     "propose_flow": _safe(propose_flow), "propose_pause_campaign": _safe(propose_pause_campaign),
-    "moengage_api_reference": _safe(moengage_api_reference), "moengage_api_read": _safe(moengage_api_read), "skill": _safe(skill),
+    "moengage_api_reference": _safe(moengage_api_reference), "moengage_api_read": _safe(moengage_api_read), "skill": _safe(skill), "log_challenge": _safe(log_challenge),
     "remember_guidance": _safe(remember_guidance), "set_engine_setting": _safe(set_engine_setting), "propose_code_change": _safe(propose_code_change),
     "model_routes": _safe(model_routes), "token_usage": _safe(token_usage), "self_diagnose": _safe(self_diagnose), "rollback_last_change": _safe(rollback_last_change),
     "north_star": _safe(north_star), "set_north_star": _safe(set_north_star), "comms_limits": _safe(comms_limits), "set_comms_limits": _safe(set_comms_limits), "peace_index": _safe(peace_index),

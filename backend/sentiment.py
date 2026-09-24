@@ -80,7 +80,12 @@ def read(ctx: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
         score += (b - 50) / 50.0; ev.append(f"{int(b)}% of tracked markets up on the day")
     except (TypeError, ValueError):
         pass
-    fb = str(reg.get("funding_bias") or "").lower()
+    fbv = reg.get("funding_bias")
+    try:
+        fbn = float(fbv)
+        fb = "long" if fbn > 0.0001 else "short" if fbn < -0.0001 else ""
+    except (TypeError, ValueError):
+        fb = str(fbv or "").lower()
     if "long" in fb or "positive" in fb:
         score += 0.4; ev.append("funding leans long (crowded longs)")
     elif "short" in fb or "negative" in fb:

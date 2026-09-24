@@ -488,6 +488,12 @@ def propose_telegram_post(text: str, why: str, product: str = "") -> Dict[str, A
     return {"proposal_id": r["id"], "status": r["status"], "note": "waits for approval on Today or in Slack; the daily cap is checked at approval"}
 
 
+def ask_operator(question: str, why: str = "", options: Optional[List[str]] = None, scope: str = "general") -> Dict[str, Any]:
+    """Ask the team a fact only they have (which cohort a name means, the KPI name in this workspace, whether a product is live in a region, the cap to use). It shows on Setup, in the CLI and in Slack; the answer is remembered as standing guidance. Do not wait: continue with the best available path and say what you assumed."""
+    from .. import operator_questions
+    return operator_questions.ask(question, why, options, scope, asked_by="agent")
+
+
 def log_challenge(task: str, blocked_by: str, tried: str = "", what_would_help: str = "") -> Dict[str, Any]:
     """Write down a task you could not finish: what you were doing, what blocked you (a missing tool, data, permission, a rule, a failing call), what you tried, and what would let you finish. A build session reads these and changes the engine; then carry on with the best available path."""
     from .. import challenges
@@ -1208,6 +1214,7 @@ TOOL_SCHEMAS: List[Dict[str, Any]] = [
         {"name": STR, "part": STR, "section": STR}, ["name"]),
     _fn("sentiment_pushes", "Market mood with evidence and the compliant nudge per product (spot, SIP, perps, tokenised stocks, indices/commodities, options, earn, web3) across every channel, for ATPU; product= gives the multi-channel plan and its measurement.", {"product": STR}),
     _fn("propose_telegram_post", "Queue a community-channel Telegram post (fact + why + tool; never a direction, price target, venue or return). A human approves; capped per day.", {"text": STR, "why": STR, "product": STR}, ["text", "why"]),
+    _fn("ask_operator", "Ask the team a fact only they have (a cohort's meaning, a KPI name, a product's availability, a cap). Shown on Setup, CLI and Slack; the answer becomes standing guidance. Continue meanwhile with a stated assumption.", {"question": STR, "why": STR, "options": {"type": "array", "items": STR}, "scope": STR}, ["question"]),
     _fn("log_challenge", "Write down a task you could not finish and why (missing tool, data, permission, a rule, a failing call), what you tried and what would let you finish. A build session fixes the engine from these. Then continue with the best available path.",
         {"task": STR, "blocked_by": STR, "tried": STR, "what_would_help": STR}, ["task", "blocked_by"]),
     _fn("remember_guidance", "Save a standing instruction from the operator so it applies to every future conversation (brand voice, exclusions, channel rules, cadence, process). Use whenever the operator says 'from now on', 'always', 'never', 'remember'. scope: general|copy|audience|channel|measurement|market|process|ui.",
@@ -1228,7 +1235,7 @@ TOOLS: Dict[str, Callable[..., Dict[str, Any]]] = {
     "record_ideas": _safe(record_ideas), "growth_hacks": _safe(growth_hacks), "campaign_content": _safe(campaign_content), "segment_detail": _safe(segment_detail),
     "analytics_query": _safe(analytics_query), "experiment_readouts": _safe(experiment_readouts), "campaign_taxonomy": _safe(campaign_taxonomy), "campaign_deep_dive": _safe(campaign_deep_dive), "clm_program_audit": _safe(clm_program_audit), "experiment_plan": _safe(experiment_plan), "campaign_brief_check": _safe(campaign_brief_check),
     "propose_flow": _safe(propose_flow), "propose_pause_campaign": _safe(propose_pause_campaign),
-    "moengage_api_reference": _safe(moengage_api_reference), "moengage_api_read": _safe(moengage_api_read), "skill": _safe(skill), "log_challenge": _safe(log_challenge), "sentiment_pushes": _safe(sentiment_pushes), "propose_telegram_post": _safe(propose_telegram_post),
+    "moengage_api_reference": _safe(moengage_api_reference), "moengage_api_read": _safe(moengage_api_read), "skill": _safe(skill), "log_challenge": _safe(log_challenge), "ask_operator": _safe(ask_operator), "sentiment_pushes": _safe(sentiment_pushes), "propose_telegram_post": _safe(propose_telegram_post),
     "remember_guidance": _safe(remember_guidance), "set_engine_setting": _safe(set_engine_setting), "propose_code_change": _safe(propose_code_change),
     "model_routes": _safe(model_routes), "token_usage": _safe(token_usage), "self_diagnose": _safe(self_diagnose), "rollback_last_change": _safe(rollback_last_change),
     "north_star": _safe(north_star), "set_north_star": _safe(set_north_star), "comms_limits": _safe(comms_limits), "set_comms_limits": _safe(set_comms_limits), "peace_index": _safe(peace_index),

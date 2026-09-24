@@ -467,3 +467,61 @@ def _short_name(name: str, limit: int = 46) -> str:
         return n
     cut = n[:limit].rsplit(" ", 1)[0].rstrip(" ,;:·→")
     return cut + "…"
+
+
+# ── Approve: every suggestion with its copy, approve / suggest edits / reject ──
+def approve_view() -> Dict[str, Any]:
+    decs = decisions()
+    rows = []
+    for d in decs:
+        row = dict(d)
+        if d["id"].startswith("proposal:"):
+            p = approvals.get_proposal(int(d["id"].split(":")[1])) or {}
+            pl = p.get("payload") or {}
+            goal = pl.get("goal") or {}
+            variants = pl.get("variants") if isinstance(pl.get("variants"), list) else []
+            row["draft"] = {"kind": p.get("kind"), "name": pl.get("name") or pl.get("title") or "", "channel": pl.get("channel"), "segment": pl.get("target_segment") or ", ".join(pl.get("cohorts") or []) or (pl.get("audience") if isinstance(pl.get("audience"), str) else ""),
+                            "copy": [{"title": v.get("title", ""), "body": v.get("body", ""), "cta": v.get("cta", "")} for v in variants[:3]] or ([{"title": pl.get("title", ""), "body": pl.get("body") or pl.get("text", ""), "cta": ""}] if pl.get("title") or pl.get("text") else []),
+                            "kpi": goal.get("primary_kpi"), "target": goal.get("target"), "holdout": goal.get("control_group_pct"), "window": goal.get("measurement_window_days"), "kill": goal.get("kill_criteria"),
+                            "rationale": plain(p.get("rationale") or ""), "council": plain(str((p.get("preview") or {}).get("council_summary") or "")), "created": str(p.get("created_at") or "")[:16], "by": p.get("created_by")}
+        rows.append(row)
+    ideas = v_ideas()["ideas"][:8]
+    return {"lead": (f"{len(rows)} suggestion{'s' if len(rows) != 1 else ''} waiting. Approve, suggest an edit in your own words, or reject; nothing reaches a user without your click." if rows else "Nothing is waiting for you. The next suggestions are below."),
+            "decisions": rows, "open": len(rows), "ideas": ideas}
+
+
+v_ideas = ideas
+
+
+def suggest_edit(did: str, note: str, actor: str = "user") -> Dict[str, Any]:
+    """The operator's edit in plain words → the copy specialist revises the pending draft (revise_proposal), which re-runs the brief check. Sends nothing."""
+    if not did.startswith("proposal:"):
+        return {"ok": False, "toast": "Edits apply to drafts only"}
+    pid = int(did.split(":")[1]); note = (note or "").strip()
+    if not note:
+        return {"ok": False, "toast": "Say what to change"}
+    p = approvals.get_proposal(pid)
+    if not p or p.get("status") != "pending":
+        return {"ok": False, "toast": "That draft is no longer waiting"}
+    approvals.add_comment(pid, f"operator asks: {note[:500]}", actor=actor)
+    try:
+        from .llm.agent import MarketerAgent
+        a = MarketerAgent(persona="copywriter"); a.purpose = "copy"
+        r = a.chat(f"Revise pending proposal #{pid} exactly as the operator asks, using revise_proposal with a partial payload, then reply in two sentences with what changed. Keep the goal, the holdout and every compliance rule; never a venue or competitor name. Operator: {note}", history=[], persist=False)
+        p2 = approvals.get_proposal(pid) or p
+        changed = json.dumps(p2.get("payload"), sort_keys=True) != json.dumps(p.get("payload"), sort_keys=True)
+        audit("decision.edit_suggested", {"id": pid, "changed": changed}, actor=actor)
+        return {"ok": True, "changed": changed, "toast": ("Revised · read it again before approving" if changed else "The brain replied but changed nothing · see its note"), "reply": plain(r.get("reply") or "")[:600]}
+    except Exception as e:
+        return {"ok": False, "toast": f"Could not revise · {plain(redact(str(e)))[:160]}. Your note is saved on the draft."}
+
+
+def reject(did: str, note: str = "", actor: str = "user") -> Dict[str, Any]:
+    if not did.startswith("proposal:"):
+        r = defer(did, actor); return {"ok": True, "toast": "Dismissed for today", **r}
+    pid = int(did.split(":")[1])
+    try:
+        approvals.reject(pid, note=note or "rejected on Approve", decided_by=actor)
+        return {"ok": True, "toast": "Rejected · nothing was sent"}
+    except Exception as e:
+        return {"ok": False, "toast": f"Not rejected · {plain(str(e))[:160]}"}

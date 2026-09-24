@@ -4,8 +4,8 @@ const $ = (s) => document.querySelector(s);
 const $$ = (s) => Array.from(document.querySelectorAll(s));
 const esc = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => ({'&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;'}[c]));
 const S = {screen: 'today', focusKey: null, resolved: new Set(), selectedSop: null, toast: '', clock: '', data: {}, params: {}};
-const SCREENS = [['today', 'Today'], ['asks', 'Asks'], ['rivals', 'Rivals'], ['ideas', 'Ideas'], ['running', 'Running'], ['plays', 'Playbooks'], ['alerts', 'Alerts'], ['engine', 'Engine'], ['bench', 'Workbench']];
-const HIDDEN = ['tool'];            // routable, shown under Workbench in the nav
+const SCREENS = [['live', 'Live'], ['approve', 'Approve'], ['asks', 'Setup'], ['more', 'More']];
+const HIDDEN = ['tool', 'today', 'rivals', 'ideas', 'running', 'plays', 'alerts', 'engine', 'bench'];   // still routable, reached from More
 
 async function api(path, opts = {}) {
   const r = await fetch(path, {method: opts.method || 'GET', headers: {'Content-Type': 'application/json', 'X-Local-Token': TOKEN}, body: opts.body ? JSON.stringify(opts.body) : undefined});
@@ -19,14 +19,16 @@ function toast(msg) {
 function tick() { const d = new Date(); const hm = [d.getHours(), d.getMinutes()].map((x) => String(x).padStart(2, '0')).join(':'); S.clock = hm; const s = $('#synced'); if (s) s.textContent = `synced ${S.syncedAt || hm} · next ${S.next || '09:00'}`; }
 function route() {
   const h = (location.hash || '#today').slice(1); const [scr, q] = h.split('?'); S.params = Object.fromEntries(new URLSearchParams(q || ''));
-  S.screen = SCREENS.some(([k]) => k === scr) || HIDDEN.includes(scr) ? scr : 'today';
+  S.screen = SCREENS.some(([k]) => k === scr) || HIDDEN.includes(scr) ? scr : 'live';
   if (S.params.decision) S.focusKey = S.params.decision;
   if (S.params.sop) S.selectedSop = S.params.sop;
   render();
 }
 function nav(open) {
   const asksOpen = S.data.asks ? S.data.asks.open : (S.data.today || {}).asks_open;
-  $('#nav').innerHTML = SCREENS.map(([k, l]) => `<a href="#${k}" class="${S.screen === k || (k === 'bench' && S.screen === 'tool') ? 'on' : ''}">${l}${k === 'today' && open ? `<span class="count">${open}</span>` : ''}${k === 'asks' && asksOpen ? `<span class="count">${asksOpen}</span>` : ''}</a>`).join('');
+  const approveOpen = S.data.approve ? S.data.approve.open : open;
+  const moreOn = HIDDEN.includes(S.screen);
+  $('#nav').innerHTML = SCREENS.map(([k, l]) => `<a href="#${k}" class="${S.screen === k || (k === 'more' && moreOn) ? 'on' : ''}">${l}${k === 'approve' && approveOpen ? `<span class="count">${approveOpen}</span>` : ''}${k === 'asks' && asksOpen ? `<span class="count">${asksOpen}</span>` : ''}</a>`).join('');
 }
 function verbLink(m, cls = 'verb accent') {
   if (!m) return '';
@@ -59,14 +61,14 @@ async function renderToday() {
 }
 async function resolve(id, action, btn) {
   if (btn) btn.disabled = true;
-  const prev = S.focusKey; S.resolved.add(id); S.focusKey = null; renderToday().catch(() => {});      // optimistic
+  const prev = S.focusKey; S.resolved.add(id); S.focusKey = null; (S.screen === 'approve' ? renderApprove() : renderToday()).catch(() => {});      // optimistic
   try {
     const r = await api(`/api/v3/decisions/${encodeURIComponent(id)}/${action}`, {method: 'POST', body: {}});
     toast(r.toast || 'Done');
     if (r.ask) ask(r.ask, true);
     if (!r.ok && action === 'approve') { S.resolved.delete(id); S.focusKey = prev; }
-    S.data.today = null; renderToday().catch(() => {});
-  } catch (e) { S.resolved.delete(id); S.focusKey = prev; S.data.today = null; renderToday().catch(() => {}); toast(`Not done · ${e.message}`); }
+    S.data.today = null; S.data.approve = null; (S.screen === 'approve' ? renderApprove() : renderToday()).catch(() => {});
+  } catch (e) { S.resolved.delete(id); S.focusKey = prev; S.data.today = null; S.data.approve = null; (S.screen === 'approve' ? renderApprove() : renderToday()).catch(() => {}); toast(`Not done · ${e.message}`); }
 }
 
 // ── Rivals ───────────────────────────────────────────────────────────────────
@@ -123,6 +125,75 @@ async function renderPlays() {
 }
 
 
+
+// ── Live: markets · MoEngage · alerts · engine, every number against the baseline ──
+const pct = (v) => (v == null ? '—' : `${Number(v).toFixed(2)}%`);
+const dTag = (d) => d && d.word !== 'no baseline' ? `<span class="${esc(d.tone)} dl">${d.delta > 0 ? '+' : ''}${esc(d.delta)}pp · ${esc(d.word)}</span>` : '<span class="dim dl">no baseline</span>';
+async function renderLive(silent) {
+  const d = await api('/api/v3/live'); S.data.live = d; nav((S.data.today || {}).open);
+  const m = d.markets, mo = d.moengage, al = d.alerts, en = d.engine;
+  const facts = m.facts.map((f) => `<div class="fact"><span class="k">${esc(f.k)}</span><span class="v ${esc(f.tone || 'text')}">${esc(f.v)}</span><span class="small" style="display:block;margin-top:4px">${esc(f.sub || '')}${f.word && f.word !== 'no baseline' ? ' · ' : ''}${f.word && f.word !== 'no baseline' ? `<span class="${esc(f.tone)}">${esc(f.word)}</span>` : ''}</span></div>`).join('');
+  const mv = (rows) => rows.map((r) => `<div class="row tight"><span class="text" style="flex:0 0 90px">${esc(r.symbol)}</span><span class="${r.chg >= 0 ? 'green' : 'magenta'}" style="flex:0 0 80px">${r.chg > 0 ? '+' : ''}${esc(r.chg)}%</span><span class="small">vol ${esc(r.vol)}${r.oi && r.oi !== '—' ? ' · OI ' + esc(r.oi) : ''}${r.funding != null ? ' · funding ' + esc(r.funding) + '%' : ''}</span></div>`).join('') || '<div class="row tight"><span class="small">nothing yet</span></div>';
+  const oi = (rows) => rows.map((r) => `<div class="row tight"><span class="text" style="flex:0 0 90px">${esc(r.symbol)}</span><span class="small" style="flex:0 0 160px">OI ${r.oi_chg > 0 ? '+' : ''}${esc(r.oi_chg)}% · px ${r.price_chg > 0 ? '+' : ''}${esc(r.price_chg)}%</span><span class="small grow">${esc(r.reading || '')}</span></div>`).join('') || '<div class="row tight"><span class="small">none</span></div>';
+  const tok = Object.entries(m.tokenised).map(([k, rows]) => rows.length ? `<div class="small" style="margin:8px 0 2px;letter-spacing:.14em">${esc(k.replace('_movers', '').toUpperCase())}</div>${mv(rows)}` : '').join('');
+  const sec = (label, html, extra = '') => `<section class="sec"><div class="lab">${label}${extra ? ` <span class="dim" style="text-transform:none;letter-spacing:0">· ${extra}</span>` : ''}</div>${html}</section>`;
+  const leagueRows = mo.league.map((c) => `<div class="row tight" title="${esc(c.do)}"><div class="grow"><span class="text">${esc(c.name)}</span><span class="small"> · ${esc(c.channel)} · ${esc(c.segment || '')} · ${esc(c.status || '')}</span><p class="small" style="margin:2px 0 0">sent ${c.sent.toLocaleString()} · delivered ${pct(c.delivery)} ${dTag(c.vs.delivery_rate)} · click ${pct(c.ctr)} ${dTag(c.vs.ctr)} · conv ${pct(c.conversion)} ${dTag(c.vs.conversion_rate)} · ${esc(c.revenue)}</p></div><span class="verb ${c.health >= 75 ? 'green' : c.health >= 50 ? 'amber' : 'magenta'}">${esc(c.verdict || '')}</span></div>`).join('') || '<div class="row"><span class="small">no campaign stats yet</span></div>';
+  const chRows = mo.channels.map((c) => `<div class="row tight"><span class="text" style="flex:0 0 90px">${esc(c.channel)}</span><span class="small grow">${c.campaigns} campaigns · delivered ${(c.delivered || 0).toLocaleString()} · ${esc(c.engagement_label || 'engagement')} ${pct(c.engagement)} ${dTag(c.vs_baseline)} · conv ${pct(c.conversion)} · ${esc(c.benchmark || '')}</span><span class="verb ${c.verdict === 'in range' ? 'green' : 'amber'}">${esc((c.verdict || '').toUpperCase())}</span></div>`).join('');
+  const anomRows = mo.anomalies.map((a) => `<div class="row tight"><span class="tag ${a.severity === 'ACT TODAY' ? 'magenta' : 'amber'}" style="flex:0 0 120px">${esc(a.severity || 'WATCH')}</span><div class="grow"><span class="text">${esc(a.campaign)}</span><span class="small"> · ${esc(a.metric)} ${esc(a.delta)}</span><p class="small" style="margin:2px 0 0">${esc(a.cause)} ${a.option ? '→ ' + esc(a.option) : ''}</p></div></div>`).join('') || '<div class="row tight"><span class="small green">nothing outside its own baseline</span></div>';
+  const expRows = mo.experiments.map((e) => `<div class="row tight"><div class="grow"><span class="text">${esc(e.name)}</span><span class="small"> · ${esc(e.kpi || '')} · ${e.day != null ? `day ${e.day} of ${e.of}` : esc(e.state)} · holdout ${e.holdout ?? '—'}%</span><p class="small" style="margin:2px 0 0">${e.value != null ? `${esc(e.metric)} ${pct(e.value)} vs pre-period ${e.baseline != null ? pct(e.baseline) : '—'}${e.ci95 && e.ci95[0] != null ? ` · 95% ${e.ci95[0]}–${e.ci95[1]}%` : ''} · ` : ''}${esc(e.verdict)}</p></div></div>`).join('') || `<div class="row tight"><span class="small">${mo.experiment_counts.proposed || 0} proposed · none running with data yet</span></div>`;
+  const alertRows = al.recent.map((f) => `<div class="row tight"><span class="small" style="flex:0 0 50px">${esc(f.at)}</span><span class="text grow">${esc(f.title)}</span><span class="small">${esc(f.signal)} · ${esc(f.token)} · ${esc(f.status)}</span></div>`).join('') || '<div class="row tight"><span class="small">nothing sent today</span></div>';
+  const outcomes = Object.entries(al.outcomes_today || {}).map(([k, v]) => `${esc(k.replace(/_/g, ' '))} ${v}`).join(' · ') || 'no detections yet';
+  const jobs = (en.jobs.list || []).map((j) => `<div class="row tight"><span class="text" style="flex:0 0 160px">${esc(j.job)}</span><span class="small ${j.ok === false ? 'magenta' : 'amber'} grow">${j.ok === false ? 'failing · ' + esc(j.error) : 'overdue · last ' + esc(j.age_min) + ' min ago'}</span></div>`).join('');
+  const b = en.budget || {}, ch = en.challenges || {};
+  $('#main').innerHTML = `<section class="sec"><div class="dateline">${esc(d.date)} · ${esc(d.at)} · ${esc(d.mode)} mode · refreshes every 30 s</div><p class="headline">${esc(d.lead)}</p>
+      <div class="acts"><button class="bordered" data-baseline="1">SET BASELINE TO NOW</button><span class="small">${d.baseline.at ? `baseline ${esc(String(d.baseline.at).slice(0, 16))} by ${esc(d.baseline.by || '')} · ${d.baseline.campaigns} campaigns${d.baseline.note ? ' · ' + esc(d.baseline.note) : ''}` : 'no baseline yet: every delta falls back to each campaign’s own 28-day median'}</span></div></section>
+    ${sec('Markets', `<div class="facts">${facts}</div>`, `prices ${esc(String(m.prices_at || '').slice(11, 16))}`)}
+    ${sec('Movers · up', mv(m.movers_up))}${sec('Movers · down', mv(m.movers_down))}
+    ${sec('Open interest · leverage building', oi(m.oi_surge))}${sec('Open interest · leverage leaving', oi(m.oi_drop))}
+    ${tok ? sec('Tokenised stocks · indices · commodities', tok) : ''}
+    ${sec('Ahead · calendar', m.calendar.map((c) => `<div class="row tight"><span class="small" style="flex:0 0 130px">${esc(c.when)}</span><span class="text grow">${esc(c.title)}</span><span class="small">${esc(c.country)} · ${esc(c.impact)}</span></div>`).join('') || '<div class="row tight"><span class="small">nothing high-impact listed</span></div>')}
+    ${sec('Risk headlines', m.risk_news.map((n) => `<div class="row tight"><span class="text grow">${esc(n.title)}</span><span class="small">${esc(n.source)} · ${esc(n.published)}</span></div>`).join('') || '<div class="row tight"><span class="small">none flagged</span></div>', m.tier0 ? `tier-0 ${esc(m.tier0.replace(/_/g, ' '))}` : '')}
+    ${sec('MoEngage · programme', `<div class="facts">${mo.totals.map((f) => `<div class="fact"><span class="k">${esc(f.k)}</span><span class="v ${esc(f.tone || 'text')}">${esc(f.v)}</span><span class="small" style="display:block;margin-top:4px">${esc(f.sub || '')} ${dTag(f)}</span></div>`).join('')}</div>`, `${esc(mo.source || '')} data · ${mo.history_days || 0} days of history`)}
+    ${sec('MoEngage · channels vs playbook range', chRows)}
+    ${sec('MoEngage · campaigns vs baseline', leagueRows, 'hover a row for the recommendation')}
+    ${sec('MoEngage · off its own baseline', anomRows)}
+    ${sec('Experiments · what can be claimed', expRows, `${mo.experiment_counts.running || 0} running · ${mo.experiment_counts.read || 0} read · ${mo.experiment_counts.with_holdout || 0} with holdout`)}
+    ${sec('Market alerts', `<div class="row tight"><span class="text grow">${al.live ? 'RUNNING' : 'NOT LIVE'}${al.kill ? ' · STOPPED' : ''} · stage ${esc(al.stage || '')} · approval ${esc(al.approval_mode || 'auto')}</span><span class="small">${al.fired_total} out today · queue ${al.queue} · window ${esc(al.window_today || '')}</span></div><div class="row tight"><span class="small grow">${outcomes}</span></div>${al.why && !al.live ? `<div class="row tight"><span class="small amber">${esc(al.why)}</span><a class="verb accent" href="#alerts">OPEN ALERTS →</a></div>` : ''}${alertRows}`)}
+    ${sec('Engine', `<div class="row tight"><span class="text" style="flex:0 0 160px">background jobs</span><span class="small grow ${en.jobs.failing ? 'magenta' : 'green'}">${en.jobs.failing || 0} failing · ${en.jobs.overdue || 0} overdue · market data ${en.jobs.market_age_min ?? '—'} min old</span></div>${jobs}
+      <div class="row tight"><span class="text" style="flex:0 0 160px">credits today</span><span class="small grow">$${(b.spent_today_usd ?? 0).toFixed(2)} of $${(b.daily_budget_usd ?? 0).toFixed(2)} · ${esc(b.state || '')} · background $${(b.background_today_usd ?? 0).toFixed(2)}</span></div>
+      <div class="row tight"><span class="text" style="flex:0 0 160px">challenges</span><span class="small grow">${ch.open || 0} open · ${ch.building || 0} being built · ${ch.resolved || 0} fixed</span></div>
+      <div class="row tight"><span class="text" style="flex:0 0 160px">channels</span><span class="small grow">telegram ${en.telegram && en.telegram.on ? 'on · ' + en.telegram.sent_today + ' posted' : 'off'} · slack approvals ${en.slack && en.slack.on ? 'on · ' + en.slack.awaiting + ' awaiting' : 'off'} · role ${esc(en.role)}</span></div>
+      <div class="row tight"><span class="text" style="flex:0 0 160px">setup</span><span class="small grow">${en.asks_open ? `${en.asks_open} answer${en.asks_open === 1 ? '' : 's'} missing` : 'nothing missing'}</span>${en.asks_open ? '<a class="verb accent" href="#asks">SETUP →</a>' : ''}</div>`)}`;
+  if (!silent) window.scrollTo(0, 0);
+}
+function liveTimer() { clearInterval(S.liveT); S.liveT = setInterval(() => { if (S.screen === 'live' && !document.activeElement.matches('input,textarea')) { const y = window.scrollY; renderLive(true).then(() => window.scrollTo(0, y)).catch(() => {}); } }, 30000); }
+
+// ── Approve: every suggestion with its copy; approve · suggest edits · reject ──
+async function renderApprove() {
+  const d = S.data.approve || (S.data.approve = await api('/api/v3/approve')); nav(d.open);
+  const cards = d.decisions.filter((x) => !S.resolved.has(x.id)).map((x, i) => {
+    const dr = x.draft;
+    const copy = dr && dr.copy && dr.copy.length ? dr.copy.map((c) => `<div class="copybox"><b>${esc(c.title)}</b><p>${esc(c.body)}</p>${c.cta ? `<span class="small">CTA · ${esc(c.cta)}</span>` : ''}</div>`).join('') : '';
+    const meta = dr ? [dr.channel, dr.segment, dr.kpi ? `KPI ${dr.kpi}` : '', dr.holdout != null ? `holdout ${dr.holdout}%` : '', dr.window ? `read after ${dr.window} days` : ''].filter(Boolean).join(' · ') : '';
+    return `<section class="sec askcard" data-id="${esc(x.id)}"><div class="tagline"><span class="tag ${esc(x.tone)}">${esc(x.tag)}</span><span class="counter">${i + 1} of ${d.open}</span></div>
+      <h3>${esc(x.title)}</h3><p class="body">${esc(x.body)}</p>${meta ? `<p class="small">${esc(meta)}</p>` : ''}${copy}
+      ${dr && dr.kill && dr.kill.length ? `<p class="small">stops if · ${esc(Array.isArray(dr.kill) ? dr.kill.join('; ') : dr.kill)}</p>` : ''}${dr && dr.council ? `<p class="small">council · ${esc(dr.council)}</p>` : ''}
+      ${x.blocked ? `<p class="blocked"><span class="k">BEFORE THIS CAN RUN</span>${esc(x.blocked)}</p>` : ''}
+      <div class="plan"><div class="k">IF YOU APPROVE</div><ul>${x.plan.map((p) => `<li>${esc(p)}</li>`).join('')}</ul></div>
+      <div class="acts">${x.primary.go ? `<a class="primary" href="${esc(x.primary.go)}">${esc(x.primary.label)}</a>` : `<button class="primary" data-resolve="approve" data-id="${esc(x.id)}">${esc(x.primary.label)}</button>`}${x.test ? `<a class="evidence" href="#" data-test-proposal="${x.test.proposal_id}">SEND ME A TEST</a>` : ''}${verbLink(x.evidence, 'evidence')}<button class="defer" data-reject="${esc(x.id)}">REJECT</button><button class="defer" data-resolve="defer" data-id="${esc(x.id)}">TOMORROW</button></div>
+      ${dr ? `<form class="editbox" data-edit="${esc(x.id)}"><input name="note" placeholder="suggest an edit in your own words · e.g. shorter title, mention UPI, hold out 30%" autocomplete="off"><button type="submit" class="bordered">ASK FOR THIS CHANGE</button></form><div class="small editout" hidden></div>` : ''}</section>`;
+  }).join('');
+  const ideas = d.ideas.map((i) => `<div class="row"><div class="grow"><span class="text">${esc(i.title)}</span><p class="small">${esc(i.hypothesis)} · ${esc(i.line)}</p></div><button class="bordered" data-promote="${esc(i.raw_id ?? i.id)}">${esc(i.button.label)}</button></div>`).join('');
+  $('#main').innerHTML = `<section class="sec"><div class="lab">Approve</div><p class="lead">${esc(d.lead)}</p></section>${cards || ''}<section class="sec"><div class="lab">Suggested next · one click drafts it for your approval</div>${ideas || '<div class="row"><span class="small">the queue is empty; the brain refills it on its next cycle</span></div>'}</section>`;
+}
+
+// ── More: everything else, one list ──────────────────────────────────────────
+async function renderMore() {
+  nav((S.data.today || {}).open);
+  const items = [['#today', 'Today · the one-decision-at-a-time view'], ['#alerts', 'Market alerts · launch brief, dry run, test sends, stop switch'], ['#engine', 'Engine · every setting, jobs, credits, skills read, challenges'], ['#running', 'Running · every experiment with a next move'], ['#rivals', 'Rivals · what they did and our answer'], ['#ideas', 'Ideas · the full queue'], ['#plays', 'Playbooks · the SOP library'], ['#bench', 'Workbench · every operator module inside this shell']];
+  $('#main').innerHTML = `<section class="sec"><div class="lab">More</div><p class="lead">Three screens do the job: Live to watch, Approve to decide, Setup when something is missing. Everything else lives here.</p></section><section class="sec">${items.map(([h, t]) => `<div class="row"><span class="grow text">${esc(t)}</span><a class="verb accent" href="${h}">OPEN →</a></div>`).join('')}</section>`;
+}
+
 // ── Asks: every missing input as one question with its own field ─────────────
 function fieldHtml(f) {
   const id = `f-${f.key.replace(/[^a-z0-9]/gi, '-')}`;
@@ -143,10 +214,10 @@ async function renderAsks() {
       <p class="where"><span class="k">WHERE TO FIND IT</span>${esc(a.where)}</p>
       ${a.command ? `<pre class="cmdline">${esc(a.command)}</pre>` : ''}
       ${a.fields.length ? `<div class="flds">${a.fields.map(fieldHtml).join('')}</div>` : ''}
-      <div class="acts">${a.button ? `<button type="submit" class="primary">${esc(a.button)}</button>` : ''}${a.link ? verbLink(a.link, 'evidence') : ''}${a.evidence ? verbLink(a.evidence, 'evidence') : ''}<span class="unblocks">UNBLOCKS · ${esc(a.unblocks)}</span></div>
+      <div class="acts">${a.button ? `<button type="submit" class="primary">${esc(a.button)}</button>` : ''}${a.dismiss ? `<a class="defer" href="#" data-dismiss-q="${esc(a.id)}">NOT RELEVANT · DISMISS</a>` : (a.link ? verbLink(a.link, 'evidence') : '')}${a.evidence ? verbLink(a.evidence, 'evidence') : ''}<span class="unblocks">UNBLOCKS · ${esc(a.unblocks)}</span></div>
     </form>`).join('');
   const waiting = d.waiting.length ? `<section class="sec"><div class="lab">Waiting on other teams · not yours to answer</div>${d.waiting.map((w) => `<div class="row"><div class="grow"><span class="text">${esc(w.title)}</span><p class="small">${esc(w.why)}${w.unblocks ? ' · unblocks ' + esc(w.unblocks) : ''}</p></div><a class="verb accent" href="#" data-delivered="${esc(w.id)}">${esc(w.verb)}</a></div>`).join('')}</section>` : '';
-  $('#main').innerHTML = `<section class="sec"><div class="lab">Asks</div><p class="lead">${esc(d.lead)}</p>${next}</section>
+  $('#main').innerHTML = `<section class="sec"><div class="lab">Setup · only what is missing</div><p class="lead">${esc(d.lead)}</p>${next}</section>
     ${d.asks.length ? `<section class="sec asks">${cards}</section>` : `<section class="sec clear"><p class="line">Nothing is missing.</p><p><a class="bordered" href="#today">GO TO TODAY'S DECISIONS</a></p></section>`}${waiting}`;
   if (S.params.focus) { const el = $(`#ask-${CSS.escape(S.params.focus.replace(/[^a-z0-9]/gi, '-'))}`); if (el) { el.scrollIntoView({block: 'start'}); const i = el.querySelector('input,select,textarea'); if (i) i.focus({preventScroll: true}); } }
 }
@@ -267,7 +338,8 @@ async function ask(q, silent) {
 
 // ── render / events ──────────────────────────────────────────────────────────
 async function render() {
-  const fn = {today: renderToday, asks: renderAsks, rivals: renderRivals, ideas: renderIdeas, running: renderRunning, plays: renderPlays, alerts: renderAlerts, engine: renderEngine, bench: renderBench, tool: renderTool}[S.screen] || renderToday;
+  const fn = {live: renderLive, approve: renderApprove, more: renderMore, today: renderToday, asks: renderAsks, rivals: renderRivals, ideas: renderIdeas, running: renderRunning, plays: renderPlays, alerts: renderAlerts, engine: renderEngine, bench: renderBench, tool: renderTool}[S.screen] || renderLive;
+  liveTimer();
   document.body.classList.toggle('wide', S.screen === 'tool');
   if (S.screen !== 'asks') S.askNext = null;
   nav((S.data.today || {}).open);
@@ -276,6 +348,8 @@ async function render() {
 }
 document.addEventListener('click', async (e) => {
   const rs = e.target.closest('[data-resolve]'); if (rs) { e.preventDefault(); return resolve(rs.dataset.id, rs.dataset.resolve, rs); }
+  const bl = e.target.closest('[data-baseline]'); if (bl) { e.preventDefault(); bl.disabled = true; try { const r = await api('/api/v3/live/baseline', {method: 'POST', body: {note: ''}}); toast(r.toast || 'Baseline set'); await renderLive(true); } catch (err) { toast(`Not set · ${err.message}`); bl.disabled = false; } return; }
+  const rj = e.target.closest('[data-reject]'); if (rj) { e.preventDefault(); rj.disabled = true; try { const r = await api(`/api/v3/decisions/${encodeURIComponent(rj.dataset.reject)}/reject`, {method: 'POST', body: {note: ''}}); toast(r.toast || 'Rejected'); S.resolved.add(rj.dataset.reject); S.data.approve = null; S.data.today = null; await renderApprove(); } catch (err) { toast(`Not done · ${err.message}`); rj.disabled = false; } return; }
   const a = e.target.closest('[data-ask]'); if (a) { e.preventDefault(); return ask(a.dataset.ask, true); }
   const al = e.target.closest('[data-al]'); if (al) { e.preventDefault(); return alertsAction(al.dataset.al, al); }
   const tp = e.target.closest('[data-test-proposal]'); if (tp) {
@@ -284,6 +358,7 @@ document.addEventListener('click', async (e) => {
     catch (err) { toast(/no test users/.test(err.message) ? 'No test users yet · add them on Asks' : `Not sent · ${err.message}`); if (/no test users/.test(err.message)) location.hash = '#asks?focus=setting:test_users'; }
     tp.textContent = 'SEND A TEST TO THE TEST USERS'; return;
   }
+  const dq = e.target.closest('[data-dismiss-q]'); if (dq) { e.preventDefault(); return answerAsk(dq.dataset.dismissQ, {_dismiss: '1'}, null); }
   const dl = e.target.closest('[data-delivered]'); if (dl) { e.preventDefault(); return answerAsk(dl.dataset.delivered, {}, null); }
   const jb = e.target.closest('[data-job]'); if (jb) {
     e.preventDefault(); jb.textContent = 'RUNNING…';
@@ -305,6 +380,12 @@ document.addEventListener('click', async (e) => {
   }
 });
 document.addEventListener('submit', async (e) => {
+  const ed = e.target.closest('[data-edit]'); if (ed) {
+    e.preventDefault(); const btn = ed.querySelector('button'); const out = ed.nextElementSibling; btn.disabled = true; btn.textContent = 'REVISING…'; out.hidden = false; out.textContent = 'The copy specialist is revising the draft…';
+    try { const r = await api(`/api/v3/decisions/${encodeURIComponent(ed.dataset.edit)}/edit`, {method: 'POST', body: {note: ed.note.value}}); toast(r.toast || 'Done'); out.textContent = r.reply || r.toast || ''; if (r.changed) { S.data.approve = null; S.data.today = null; await renderApprove(); } }
+    catch (err) { out.textContent = `Could not revise · ${err.message}`; }
+    btn.disabled = false; btn.textContent = 'ASK FOR THIS CHANGE'; return;
+  }
   const f = e.target.closest('[data-ask-form]'); if (f) { e.preventDefault(); return answerAsk(f.dataset.askForm, formValues(f), f.querySelector('[type=submit]')); }
   const tu = e.target.closest('#en-testers'); if (tu) {
     e.preventDefault();

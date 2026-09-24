@@ -1866,6 +1866,41 @@ class V3AnswerPayload(BaseModel):
     values: Dict[str, Any] = {}
 
 
+class V3NotePayload(BaseModel):
+    note: str = ""
+
+
+@app.get("/api/v3/live")
+def v3_live():
+    """Markets, MoEngage performance, alerts and the engine, every number against the baseline. No model call."""
+    from . import v3_live
+    return v3_live.live()
+
+
+@app.post("/api/v3/live/baseline")
+def v3_set_baseline(payload: V3NotePayload, request: Request):
+    from . import v3_live
+    return v3_live.set_baseline(actor=request_actor(request), note=payload.note)
+
+
+@app.get("/api/v3/approve")
+def v3_approve():
+    from . import v3
+    return v3.approve_view()
+
+
+@app.post("/api/v3/decisions/{did}/edit")
+def v3_edit(did: str, payload: V3NotePayload, request: Request):
+    from . import v3
+    return v3.suggest_edit(did, payload.note, actor=request_actor(request))
+
+
+@app.post("/api/v3/decisions/{did}/reject")
+def v3_reject(did: str, payload: V3NotePayload, request: Request):
+    from . import v3
+    return v3.reject(did, payload.note, actor=request_actor(request))
+
+
 @app.get("/api/v3/asks")
 def v3_asks():
     """Every input the engine is missing, each as one question with its own field."""

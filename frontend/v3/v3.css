@@ -161,6 +161,17 @@ button.bordered{background:none}
 .pick input{accent-color:#7fd8ec;width:15px;height:15px;cursor:pointer}
 .pick input:disabled{opacity:.3;cursor:default}
 
+/* live + approve */
+.row.tight{padding:8px 0;gap:8px 18px}
+.dl{font-size:12px;margin-left:4px}
+.copybox{border-left:2px solid rgba(127,216,236,.35);padding:8px 14px;margin:10px 0}
+.copybox b{color:var(--text-hi);font-weight:500}
+.copybox p{margin:4px 0 2px;color:var(--text-body)}
+.editbox{display:flex;gap:14px;align-items:center;margin-top:18px;flex-wrap:wrap}
+.editbox input{flex:1 1 320px;background:transparent;border:0;border-bottom:1px solid rgba(127,216,236,.28);color:var(--text-hi);font:400 14px var(--mono);padding:6px 0}
+.editbox input:focus{outline:0;border-bottom-color:var(--accent)}
+.editout{margin-top:10px;color:var(--text-body);white-space:pre-wrap}
+
 /* workbench: the operator modules inside this shell */
 body.wide .col{max-width:none;padding:0 0 0;gap:0}
 body.wide .ask,body.wide #ask-out{display:none}

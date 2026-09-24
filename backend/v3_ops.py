@@ -282,11 +282,27 @@ def _waiting() -> List[Dict[str, Any]]:
     return rows
 
 
+def _question_asks() -> List[Dict[str, Any]]:
+    out = []
+    try:
+        from . import operator_questions as oq
+        for q in oq.open_questions():
+            fields = [_f("answer", "YOUR ANSWER", "choice", options=q["options"] + ["other"]) if q["options"] else _f("answer", "YOUR ANSWER", "long", "in your own words")]
+            if q["options"]:
+                fields.append(_f("answer_other", "OR TYPE IT", "text", "if none of the options fit"))
+            out.append({"id": f"question:{q['id']}", "group": "FROM THE BRAIN", "tone": "amber", "title": q["question"], "why": (q.get("why") or "The brain could not proceed without this.") + " Your answer is remembered as standing guidance.",
+                        "where": f"Asked {str(q['asked_at'])[:16]} by {q.get('asked_by') or 'the brain'}.", "unblocks": "the task the brain was doing, and every later one that needs the same fact",
+                        "fields": fields, "button": "ANSWER AND REMEMBER", "link": {"label": "NOT RELEVANT · DISMISS →", "ask": ""}, "dismiss": True})
+    except Exception:
+        pass
+    return out
+
+
 def asks() -> Dict[str, Any]:
     settings = get_all_settings()
-    rows = _connection_asks(settings) + _alerts_asks(settings) + _proposal_asks()
+    rows = _question_asks() + _connection_asks(settings) + _alerts_asks(settings) + _proposal_asks()
     order = {"magenta": 0, "amber": 1, "dim": 2}
-    rows.sort(key=lambda a: (order.get(a["tone"], 1), {"CONNECTION": 0, "MARKET ALERTS": 1, "DRAFTS": 2, "ENGINE": 3}.get(a["group"], 4)))
+    rows.sort(key=lambda a: (order.get(a["tone"], 1), {"FROM THE BRAIN": 0, "CONNECTION": 1, "MARKET ALERTS": 2, "DRAFTS": 3, "ENGINE": 4}.get(a["group"], 5)))
     for i, a in enumerate(rows, 1):
         a["n"] = i
     waiting = _waiting()
@@ -355,6 +371,19 @@ def answer(aid: str, values: Dict[str, Any], save: SaveFn, actor: str = "user") 
                 if key in (r.get("rejected") or []):
                     return {"ok": False, "toast": "The engine does not accept that setting"}
                 toast = "Saved · encrypted on this Mac and never shown again" if key.endswith("_key") else "Saved"
+        elif kind == "question":
+            from . import operator_questions as oq
+            qid = int(rest.split(":")[0])
+            if rest.endswith(":dismiss") or values.get("_dismiss"):
+                oq.dismiss(qid, actor=actor); toast = "Dismissed"
+            else:
+                text = str(values.get("answer_other") or "").strip() or str(values.get("answer") or "").strip()
+                if not text or text == "other":
+                    return {"ok": False, "toast": "Type the answer"}
+                r = oq.answer(qid, text, actor=actor)
+                if not r.get("ok"):
+                    return {"ok": False, "toast": r.get("error") or "not saved"}
+                toast = "Answered · the brain remembers it from now on" if r.get("remembered") else "Answered"
         elif aid == "setting:telegram":
             from . import telegram_out
             tok, cid = str(values.get("bot_token") or ""), str(values.get("chat_id") or "")

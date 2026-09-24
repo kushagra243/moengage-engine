@@ -31,6 +31,7 @@ from .database import get_db, get_setting
 from .security import redact
 
 _lock = threading.Lock()
+_fail_streak: Dict[str, int] = {}          # consecutive failures per job; reset on success
 _running: Dict[str, float] = {}
 _state: Dict[str, Dict[str, Any]] = {}
 
@@ -234,13 +235,16 @@ def run_job(name: str) -> Dict[str, Any]:
     _running[name] = time.time(); started = datetime.now(timezone.utc); t0 = time.time(); ok, summary, error = True, None, None
     try:
         summary = job["fn"]()
+        _fail_streak.pop(name, None)
     except Exception as e:
         ok, error = False, redact(str(e))[:300]
-        try:
-            from . import challenges
-            challenges.log("job_failed", f"background job {name}", error, source="refresher", context={"job": name})
-        except Exception:
-            pass
+        streak = _fail_streak.get(name, 0) + 1; _fail_streak[name] = streak
+        if streak >= 3:                                    # a flaky minute is not a challenge; three failures in a row are
+            try:
+                from . import challenges
+                challenges.log("job_failed", f"background job {name} keeps failing", f"{type(e).__name__}: {error[:200]} ({streak} times in a row)", source="refresher", context={"job": name, "streak": streak})
+            except Exception:
+                pass
     finally:
         _running.pop(name, None)
     ms = int((time.time() - t0) * 1000); finished = datetime.now(timezone.utc)
@@ -275,11 +279,15 @@ def run_due(max_jobs: int = 3) -> List[Dict[str, Any]]:
     if not _lock.acquire(blocking=False):
         return []
     try:
-        due = due_jobs()
-        order = {j["name"]: i for i, j in enumerate(JOBS)}
-        prio = {j["name"] for j in JOBS if j.get("priority")}
-        due.sort(key=lambda n: (0 if n in prio else 1, order.get(n, 99)))
-        keep = [n for n in due if n in prio] + [n for n in due if n not in prio][:max_jobs]   # priority jobs never wait behind slow sources
+        due = due_jobs(); now = time.time()
+        by = {j["name"]: j for j in JOBS}
+        prio = {n for n in due if by[n].get("priority")}
+
+        def staleness(n: str) -> float:                    # how overdue relative to its own interval: 2.0 = twice its interval since it last ran
+            last = _ts((_state.get(n) or {}).get("last_started"))
+            return 99.0 if last is None else (now - last) / max(1.0, interval_min(by[n]) * 60)
+        rest = sorted((n for n in due if n not in prio), key=staleness, reverse=True)      # fixed list order starved the tail for hours when the head was due together
+        keep = sorted(prio, key=lambda n: JOBS.index(by[n])) + rest[:max_jobs]              # priority jobs never wait behind slow sources
         return [run_job(n) for n in keep]
     finally:
         _lock.release()

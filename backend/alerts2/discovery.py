@@ -914,6 +914,7 @@ def _alert_preview(p: Dict[str, Any]) -> Dict[str, Any]:
 
 
 def _alert_execute(p: Dict[str, Any]) -> Dict[str, Any]:
+    init_tables()                                          # an approved alert may be the first thing this machine ever fires
     now = datetime.now(IST)
     targets = [c for c in cohorts() if c["id"] in set(p.get("cohorts") or [])]
     attrs = {**(p.get("attrs") or {}), "title": p["title"], "body": p["body"]}

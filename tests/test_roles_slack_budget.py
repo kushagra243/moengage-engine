@@ -131,7 +131,7 @@ def test_a_reaction_rejects_and_each_alert_can_wait_for_a_human(monkeypatch):
             approvals.approve_and_execute(pr2["id"], decided_by="test")
         pr3 = discovery.propose_alert(dict(c, det_key="large_trades|ETH|t3"), {"title": "Large buying in ETH", "body": "A large buy of about $3.8M was recorded in ETH. See the market."}, {"signal": "large_trades", "token": "ETH"}, ["internal"], now, cfg, "test")
         done = approvals.approve_and_execute(pr3["id"], decided_by="test")
-        assert done["status"] == "executed" and done["result"]["status"] == "recorded_mock"
+        assert done["status"] == "executed" and done["result"]["status"] == "recorded_mock", done.get("error")
     finally:
         set_setting("ma2_alert_approval", "auto"); set_setting("slack_bot_token", ""); set_setting("slack_channel_id", ""); set_setting("slack_approvers", "")
 

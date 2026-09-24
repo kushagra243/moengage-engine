@@ -33,6 +33,7 @@ ROUTES: List[Tuple[str, List[Tuple[str, str, str]]]] = [
     (r"\b(perp|futures|leverage|funding|liquidat|options|open interest)\b", [("crypto-derivatives-marketing", "SKILL", "")]),
     (r"\b(rival|competitor|share of|counter)\b", [("competitive-intelligence", "SKILL", "")]),
     (r"\b(experiment|holdout|lift|readout|significan|a/b|ab test)\b", [("clm-operator", "SKILL", "")]),
+    (r"\b(atpu|trades per user|sentiment|mood|fear|greed|portfolio|breadth|cross-?sell|diversif|tokeni[sz]ed|us stock|indices|commodit)\b", [("atpu-portfolio-playbook", "SKILL", ""), ("product-cohort-playbook", "SKILL", "")]),
 ]
 ALWAYS_WHEN_BUILDING = [("moengage", "SKILL", "Quick facts"), ("moengage", "official-skill", "Common Gotchas"), ("moengage", "official-skill", "Verification Checklist")]
 BY_PERSONA = {"copywriter": [("crypto-compliance-copy", "SKILL", "")], "compliance": [("crypto-compliance-copy", "SKILL", "")], "alerts": [("market-alerts-2", "SKILL", "")],

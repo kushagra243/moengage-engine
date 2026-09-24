@@ -23,8 +23,8 @@ from typing import Any, Dict, List, Optional
 from .database import get_setting, set_setting
 from .security import audit
 
-DEFAULT_NORTH_STAR = ("Incremental active trading weeks per user at the lowest message load: maximise weekly_active_weeks_4w lift versus holdout "
-                      "while every cohort stays inside the communication limits and no user is contacted during a stress regime except for service.")
+DEFAULT_NORTH_STAR = ("Average trades per active user (ATPU) per week, lifted versus holdout across every product, with portfolio breadth (products traded per user, 30d) "
+                      "as the second number and unsubscribe/opt-out as the guardrail — every channel, sentiment-timed, never a price call.")
 
 DEFAULT_LIMITS: Dict[str, Any] = {
     "per_user": {"push": {"per_day": 1, "per_week": 4}, "email": {"per_day": 1, "per_week": 3}, "in-app": {"per_day": 2, "per_week": 6},

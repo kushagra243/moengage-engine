@@ -23,7 +23,7 @@ from .security import audit, guarded_session, redact
 
 APPROVE = re.compile(r"^\s*(approve|approved|yes|go|ship it|lgtm)\b", re.I)
 REJECT = re.compile(r"^\s*(reject|rejected|no|stop|hold)\b", re.I)
-ASK_KINDS = ("create_campaign", "alert_send", "ma2_discovery", "create_segment", "create_flow", "custom_segment_upload")
+ASK_KINDS = ("create_campaign", "alert_send", "ma2_discovery", "create_segment", "create_flow", "custom_segment_upload", "telegram_post")
 
 
 def init_tables() -> None:
@@ -84,7 +84,9 @@ def _card(p: Dict[str, Any]) -> Dict[str, Any]:
     kind = p.get("kind")
     v = (pl.get("variants") or [{}])[0] if isinstance(pl.get("variants"), list) else {}
     title = {"create_campaign": f"Campaign draft · {pl.get('name', '')}", "alert_send": f"Market alert · {pl.get('title', '')}", "ma2_discovery": "Market alerts · permission to fire",
-             "create_segment": f"Cohort · {pl.get('name', '')}"}.get(kind, p.get("title") or kind)
+             "create_segment": f"Cohort · {pl.get('name', '')}", "telegram_post": f"Community post · {pl.get('product') or 'all'}"}.get(kind, p.get("title") or kind)
+    if kind == "telegram_post":
+        pl = {**pl, "title": "Telegram community channel", "body": pl.get("text", "")}
     copy = f"*{pl.get('title') or v.get('title') or ''}*\n{pl.get('body') or v.get('body') or ''}".strip()
     who = pl.get("target_segment") or ", ".join(pl.get("cohorts") or []) or pl.get("audience") or (pl.get("audience") or {}).get("segment_name") if isinstance(pl.get("audience"), dict) else pl.get("audience") or ""
     facts = [f"id `{p['id']}` · {kind}", f"to: {who or 'see draft'}"]

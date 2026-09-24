@@ -28,6 +28,7 @@ from .security import audit, guarded_session, redact
 IST = timezone(timedelta(hours=5, minutes=30))
 TOKEN_KEY = "telegram_bot_token"           # ends in _token → encrypted secret
 CHAT_KEY = "telegram_chat_id"
+BROADCAST_KEY = "telegram_broadcast_chat_id"     # the community channel: users, not the team — posts only through an approved telegram_post
 MODE_KEY = "telegram_alerts"               # on | off (default on once configured)
 TOKEN_SHAPE = re.compile(r"^\d{6,12}:[A-Za-z0-9_-]{30,}$")
 _chat_cache: Dict[str, Any] = {"at": 0.0, "chats": []}
@@ -205,3 +206,64 @@ def hello(actor: str = "user") -> Dict[str, Any]:
     r = post(format_alert("The alerts engine is connected", "Every market alert the engine fires will also appear here. This message is the only one that is not an alert.", {}, "hello"), "hello", "hello")
     audit("telegram.hello", {"ok": r.get("ok")}, actor=actor)
     return {**r, "step": "sent" if r.get("ok") else "chat", "bot": who}
+
+
+# ── the community channel: distribution to users, behind an approval and a daily cap ──
+def broadcast_chat() -> str:
+    return (get_setting(BROADCAST_KEY, "") or "").strip()
+
+
+def broadcast_cap() -> int:
+    try:
+        return int(get_setting("telegram_broadcast_daily_cap", "2") or 2)
+    except ValueError:
+        return 2
+
+
+def broadcast_sent_today() -> int:
+    init_tables(); conn = get_db()
+    n = conn.execute("SELECT COUNT(*) FROM telegram_log WHERE day_ist=? AND kind='broadcast' AND ok=1", (datetime.now(IST).strftime("%Y-%m-%d"),)).fetchone()[0]
+    conn.close(); return int(n)
+
+
+def _bc_validate(p: Dict[str, Any]) -> None:
+    text = str(p.get("text") or "").strip()
+    if not text:
+        raise ValueError("a broadcast needs text")
+    if len(text) > 900:
+        raise ValueError("keep a community post under 900 characters")
+    from .alerts2 import rules
+    bad = [x for x in rules.lint(text[:60], text) if x["severity"] in ("high", "medium") and x["rule"] != "push_length"]
+    if bad:
+        raise ValueError("the post breaks a rule: " + "; ".join(f"{x['rule']} ({x['snippet']})" for x in bad[:3]))
+    if p.get("_approving"):
+        if not broadcast_chat():
+            raise ValueError("no community channel is set (telegram_broadcast_chat_id)")
+        if broadcast_sent_today() >= broadcast_cap():
+            raise ValueError(f"the community channel already had {broadcast_cap()} post(s) today; the cap protects the channel")
+
+
+def _bc_preview(p: Dict[str, Any]) -> Dict[str, Any]:
+    return {"to": "community channel " + ((broadcast_chat()[:4] + "…") if broadcast_chat() else "(not set)"), "text": p.get("text"), "sent_today": broadcast_sent_today(), "cap": broadcast_cap()}
+
+
+def _bc_execute(p: Dict[str, Any]) -> Dict[str, Any]:
+    chat = broadcast_chat()
+    text = _esc(str(p.get("text") or "")) + ("\n\n<i>" + _esc(p.get("footer") or "Not investment advice. Crypto assets are unregulated and can lose value; know the risks.") + "</i>")
+    try:
+        _api("sendMessage", {"chat_id": chat, "text": text[:4000], "parse_mode": "HTML", "disable_web_page_preview": True})
+        _log("broadcast", True, str(p.get("text") or "")[:80])
+        return {"success": True, "status": "posted to the community channel"}
+    except Exception as e:
+        _log("broadcast", False, str(p.get("text") or "")[:80], str(e))
+        raise
+
+
+def register() -> None:
+    from .approvals import register_executor
+    register_executor("telegram_post", _bc_execute, _bc_preview, _bc_validate)
+
+
+def propose_broadcast(text: str, why: str, product: str = "", actor: str = "agent") -> Dict[str, Any]:
+    from . import approvals
+    return approvals.propose("telegram_post", f"Community post: {text[:60]}", {"text": text[:900], "product": product, "channel": "telegram_broadcast"}, rationale=why[:400], risk="medium", created_by=actor)

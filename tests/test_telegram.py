@@ -113,8 +113,9 @@ def test_telegram_is_operator_only_and_the_screens_know_about_it():
     from backend.llm.tools import TOOLS, TOOL_SCHEMAS
     import inspect
     from backend.llm import tools as tools_mod
-    assert not any("telegram" in n for n in TOOLS) and "telegram" not in json.dumps(TOOL_SCHEMAS).lower()
-    assert "telegram" not in inspect.getsource(tools_mod).lower(), "no agent tool imports or reaches the Telegram module"
+    assert [n for n in TOOLS if "telegram" in n] == ["propose_telegram_post"], "the only Telegram the agent can reach is the community channel, and only as a proposal a human approves"
+    src = inspect.getsource(tools_mod)
+    assert "telegram_out.propose_broadcast" in src and "telegram_out.post" not in src and "mirror_alert" not in src and "send_test" not in src, "no direct send, no team mirror, from any agent tool"
     from backend import v3_ops
     import backend.main as m
     from backend.database import set_setting

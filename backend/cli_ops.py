@@ -41,7 +41,7 @@ def _boot():
     from .moengage.executors import register_all
     from . import test_sends
     register_all(); test_sends.register()
-    for mod in ("signals", "research", "sop_improve", "sop_requests", "alerts2.service", "alerts2.discovery"):
+    for mod in ("signals", "research", "sop_improve", "sop_requests", "alerts2.service", "alerts2.discovery", "telegram_out"):
         try:
             __import__("importlib").import_module(f"backend.{mod}").register()
         except Exception:

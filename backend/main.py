@@ -68,7 +68,7 @@ if _migrated:
 register_executors()
 from . import devagent as _devagent
 _devagent.register()
-for _mod in ("signals", "research", "sop_improve", "sop_requests", "alerts2.service", "alerts2.discovery", "test_sends"):     # approval executors: signal_rule, skill_update, sop_change, sop_new, ma2_pilot, ma2_discovery, test_send
+for _mod in ("signals", "research", "sop_improve", "sop_requests", "alerts2.service", "alerts2.discovery", "test_sends", "telegram_out"):     # approval executors: signal_rule, skill_update, sop_change, sop_new, ma2_pilot, ma2_discovery, test_send
     try:
         __import__("importlib").import_module(f"backend.{_mod}").register()
     except Exception as _e:
@@ -2044,6 +2044,13 @@ def slack_save(payload: SlackPayload, request: Request):
 def slack_poll(request: Request):
     from . import slack_out
     return slack_out.poll()
+
+
+@app.get("/api/sentiment")
+def sentiment_get(product: Optional[str] = None):
+    """The market mood and the compliant multi-channel nudge per product for ATPU; plan for one product with ?product=."""
+    from . import sentiment
+    return sentiment.plan(product) if product else {**sentiment.nudges(), "breadth": sentiment.breadth()}
 
 
 @app.get("/api/telemetry")

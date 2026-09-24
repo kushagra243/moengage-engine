@@ -529,7 +529,8 @@ ENGINE_GROUPS: List[Dict[str, Any]] = [
         ("ma2_internal_delivery", "EMPLOYEE DELIVERY", "choice:event,inform", ""), ("ma2_inform_alert_id", "INFORM ALERT ID", "text", ""), ("ma2_inform_alert_name", "INFORM ALERT NAME", "text", "MA2_Discovery_Internal"),
         ("ma2_agent_autonomy", "AGENT WRITES ITS OWN ALERTS", "choice:true,false", "")]},
     {"title": "Telegram mirror", "note": "Every alert the engine fires is also posted to one Telegram chat for the team.", "fields": [
-        ("telegram_bot_token", "BOT TOKEN", "secret", "from @BotFather"), ("telegram_chat_id", "CHAT ID", "text", "-1001234567890"), ("telegram_alerts", "MIRROR ALERTS", "choice:on,off", "")]},
+        ("telegram_bot_token", "BOT TOKEN", "secret", "from @BotFather"), ("telegram_chat_id", "TEAM CHAT ID · MIRROR", "text", "-1001234567890"), ("telegram_alerts", "MIRROR ALERTS", "choice:on,off", ""),
+        ("telegram_broadcast_chat_id", "COMMUNITY CHANNEL ID · USERS", "text", "-1009876543210"), ("telegram_broadcast_daily_cap", "COMMUNITY POSTS PER DAY", "number", "2")]},
     {"title": "Approvals in Slack", "note": "Drafts and alerts are posted to one channel; a listed approver replies approve or reject in the thread and the engine executes it.", "fields": [
         ("slack_bot_token", "BOT TOKEN · xoxb-…", "secret", ""), ("slack_channel_id", "CHANNEL ID", "text", "C0123456789"), ("slack_approvers", "APPROVERS · SLACK USER IDS, COMMA-SEPARATED", "text", "U0123,U0456"),
         ("slack_ask_approval", "ASK IN SLACK", "choice:on,off", ""), ("ma2_alert_approval", "EACH MARKET ALERT WAITS FOR APPROVAL", "choice:auto,ask", "")]},

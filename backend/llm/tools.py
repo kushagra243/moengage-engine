@@ -475,6 +475,19 @@ def skill(name: str, part: str = "", section: str = "") -> Dict[str, Any]:
     return r
 
 
+def sentiment_pushes(product: str = "") -> Dict[str, Any]:
+    """The market mood (fearful…euphoric, with evidence) and the compliant nudge per product across push, in-app, email, WhatsApp and the Telegram community channel — the ATPU programme. With product=, the full multi-channel plan and its measurement for that product."""
+    from .. import sentiment
+    return sentiment.plan(product) if product else sentiment.nudges()
+
+
+def propose_telegram_post(text: str, why: str, product: str = "") -> Dict[str, Any]:
+    """Queue a post for the Telegram community channel (users). Fact + why + tool; no direction, price target, venue name or return. Capped per day; a human approves."""
+    from .. import telegram_out
+    r = telegram_out.propose_broadcast(text, why, product, actor="agent")
+    return {"proposal_id": r["id"], "status": r["status"], "note": "waits for approval on Today or in Slack; the daily cap is checked at approval"}
+
+
 def log_challenge(task: str, blocked_by: str, tried: str = "", what_would_help: str = "") -> Dict[str, Any]:
     """Write down a task you could not finish: what you were doing, what blocked you (a missing tool, data, permission, a rule, a failing call), what you tried, and what would let you finish. A build session reads these and changes the engine; then carry on with the best available path."""
     from .. import challenges
@@ -1193,6 +1206,8 @@ TOOL_SCHEMAS: List[Dict[str, Any]] = [
         {"method": STR, "path": STR, "path_vars": OBJ, "params": OBJ, "body": OBJ}, ["method", "path"]),
     _fn("skill", "Load a shared skill before specialised work. Every skill in the system prompt's list can be loaded by name. `part` opens a reference file that ships with a skill and `section` returns one heading only, e.g. skill('moengage', part='official-skill', section='Common Gotchas') for MoEngage's own agent skill (channel matrix, delivery types, campaign and flow workflows, gotchas, verification checklist); skill('moengage-api') for auth, endpoints, key scopes and limits. The result lists the headings you can ask for next.",
         {"name": STR, "part": STR, "section": STR}, ["name"]),
+    _fn("sentiment_pushes", "Market mood with evidence and the compliant nudge per product (spot, SIP, perps, tokenised stocks, indices/commodities, options, earn, web3) across every channel, for ATPU; product= gives the multi-channel plan and its measurement.", {"product": STR}),
+    _fn("propose_telegram_post", "Queue a community-channel Telegram post (fact + why + tool; never a direction, price target, venue or return). A human approves; capped per day.", {"text": STR, "why": STR, "product": STR}, ["text", "why"]),
     _fn("log_challenge", "Write down a task you could not finish and why (missing tool, data, permission, a rule, a failing call), what you tried and what would let you finish. A build session fixes the engine from these. Then continue with the best available path.",
         {"task": STR, "blocked_by": STR, "tried": STR, "what_would_help": STR}, ["task", "blocked_by"]),
     _fn("remember_guidance", "Save a standing instruction from the operator so it applies to every future conversation (brand voice, exclusions, channel rules, cadence, process). Use whenever the operator says 'from now on', 'always', 'never', 'remember'. scope: general|copy|audience|channel|measurement|market|process|ui.",
@@ -1213,7 +1228,7 @@ TOOLS: Dict[str, Callable[..., Dict[str, Any]]] = {
     "record_ideas": _safe(record_ideas), "growth_hacks": _safe(growth_hacks), "campaign_content": _safe(campaign_content), "segment_detail": _safe(segment_detail),
     "analytics_query": _safe(analytics_query), "experiment_readouts": _safe(experiment_readouts), "campaign_taxonomy": _safe(campaign_taxonomy), "campaign_deep_dive": _safe(campaign_deep_dive), "clm_program_audit": _safe(clm_program_audit), "experiment_plan": _safe(experiment_plan), "campaign_brief_check": _safe(campaign_brief_check),
     "propose_flow": _safe(propose_flow), "propose_pause_campaign": _safe(propose_pause_campaign),
-    "moengage_api_reference": _safe(moengage_api_reference), "moengage_api_read": _safe(moengage_api_read), "skill": _safe(skill), "log_challenge": _safe(log_challenge),
+    "moengage_api_reference": _safe(moengage_api_reference), "moengage_api_read": _safe(moengage_api_read), "skill": _safe(skill), "log_challenge": _safe(log_challenge), "sentiment_pushes": _safe(sentiment_pushes), "propose_telegram_post": _safe(propose_telegram_post),
     "remember_guidance": _safe(remember_guidance), "set_engine_setting": _safe(set_engine_setting), "propose_code_change": _safe(propose_code_change),
     "model_routes": _safe(model_routes), "token_usage": _safe(token_usage), "self_diagnose": _safe(self_diagnose), "rollback_last_change": _safe(rollback_last_change),
     "north_star": _safe(north_star), "set_north_star": _safe(set_north_star), "comms_limits": _safe(comms_limits), "set_comms_limits": _safe(set_comms_limits), "peace_index": _safe(peace_index),

@@ -127,5 +127,5 @@ def test_telegram_is_operator_only_and_the_screens_know_about_it():
     assert al["telegram"]["configured"] is False and "Asks" in al["telegram"]["line"]
     eng = v3_ops.engine(m.status())
     g = next(g for g in eng["groups"] if g["title"] == "Telegram mirror")
-    assert [f["key"] for f in g["fields"]] == ["telegram_bot_token", "telegram_chat_id", "telegram_alerts"] and g["fields"][0]["type"] == "secret"
+    assert [f["key"] for f in g["fields"]] == ["telegram_bot_token", "telegram_chat_id", "telegram_alerts", "telegram_broadcast_chat_id", "telegram_broadcast_daily_cap"] and g["fields"][0]["type"] == "secret"
     assert "telegram_" in m.ALLOWED_SETTING_PREFIXES

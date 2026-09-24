@@ -468,6 +468,11 @@ def run(mode: str = "dry_run", actor: str = "user", now: Optional[datetime] = No
             if not targets:
                 row["decision"] = "suppressed"; row["reason"] = "no_cohort_takes_this_signal"; supp += 1; outcome(c, "suppressed:no_cohort_takes_this_signal")
                 decided.append(row); continue
+            if approval_mode(cfg) != "auto":                # a human (in Slack or on Today) says go before each alert leaves; the alert expires with the fact
+                pr = propose_alert(c, copy, attrs, [t["id"] for t in targets], now, cfg, actor)
+                row["decision"] = "awaiting_approval"; row["proposal_id"] = pr.get("id"); row["cohorts"] = [t["id"] for t in targets]
+                _count(counts, c, key); outcome(c, "awaiting_approval")
+                decided.append(row); continue
             results = {t["id"]: _send_to_cohort(t, attrs, c.get("det_key") or key) for t in targets}
             ok = [k for k, r in results.items() if r["status"] != "failed"]
             r = {"status": (results[ok[0]]["status"] if ok else "failed"), "error": "; ".join(f"{k}: {v.get('error')}" for k, v in results.items() if v["status"] == "failed") or None}
@@ -876,9 +881,59 @@ def _execute(payload: Dict[str, Any]) -> Dict[str, Any]:
     return {"ok": True, "experiment": x}
 
 
+# ── one alert, one approval ───────────────────────────────────────────────────
+def approval_mode(cfg: Optional[Dict[str, Any]] = None) -> str:
+    """auto (the engine fires on detection) | ask (each alert is a proposal: approve in Slack or on Today, then it fires)."""
+    return "ask" if str(get_setting("ma2_alert_approval", "auto")).lower() in ("ask", "slack", "queue", "on") else "auto"
+
+
+def propose_alert(c: Dict[str, Any], copy: Dict[str, str], attrs: Dict[str, Any], cohort_ids: List[str], now: datetime, cfg: Dict[str, Any], actor: str) -> Dict[str, Any]:
+    from .. import approvals
+    perishable = c["signal"] in set(cfg.get("perishable_signals") or [])
+    ages = cfg.get("perishable_max_age_min") or {}
+    age_min = float(ages.get(c["signal"], 30) if isinstance(ages, dict) else ages or 30)
+    stale_at = (now + timedelta(minutes=age_min)) if perishable else (now + timedelta(hours=6))
+    payload = {"signal": c["signal"], "token": c["token"], "product": c.get("product"), "direction": c.get("direction"), "value": c.get("value"), "title": copy["title"], "body": copy["body"],
+               "attrs": {k: v for k, v in attrs.items() if k != "run_id"}, "cohorts": cohort_ids, "det_key": c.get("det_key"), "detected_at": now.isoformat(), "stale_at": stale_at.isoformat(), "source": c.get("source")}
+    return approvals.propose("alert_send", f"Market alert: {copy['title'][:70]} · {c.get('det_key') or c['token']}", payload,
+                             rationale=f"{c['signal'].replace('_', ' ')} on {c['token']}; goes to {', '.join(cohort_ids)}; stale after {stale_at.strftime('%H:%M')} IST", risk="low", created_by=actor)
+
+
+def _alert_validate(p: Dict[str, Any]) -> None:
+    if not p.get("title") or not p.get("body") or not p.get("cohorts"):
+        raise ValueError("an alert needs a title, a body and at least one cohort")
+    if p.get("_approving") and p.get("stale_at") and datetime.now(IST).isoformat() > str(p["stale_at"]):
+        raise ValueError(f"this market fact went stale at {str(p['stale_at'])[11:16]} IST; it is not sent late")
+    bad = [x for x in rules.lint(str(p["title"]), str(p["body"])) if x["severity"] in ("high", "medium")]
+    if bad:
+        raise ValueError("copy fails the alert rules: " + "; ".join(x["rule"] for x in bad))
+
+
+def _alert_preview(p: Dict[str, Any]) -> Dict[str, Any]:
+    return {"title": p.get("title"), "body": p.get("body"), "cohorts": p.get("cohorts"), "events": [c["event"] for c in cohorts() if c["id"] in set(p.get("cohorts") or [])], "stale_at": p.get("stale_at")}
+
+
+def _alert_execute(p: Dict[str, Any]) -> Dict[str, Any]:
+    now = datetime.now(IST)
+    targets = [c for c in cohorts() if c["id"] in set(p.get("cohorts") or [])]
+    attrs = {**(p.get("attrs") or {}), "title": p["title"], "body": p["body"]}
+    results = {t["id"]: _send_to_cohort(t, attrs, str(p.get("det_key") or p.get("token"))) for t in targets}
+    ok = [k for k, r in results.items() if r["status"] != "failed"]
+    status = results[ok[0]]["status"] if ok else "failed"
+    err = "; ".join(f"{k}: {v.get('error')}" for k, v in results.items() if v["status"] == "failed") or None
+    c = {"signal": p.get("signal"), "token": p.get("token"), "product": p.get("product") or "futures", "direction": p.get("direction") or "any", "value": p.get("value"), "source": p.get("source")}
+    _write_fire(None, now, c, {"title": p["title"], "body": p["body"]}, status, err)
+    if status != "failed":
+        _mirror({"title": p["title"], "body": p["body"]}, c, ok, status)
+    if status == "failed":
+        raise RuntimeError(err or "delivery failed")
+    return {"success": True, "status": status, "cohorts": ok}
+
+
 def register() -> None:
     from ..approvals import register_executor
     register_executor("ma2_discovery", _execute, _preview, _validate)
+    register_executor("alert_send", _alert_execute, _alert_preview, _alert_validate)
 
 
 def fires(limit: int = 30) -> List[Dict[str, Any]]:

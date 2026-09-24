@@ -166,8 +166,9 @@ def get_settings():
 @app.post("/api/settings")
 def update_settings(payload: SettingsPayload):
     saved, rejected = [], []
+    from .roles import refuse_setting
     for k, v in payload.values.items():
-        if not k.startswith(ALLOWED_SETTING_PREFIXES):
+        if not k.startswith(ALLOWED_SETTING_PREFIXES) or refuse_setting(k):
             rejected.append(k); continue
         if v is None:
             continue
@@ -2017,6 +2018,45 @@ def challenges_status(cid: int, payload: ChallengeStatusPayload, request: Reques
     if not r:
         raise HTTPException(400, "bad status or id")
     return r
+
+
+class SlackPayload(BaseModel):
+    channel_id: str = ""
+    approvers: str = ""
+
+
+@app.get("/api/slack")
+def slack_status():
+    from . import slack_out
+    return slack_out.status()
+
+
+@app.post("/api/slack")
+def slack_save(payload: SlackPayload, request: Request):
+    """Channel and approvers (the token is a secret: Asks, Engine or ./cli.py secret slack_bot_token), then one hello."""
+    from . import slack_out
+    from .settings_policy import save_plain
+    save_plain({k: v for k, v in {"slack_channel_id": payload.channel_id, "slack_approvers": payload.approvers}.items() if v})
+    return {**slack_out.hello(actor=request_actor(request)), "status": slack_out.status()}
+
+
+@app.post("/api/slack/poll")
+def slack_poll(request: Request):
+    from . import slack_out
+    return slack_out.poll()
+
+
+@app.get("/api/telemetry")
+def telemetry_get(days: int = 7):
+    """Counts and latencies only: what the operator machine may share with the builder."""
+    from . import telemetry
+    return telemetry.snapshot(days)
+
+
+@app.get("/api/llm/budget")
+def llm_budget():
+    from .llm import budget
+    return budget.status()
 
 
 @app.get("/api/skills/usage")

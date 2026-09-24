@@ -53,6 +53,9 @@ def meta() -> Dict[str, Any]:
 
 
 def save_users(values: Any, actor: str = "user") -> Dict[str, Any]:
+    from .roles import refuse_setting
+    if refuse_setting(SETTING):
+        raise TestSendError(refuse_setting(SETTING))
     raw = values if isinstance(values, list) else re.split(r"[\n,;]+", str(values or ""))      # never on spaces: "+91 98765 43210" must be judged whole
     out: List[str] = []
     for x in raw:

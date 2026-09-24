@@ -97,10 +97,20 @@ def doctor(a):
          "skills_never_opened": skill_router.usage(7)["never_opened"]}
     from . import challenges as ch
     d["challenges"] = ch.summary()
+    try:
+        from .llm import budget
+        d["budget"] = budget.status()
+        from . import slack_out
+        d["slack"] = slack_out.status()
+    except Exception:
+        d["budget"] = {}; d["slack"] = {}
     from .llm.provider import bulk_models
     d["model"]["heavy_lifting"] = bulk_models(cfg)[0]
     d["model"]["data_use"] = {"anthropic": "enterprise API: inputs and outputs are not used for training", "claude_cli": "this machine's Claude Code login", "openrouter": "provider data collection " + get_setting("llm_data_collection", "deny")}.get(cfg["provider"], cfg["provider"])
-    lines = [f"mode: {'practice (mock)' if d['mock_mode'] == 'true' else 'LIVE'}   model: {cfg['provider']} · {cfg['model']} · heavy lifting on {d['model']['heavy_lifting']} · {'ready' if d['model']['configured'] else 'NO KEY'} · {d['model']['data_use']}", ""]
+    from .roles import role as _role
+    d["role"] = _role()
+    lines = [f"role: {d['role']}" + ("  (builder: no workspace credentials or customer ids are ever stored here)" if d["role"] == "builder" else ""),
+             f"mode: {'practice (mock)' if d['mock_mode'] == 'true' else 'LIVE'}   model: {cfg['provider']} · {cfg['model']} · heavy lifting on {d['model']['heavy_lifting']} · {'ready' if d['model']['configured'] else 'NO KEY'} · {d['model']['data_use']}", ""]
     lines.append("missing answers:" if d["asks"] else "missing answers: none")
     lines += [f"  {x['id']:36} {x['title']}" for x in d["asks"]]
     lines.append(""); lines.append("alerts preflight:")
@@ -108,6 +118,11 @@ def doctor(a):
         mark = "OK " if c["ok"] else ("?? " if c["ok"] is None else "XX ")
         lines.append(f"  {mark}{c['check']}: {c['detail']}" + (f"\n       fix: {c['fix']}" if c.get("fix") and not c["ok"] else ""))
     tg = d["telegram"]
+    b = d.get("budget") or {}
+    if b:
+        lines.append(""); lines.append(f"credits: ${b['spent_today_usd']:.2f} spent of ${b['daily_budget_usd']:.2f} today · {b['state']} · background ${b['background_today_usd']:.2f} (share {int(b['background_share'] * 100)}%)" + (f" · premium for {', '.join(b['premium_purposes'])}" if b.get("premium_purposes") else " · basic model everywhere"))
+    sl = d.get("slack") or {}
+    lines.append(f"slack approvals: {'on · ' + str(sl.get('awaiting', 0)) + ' awaiting · ' + str(sl.get('approvers', 0)) + ' approver(s)' if sl.get('on') else 'set up, off' if sl.get('configured') else 'not set up'}")
     lines.append(""); lines.append(f"challenges: {d['challenges']['open']} open, {d['challenges']['building']} building, {d['challenges']['resolved']} resolved" + ("  → ./cli.py challenges list" if d['challenges']['open'] else ""))
     lines.append(""); lines.append(f"telegram: {'on · ' + str(tg['sent_today']) + ' posted today' if tg['on'] else 'set up, off' if tg['configured'] else 'bot saved, chat missing' if tg['token_set'] else 'not set up'}" + (f" · last error {tg['last_error']}" if tg.get("last_error") else ""))
     _out(a, d, "\n".join(lines))
@@ -400,10 +415,52 @@ def watch(a):
         print("stopped", file=sys.stderr)
 
 
+def role_cmd(a):
+    from . import roles
+    if not a.role:
+        _out(a, {"role": roles.role()}, f"role: {roles.role()}")
+        return
+    r = roles.set_role(a.role, actor="cli")
+    _out(a, r, f"role: {r['role']}" + (f" · cleared {', '.join(r['cleared'])}" if r["cleared"] else "") + ("\nbuilder: no MoEngage credentials, no customer ids, practice mode; it reads challenges and telemetry and ships fixes" if a.role == "builder" else ""))
+
+
+def telemetry_cmd(a):
+    from . import telemetry
+    snap = telemetry.snapshot(a.days)
+    if a.out:
+        open(a.out, "w").write(json.dumps(snap, indent=1, default=str)); print(f"wrote {a.out} (counts only; no user or workspace content)")
+    else:
+        print(json.dumps(snap, indent=1, default=str, ensure_ascii=False))
+
+
+def slack(a):
+    from . import slack_out as so
+    if a.action == "status":
+        _out(a, so.status(), json.dumps(so.status(), indent=2))
+    elif a.action == "setup":
+        if not so.token() or a.new_token:
+            save_plain({"slack_bot_token": _hidden("Slack bot token xoxb-… (hidden): ", env=a.env or "", stdin=a.stdin)})
+        vals = {k: v for k, v in {"slack_channel_id": a.channel, "slack_approvers": a.approvers}.items() if v}
+        if vals:
+            save_plain(vals)
+        if not so.channel():
+            sys.exit("give the channel: ./cli.py slack setup --channel C0123456789 --approvers U0123,U0456")
+        h = so.hello(actor="cli")
+        _out(a, h, f"connected as {h.get('bot')} in {h.get('team')} · hello posted" if h.get("ok") else f"not connected · {h.get('error')}")
+        if not so.approvers():
+            print("warning: no approvers listed yet; nobody's approve counts until --approvers U… is set", file=sys.stderr)
+    elif a.action == "poll":
+        r = so.poll(); _out(a, r, json.dumps(r, indent=2))
+    elif a.action == "ask":
+        r = so.post_proposal(a.id); _out(a, r, "posted" if r.get("ok") else f"not posted · {r.get('error') or r.get('skipped')}")
+    elif a.action in ("on", "off"):
+        save_plain({"slack_ask_approval": a.action}); _out(a, {"slack_ask_approval": a.action}, f"slack approvals {a.action}")
+
+
 def add_parsers(sp) -> None:
     def J(p):
         p.add_argument("--json", action="store_true", help="machine-readable output"); return p
-    for name in ("today", "asks", "doctor", "answer", "secret", "telegram", "test_users", "test_send", "launch", "decide", "alerts_run", "challenges_cmd", "watch"):
+    for name in ("today", "asks", "doctor", "answer", "secret", "telegram", "test_users", "test_send", "launch", "decide", "alerts_run", "challenges_cmd", "watch", "slack", "role_cmd", "telemetry_cmd"):
         globals()[name] = _booted(globals()[name])
     J(sp.add_parser("today", help="today's decisions, what moved, what was handled")).set_defaults(fn=today)
     J(sp.add_parser("asks", help="every input the engine is missing, each with the command that answers it")).set_defaults(fn=asks)
@@ -427,6 +484,11 @@ def add_parsers(sp) -> None:
     s.add_argument("action", choices=["list", "show", "prompt", "resolve", "building", "wontfix", "reopen", "export", "import", "push", "pull", "log"]); s.add_argument("id", nargs="?", type=int)
     s.add_argument("--status"); s.add_argument("--limit", type=int, default=20); s.add_argument("--out"); s.add_argument("--file"); s.add_argument("--commit"); s.add_argument("--note"); s.add_argument("--task"); s.add_argument("--blocked"); s.add_argument("--tried")
     s.set_defaults(fn=challenges_cmd)
+    s = J(sp.add_parser("role", help="operator (holds the workspace) | builder (never holds credentials or customer ids; reads challenges, ships fixes)")); s.add_argument("role", nargs="?", choices=["operator", "builder"]); s.set_defaults(fn=role_cmd)
+    s = J(sp.add_parser("telemetry", help="what the operator may share with the builder: counts, latencies, spend; never content")); s.add_argument("--days", type=int, default=7); s.add_argument("--out"); s.set_defaults(fn=telemetry_cmd)
+    s = J(sp.add_parser("slack", help="approvals from Slack: status | setup --channel C… --approvers U…,U… | poll | ask <proposal id> | on | off"))
+    s.add_argument("action", choices=["status", "setup", "poll", "ask", "on", "off"]); s.add_argument("id", nargs="?", type=int); s.add_argument("--channel"); s.add_argument("--approvers"); s.add_argument("--new-token", action="store_true"); s.add_argument("--env"); s.add_argument("--stdin", action="store_true")
+    s.set_defaults(fn=slack)
     s = J(sp.add_parser("watch", help="live feed for a test day: audit events, tool errors, challenges, telegram, proposals; --push-every 300 files new challenges as GitHub issues"))
     s.add_argument("--interval", type=float, default=2.0); s.add_argument("--since", type=int, default=0, help="also print roughly the last N minutes of the audit log"); s.add_argument("--push-every", type=int, default=0); s.add_argument("--quiet", help="comma-separated audit events to hide")
     s.set_defaults(fn=watch)

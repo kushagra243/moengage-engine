@@ -119,7 +119,7 @@ def test_alerts_and_engine_screens_speak_in_rows_and_verbs():
     assert al["lead"] and al["copy"] and all({"title", "body", "ok"} <= set(c) for c in al["copy"]) and al["cohorts"][0]["state"] in ("READY", "RUNNING", "LOCKED")
     assert all(b["verb"][-1] in "→↑" and b["go"].split("?")[0] in ("#asks", "#alerts") for b in al["blockers"]) and al["ops"]["go"] == "#tool?m=alerts"
     eng = v3_ops.engine(m.status())
-    assert [s["k"] for s in eng["state"]] == ["MOENGAGE", "THE BRAIN", "MORNING RUN", "SECRETS"] and all(j["verb"] == "RUN IT NOW →" for j in eng["jobs"])
+    assert [s["k"] for s in eng["state"]][:4] == ["MOENGAGE", "THE BRAIN", "MORNING RUN", "SECRETS"] and all(j["verb"] == "RUN IT NOW →" for j in eng["jobs"])
     for name, data in {"asks": v3_ops.asks(), "alerts": al, "workbench": v3_ops.workbench()}.items():
         for s in _strings(data):
             assert not LEAK.search(s), f"{name}: leaked internals in {s!r}"

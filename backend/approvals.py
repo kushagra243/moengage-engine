@@ -16,7 +16,7 @@ from typing import Any, Callable, Dict, List, Optional
 from .database import get_db
 from .security import audit, redact
 
-KINDS = ("create_segment", "create_campaign", "create_flow", "pause_campaign", "resume_campaign", "update_segment", "custom_segment_upload", "code_change", "signal_rule", "skill_update", "sop_change", "sop_new", "ma2_pilot", "ma2_discovery", "test_send")
+KINDS = ("create_segment", "create_campaign", "create_flow", "pause_campaign", "resume_campaign", "update_segment", "custom_segment_upload", "code_change", "signal_rule", "skill_update", "sop_change", "sop_new", "ma2_pilot", "ma2_discovery", "test_send", "alert_send")
 
 _executors: Dict[str, Dict[str, Callable[..., Dict[str, Any]]]] = {}
 
@@ -222,6 +222,12 @@ def propose(kind: str, title: str, payload: Dict[str, Any], rationale: str = "",
     row = _row(conn.execute("SELECT * FROM proposals WHERE id=?", (pid,)).fetchone())
     conn.close()
     audit("proposal.created", {"id": pid, "kind": kind, "title": title, "created_by": created_by}, actor=created_by)
+    try:                                                     # ask for the click where the team is; silent when Slack is not set up
+        from . import slack_out
+        if slack_out.enabled() and kind in slack_out.ASK_KINDS:
+            row["slack"] = slack_out.post_proposal(pid)
+    except Exception:
+        pass
     if kind == "create_campaign":
         try:
             from .experiments import register_proposed

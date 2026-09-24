@@ -24,7 +24,8 @@ _PATTERNS = [
     (re.compile(r"eyJ[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}"), "<jwt>"),
     # Fernet tokens (our own ciphertexts)
     (re.compile(r"gAAAA[A-Za-z0-9_=-]{40,}"), "<enc>"),
-    (re.compile(r"\d{6,12}:[A-Za-z0-9_-]{30,}"), "<telegram-token>"),                        # bot tokens, also inside api.telegram.org/bot<token>/ paths
+    (re.compile(r"\d{6,12}:[A-Za-z0-9_-]{30,}"), "<telegram-token>"),
+    (re.compile(r"xox[abprs]-[A-Za-z0-9-]{10,}"), "<slack-token>"),                        # bot tokens, also inside api.telegram.org/bot<token>/ paths
     # Authorization / Cookie header values
     (re.compile(r"(?i)(authorization\s*[:=]\s*)(bearer\s+|basic\s+)?[A-Za-z0-9._~+/=-]{8,}"), r"\1\2<redacted>"),
     (re.compile(r"(?i)(cookie\s*[:=]\s*)[^\r\n]{8,}"), r"\1<redacted>"),

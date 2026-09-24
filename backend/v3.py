@@ -28,10 +28,10 @@ LEAKS = [
     (re.compile(r"\bEV\s*₹\s*([\d.]+\s*[LKCr]*)", re.I), r"worth ₹\1 / month"),
     (re.compile(r"\bpressure index \d+\b", re.I), "high pressure"),
     (re.compile(r"\bSOV\b"), "share of voice"),
-    (re.compile(r"\b(create_segment|create_campaign|create_flow|pause_campaign|code_change|custom_segment_upload|signal_rule|skill_update|sop_change|sop_new|ma2_pilot|ma2_discovery)\b"),
+    (re.compile(r"\b(create_segment|create_campaign|create_flow|pause_campaign|code_change|custom_segment_upload|signal_rule|skill_update|sop_change|sop_new|ma2_pilot|ma2_discovery|alert_send|test_send)\b"),
      lambda m: {"create_segment": "a new cohort", "create_campaign": "a campaign draft", "create_flow": "a flow draft", "pause_campaign": "pausing a campaign", "code_change": "an engine change",
                 "custom_segment_upload": "a cohort upload", "signal_rule": "a standing trigger", "skill_update": "a playbook lesson", "sop_change": "a playbook change", "sop_new": "a new playbook",
-                "ma2_pilot": "the alerts pilot", "ma2_discovery": "the market alerts programme"}[m.group(1)]),
+                "ma2_pilot": "the alerts pilot", "ma2_discovery": "the market alerts programme", "alert_send": "a market alert", "test_send": "a test send"}[m.group(1)]),
     (re.compile(r"\bactuation\b", re.I), "sending"),
     (re.compile(r"\bn=\d+\b"), ""),
     (re.compile(r"\s{2,}"), " "),
@@ -103,6 +103,7 @@ def _proposal_decision(d: Dict[str, Any]) -> Dict[str, Any]:
         "sop_new": ("add", f"Put the new playbook “{(pl.get('spec') or {}).get('name', name)}” in the library", "PUT IT IN THE LIBRARY"),
         "ma2_pilot": ("start", f"Start the market alerts pilot “{name}”", "START THE PILOT"),
         "ma2_discovery": ("start", f"Let the engine fire market alerts for {pl.get('audience') or 'the employee cohort'}", "START FIRING ALERTS"),
+        "alert_send": ("send", f"Send the alert “{pl.get('title', '')[:60]}” to {', '.join(pl.get('cohorts') or []) or 'the cohort'} now", "SEND THE ALERT"),
         "custom_segment_upload": ("upload", f"Upload the “{name}” cohort to MoEngage", "UPLOAD THE COHORT"),
     }.get(kind, ("approve", plain(p.get("title") or "Approve this draft"), "APPROVE THE DRAFT"))
     worth = (f"worth {goal['target']}" if goal.get("target") else f"{plain(pl.get('expected_impact'))}" if pl.get("expected_impact") else "Not measured yet")
@@ -115,6 +116,8 @@ def _proposal_decision(d: Dict[str, Any]) -> Dict[str, Any]:
         plan = [f"A cohort called “{name}” is created in MoEngage", "The journeys waiting for it can be proposed next", "Nothing is sent to anyone"]
     elif kind in ("sop_change", "sop_new"):
         plan = ["A new version of the playbook is written to the library", "Every future run follows it", "Nothing is sent to anyone"]
+    elif kind == "alert_send":
+        plan = [f"The alert goes to {', '.join(pl.get('cohorts') or [])} through MoEngage this minute", f"It is refused automatically after {str(pl.get('stale_at') or '')[11:16]} IST, when the fact is stale", "It is also posted to the team's Telegram"]
     elif kind == "ma2_discovery":
         plan = [f"The engine starts firing market alerts to {pl.get('audience') or 'the employee cohort'} through MoEngage", "Every alert passes the copy rules and the daily caps first", "The kill switch stops it at once"]
     elif kind == "code_change":

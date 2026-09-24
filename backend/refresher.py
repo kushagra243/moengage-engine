@@ -56,6 +56,11 @@ def _j_market_context():
     return {"assets": len(c.get("crypto_markets") or []), "regime": ((c.get("crypto") or {}).get("regime") or {}).get("label"), "tier0": bool(c.get("tier0"))}
 
 
+def _j_slack_approvals():
+    from . import slack_out
+    return slack_out.poll()
+
+
 def _j_market_alerts():
     from .alerts2 import service
     r = service.scheduled_tick()
@@ -162,6 +167,7 @@ JOBS: List[Dict[str, Any]] = [
     {"name": "prices", "minutes": 1, "fn": _j_prices, "feeds": "Brain Lab prices · movers · OI · funding (real time)"},
     {"name": "market_context", "minutes": 10, "fn": _j_market_context, "feeds": "Brain Lab · Brain · signals (full picture incl. news, listings, competitors)"},
     {"name": "signals", "minutes": 5, "fn": _j_signals, "feeds": "Signal Bridge → MoEngage business events"},
+    {"name": "slack_approvals", "minutes": 1, "fn": _j_slack_approvals, "priority": True, "feeds": "approvals answered in the Slack thread → executed"},
     {"name": "market_alerts", "minutes": 5, "fn": _j_market_alerts, "priority": True, "feeds": "Market Alerts 2.0: the per-user pilot and the discovery experiment, each only while approved"},
     {"name": "benchmarks", "minutes": 15, "fn": _j_benchmarks, "feeds": "Brain Lab → Comparison"},
     {"name": "campaign_intel", "minutes": 15, "fn": _j_campaign_intel, "feeds": "Brain Lab → Competitors (their campaigns)"},

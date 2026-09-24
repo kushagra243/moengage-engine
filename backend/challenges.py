@@ -210,8 +210,21 @@ def push_issues(limit: int = 30) -> Dict[str, Any]:
         except Exception as e:
             errors.append(f"#{c['id']}: {e}")
     conn.close()
-    audit("challenge.pushed", {"created": created, "updated": updated, "errors": len(errors)}, actor="cli")
-    return {"ok": not errors, "created": created, "updated": updated, "errors": errors[:5]}
+    tele = ""
+    try:                                                     # the builder also gets the shape of how the engine is doing: counts only
+        from . import telemetry
+        snap = telemetry.snapshot(7)
+        title = f"[telemetry] {machine()}"
+        body = "Operator machine telemetry (counts, latencies, spend; no user or workspace content). Updated on every `challenges push`.\n\n```json\n" + json.dumps(snap, indent=1, default=str)[:60000] + "\n```"
+        found = json.loads(_gh(["issue", "list", "--search", f"{title} in:title", "--state", "open", "--json", "number", "--limit", "1"]) or "[]")
+        if found:
+            _gh(["issue", "edit", str(found[0]["number"]), "--body", body]); tele = f"updated #{found[0]['number']}"
+        else:
+            tele = "created " + _gh(["issue", "create", "--title", title, "--body", body, "--label", LABEL]).strip().rsplit("/", 1)[-1]
+    except Exception as e:
+        tele = f"not sent: {e}"
+    audit("challenge.pushed", {"created": created, "updated": updated, "errors": len(errors), "telemetry": tele[:40]}, actor="cli")
+    return {"ok": not errors, "created": created, "updated": updated, "errors": errors[:5], "telemetry": tele}
 
 
 def pull_issues() -> Dict[str, Any]:
@@ -223,6 +236,7 @@ def pull_issues() -> Dict[str, Any]:
     except Exception as e:
         return {"ok": False, "error": str(e)}
     rows = []
+    items = [it for it in items if not str(it.get("title") or "").startswith("[telemetry]")]
     for it in items:
         m = re.match(r"\[chal:([0-9a-f]{12})\]\s*(\w+):\s*(.*)", it.get("title") or "")
         if not m:

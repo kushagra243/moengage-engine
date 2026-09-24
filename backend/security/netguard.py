@@ -146,6 +146,10 @@ def guarded_session(scope: str, extra_hosts: Optional[Iterable[str]] = None, fre
         if fresh or scope not in _sessions:
             _sessions[scope] = GuardedSession(scope, hosts, allow_http_loopback=False, default_timeout=20.0)
         return _sessions[scope]
+    if scope == "slack":                                       # approvals from the team's channel: post the card, read the thread
+        if fresh or scope not in _sessions:
+            _sessions[scope] = GuardedSession(scope, ["slack.com"], allow_http_loopback=False, default_timeout=15.0)
+        return _sessions[scope]
     if scope == "telegram":                                    # team mirror of every alert: one host, nothing read back but the API's own reply
         if fresh or scope not in _sessions:
             _sessions[scope] = GuardedSession(scope, ["api.telegram.org"], allow_http_loopback=False, default_timeout=15.0)

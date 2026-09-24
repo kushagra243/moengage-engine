@@ -530,7 +530,13 @@ ENGINE_GROUPS: List[Dict[str, Any]] = [
         ("ma2_agent_autonomy", "AGENT WRITES ITS OWN ALERTS", "choice:true,false", "")]},
     {"title": "Telegram mirror", "note": "Every alert the engine fires is also posted to one Telegram chat for the team.", "fields": [
         ("telegram_bot_token", "BOT TOKEN", "secret", "from @BotFather"), ("telegram_chat_id", "CHAT ID", "text", "-1001234567890"), ("telegram_alerts", "MIRROR ALERTS", "choice:on,off", "")]},
-    {"title": "The brain's model", "note": "Free models do the heavy reading; the main model writes and reviews.", "fields": [
+    {"title": "Approvals in Slack", "note": "Drafts and alerts are posted to one channel; a listed approver replies approve or reject in the thread and the engine executes it.", "fields": [
+        ("slack_bot_token", "BOT TOKEN · xoxb-…", "secret", ""), ("slack_channel_id", "CHANNEL ID", "text", "C0123456789"), ("slack_approvers", "APPROVERS · SLACK USER IDS, COMMA-SEPARATED", "text", "U0123,U0456"),
+        ("slack_ask_approval", "ASK IN SLACK", "choice:on,off", ""), ("ma2_alert_approval", "EACH MARKET ALERT WAITS FOR APPROVAL", "choice:auto,ask", "")]},
+    {"title": "Credits", "note": "The brain lives on the organisation's Claude credits: basic models by default, a daily budget, background work capped at a share of it.", "fields": [
+        ("llm_daily_budget_usd", "DAILY BUDGET · USD", "number", "2.00"), ("llm_background_share", "SHARE FOR BACKGROUND WORK · 0–1", "number", "0.35"),
+        ("llm_premium_purposes", "PURPOSES ALLOWED A BETTER MODEL", "text", "leave empty, or: copy,review"), ("llm_premium_model", "THAT BETTER MODEL", "text", "claude-sonnet-5")]},
+    {"title": "The brain's model", "note": "Basic model for everything; the credit rules above decide when a better one is allowed.", "fields": [
         ("llm_provider", "PROVIDER", "choice:anthropic,openrouter,openai_compatible,claude_cli", ""), ("llm_model", "MAIN MODEL", "text", "anthropic/claude-sonnet-4.5"), ("llm_model_bulk", "HEAVY-LIFTING MODEL", "text", "claude-haiku-4-5-20251001 or auto-free"),
         ("llm_api_key", "MODEL KEY", "secret", "sk-or-…"), ("llm_data_collection", "PROVIDERS MAY KEEP PROMPTS", "choice:deny,allow", ""),
         ("llm_autoload_skills", "LOAD THE RIGHT SKILLS AUTOMATICALLY", "choice:true,false", "")]},
@@ -604,6 +610,14 @@ def engine(status: Dict[str, Any]) -> Dict[str, Any]:
         testers = test_sends.meta()
     except Exception:
         testers = {"count": 0, "masked": [], "max": 10}
+    budget_state = {}
+    try:
+        from .llm import budget
+        budget_state = budget.status()
+        state.append({"k": "CREDITS TODAY", "v": f"${budget_state['spent_today_usd']:.2f} of ${budget_state['daily_budget_usd']:.2f}", "tone": "green" if budget_state["state"] == "ok" else "amber" if budget_state["state"] == "essential only" else "magenta" if budget_state["state"] == "paused" else "dim",
+                      "note": f"{budget_state['state']} · background ${budget_state['background_today_usd']:.2f} of a {int(budget_state['background_share'] * 100)}% share · {budget_state['calls_today']} calls"})
+    except Exception:
+        pass
     chal = {"open": 0, "top": []}
     try:
         from . import challenges
@@ -612,7 +626,7 @@ def engine(status: Dict[str, Any]) -> Dict[str, Any]:
         pass
     chal_rows = [{"id": c["id"], "name": f"{c['kind'].replace('_', ' ')} · {c['count']}×", "status": c["task"], "verb": "READ THE PROMPT →", "go": f"#tool?m=engine"} for c in chal.get("top") or []]
     return {"lead": lead, "state": state, "groups": groups, "jobs": jobs, "asks_open": n_asks, "test_users": testers, "skills": skills_rows,
-            "challenges": {"open": chal.get("open", 0), "building": chal.get("building", 0), "resolved": chal.get("resolved", 0), "rows": chal_rows}, "skills_note": skills_note,
+            "budget": budget_state, "challenges": {"open": chal.get("open", 0), "building": chal.get("building", 0), "resolved": chal.get("resolved", 0), "rows": chal_rows}, "skills_note": skills_note,
             "more": [{"label": "TEACH THE BRAIN A RULE →", "go": "#tool?m=engine"}, {"label": "ASK FOR AN ENGINE CHANGE →", "go": "#tool?m=engine"}, {"label": "SEE EVERY TOOL AND SKILL →", "go": "#tool?m=skills"},
                      {"label": "OPEN THE WHOLE WORKBENCH →", "go": "#bench"}]}
 

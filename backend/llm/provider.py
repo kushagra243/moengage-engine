@@ -29,7 +29,8 @@ DEFAULT_MODEL = "anthropic/claude-sonnet-4.5"
 FALLBACK_MODELS = ["openai/gpt-4o-mini", "google/gemini-2.5-flash", "meta-llama/llama-3.3-70b-instruct"]
 # Free-tier OpenRouter models tried in order for bulk analysis (per-campaign deep dives, idea generation).
 ANTHROPIC_BASE = "https://api.anthropic.com"
-ANTHROPIC_MAIN = "claude-sonnet-5"                     # judgement, copy, review
+ANTHROPIC_MAIN = "claude-haiku-4-5-20251001"          # basic model everywhere by default: credits are for knowing, not busywork
+ANTHROPIC_PREMIUM = "claude-sonnet-5"                  # opt in per purpose with llm_premium_purposes (e.g. "copy,review")
 ANTHROPIC_CHEAP = "claude-haiku-4-5-20251001"          # the heavy lifting: autopilot, analysis, briefs, classification, tests
 ANTHROPIC_ALIASES = {"sonnet": ANTHROPIC_MAIN, "haiku": ANTHROPIC_CHEAP, "opus": "claude-opus-5", "fable": "claude-fable-5-1"}
 # USD per million tokens (input, output, cache read). Haiku 4.5 is published; the others are estimates from the previous generation and are labelled so in the ledger.
@@ -138,8 +139,14 @@ def route_defaults(cfg: Dict[str, Any]) -> Dict[str, List[str]]:
     free = FREE_BULK_MODELS if cfg.get("provider") == "openrouter" else []
     bulk = bulk_models(cfg)
     cls = (free[:2] + [main]) if free else (bulk if cfg.get("provider") == "anthropic" else [main])
-    return {"chat": [main], "code": [main], "copy": [main], "review": [main],
-            "autopilot": bulk, "analysis": bulk, "brief": bulk, "classification": cls, "test": bulk}
+    out = {"chat": [main], "code": [main], "copy": [main], "review": [main],
+           "autopilot": bulk, "analysis": bulk, "brief": bulk, "classification": cls, "test": bulk}
+    if cfg.get("provider") == "anthropic":                     # a better model only where the operator asked for it, and the basic one stays the fallback
+        prem = normalise_model_for_provider("anthropic", get_setting("llm_premium_model", ANTHROPIC_PREMIUM))
+        for purpose in [x.strip() for x in (get_setting("llm_premium_purposes", "") or "").split(",") if x.strip()]:
+            if purpose in out and prem != main:
+                out[purpose] = [prem, main]
+    return out
 
 
 def routes(cfg: Optional[Dict[str, Any]] = None) -> Dict[str, List[str]]:
@@ -251,6 +258,16 @@ class LLMClient:
         tier="bulk" tries the free/cheap candidates in order and falls back to the main model.
         """
         purpose = getattr(self, "purpose", "chat")
+        if model is None:                                     # the ration is checked once per logical call, before any model is tried
+            try:
+                from .budget import check as _budget_check, BudgetExceeded
+            except Exception:
+                _budget_check = None
+            if _budget_check:
+                try:
+                    _budget_check(purpose)
+                except BudgetExceeded as e:
+                    raise LLMError(str(e))
         if tier == "main" and model is None and self.cfg["provider"] != "claude_cli":
             cands = route_models(purpose, self.cfg)
             if cands and (len(cands) > 1 or cands[0] != self.cfg["model"]):

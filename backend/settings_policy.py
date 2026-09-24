@@ -4,7 +4,7 @@ import re
 from typing import Any, Dict, List, Tuple
 
 ALLOWED_SETTING_PREFIXES = ("moengage_", "llm_", "market_", "schedule_", "refresh_", "analysis_", "taxonomy_", "autopilot_", "devagent_", "web3_", "competitor", "mock_mode",
-                            "ma2_", "sop_", "sopqa_", "usd_inr", "telegram_")
+                            "ma2_", "sop_", "sopqa_", "usd_inr", "telegram_", "slack_")
 
 
 def allowed(key: str) -> bool:
@@ -30,9 +30,10 @@ def save_plain(values: Dict[str, Any]) -> Dict[str, List[str]]:
     """Write settings without the web layer (CLI use): allowlist, normalise, keep an empty secret untouched, encrypt via set_setting."""
     from .database import set_setting
     from .security import is_secret_key
+    from .roles import refuse_setting
     saved, rejected = [], []
     for k, v in values.items():
-        if not allowed(k):
+        if not allowed(k) or refuse_setting(k):
             rejected.append(k); continue
         if v is None or (is_secret_key(k) and str(v) == ""):
             continue

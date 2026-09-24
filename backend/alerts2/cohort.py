@@ -274,6 +274,9 @@ def tokens_by_product(users: List[Dict[str, Any]]) -> Dict[str, List[str]]:
 
 # ── internal employees for MoEngage Inform (direct transactional sends, no campaign) ──────────────
 def save_internal_users(user_ids: List[str], actor: str = "user") -> Dict[str, Any]:
+    from ..roles import is_builder
+    if is_builder():
+        raise CohortError("this machine is a builder: it never holds customer ids; only the operator machine does")
     """Opaque MoEngage customer ids of the employee test cohort. Anything that looks like an email, phone, PAN or Aadhaar
     is refused: Inform addresses users by the id MoEngage already knows, never by a personal detail."""
     clean, bad = [], []

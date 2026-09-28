@@ -232,16 +232,34 @@ def probe() -> Dict[str, Any]:
         return {"ok": False, "provider": cfg["provider"], "model": cfg["model"], "base_url": cfg["base_url"], "error": redact(str(e))}
 
 
+FALLBACK_CHEAP = "openai/gpt-4o-mini"
+
+
+def fallback_on() -> set:
+    return {x.strip() for x in (get_setting("llm_fallback_on", "errors,budget") or "").split(",") if x.strip()}
+
+
 def fallback_cfg(cfg: Dict[str, Any]) -> Optional[Dict[str, Any]]:
-    """When the primary is the Claude Code CLI (team login on this host) and an OpenRouter key exists, the key is the fallback:
-    llm_fallback_provider (default openrouter when a key is saved; 'none' disables), llm_fallback_model (default anthropic/claude-sonnet-4.5)."""
-    if cfg.get("provider") != "claude_cli":
+    """The OpenRouter fallback behind the primary provider.
+    * primary claude_cli: the saved llm_api_key is an OpenRouter key and is the fallback (as before).
+    * primary anthropic: a separate llm_fallback_api_key (OpenRouter) is the fallback; it is used when the Anthropic API fails
+      (`errors`) and when the daily credit budget is spent (`budget`) — llm_fallback_on chooses, default both.
+    llm_fallback_provider 'none' disables; llm_fallback_model defaults to the free bulk chain then a cheap paid model."""
+    prov_primary = cfg.get("provider")
+    if prov_primary == "claude_cli":
+        key = cfg.get("api_key")
+    elif prov_primary == "anthropic":
+        key = get_setting("llm_fallback_api_key", "")
+    else:
         return None
-    prov = get_setting("llm_fallback_provider", "openrouter" if cfg.get("api_key") else "none")
-    if prov in ("", "none") or not cfg.get("api_key"):
+    prov = get_setting("llm_fallback_provider", "openrouter" if key else "none")
+    if prov in ("", "none") or not key:
         return None
-    base = get_setting("llm_base_url", "https://openrouter.ai/api/v1") if prov == "openai_compatible" else "https://openrouter.ai/api/v1"
-    return {**cfg, "provider": prov, "base_url": base, "model": get_setting("llm_fallback_model", "anthropic/claude-sonnet-4.5"), "model_bulk": get_setting("llm_model_bulk", "auto-free")}
+    base = get_setting("llm_base_url", DEFAULT_BASE_URL) if (prov == "openai_compatible" and prov_primary == "claude_cli") else DEFAULT_BASE_URL
+    model = get_setting("llm_fallback_model", "anthropic/claude-sonnet-4.5" if prov_primary == "claude_cli" else "auto-free")
+    if model in ("", "auto-free"):
+        model = FALLBACK_CHEAP
+    return {**cfg, "provider": prov, "base_url": base, "api_key": key, "model": model, "model_bulk": get_setting("llm_fallback_model_bulk", "auto-free"), "_fallback": True}
 
 
 class LLMClient:
@@ -258,7 +276,7 @@ class LLMClient:
         tier="bulk" tries the free/cheap candidates in order and falls back to the main model.
         """
         purpose = getattr(self, "purpose", "chat")
-        if model is None:                                     # the ration is checked once per logical call, before any model is tried
+        if model is None and not self.cfg.get("_fallback"):    # the ration is checked once per logical call, before any model is tried; a fallback client is past it
             try:
                 from .budget import check as _budget_check, BudgetExceeded
             except Exception:
@@ -267,6 +285,12 @@ class LLMClient:
                 try:
                     _budget_check(purpose)
                 except BudgetExceeded as e:
+                    fb = fallback_cfg(self.cfg)
+                    if fb and "budget" in fallback_on():        # credits are spent: the work moves to OpenRouter (free chain first) instead of waiting
+                        log.info("budget spent for %s; using the OpenRouter fallback", purpose)
+                        out = self._via_fallback(fb, messages, tools, tool_choice, max_tokens, temperature, response_format, tier="bulk" if purpose not in ("chat", "copy", "review", "code") else "main")
+                        out["fallback_from"] = "budget"
+                        return out
                     raise LLMError(str(e))
         if tier == "main" and model is None and self.cfg["provider"] != "claude_cli":
             cands = route_models(purpose, self.cfg)
@@ -303,7 +327,16 @@ class LLMClient:
                 out["fallback_from"] = "claude_cli"
                 return out
         if self.cfg["provider"] == "anthropic":
-            return self._chat_anthropic(messages, tools, tool_choice, max_tokens, temperature, response_format, model)
+            try:
+                return self._chat_anthropic(messages, tools, tool_choice, max_tokens, temperature, response_format, model)
+            except LLMError as e:
+                fb = fallback_cfg(self.cfg)
+                if not fb or "errors" not in fallback_on():
+                    raise
+                log.warning("anthropic failed (%s); falling back to %s/%s", redact(str(e))[:100], fb["provider"], fb["model"])
+                out = self._via_fallback(fb, messages, tools, tool_choice, max_tokens, temperature, response_format, tier=tier)
+                out["fallback_from"] = "anthropic"
+                return out
         if not self.cfg["api_key"] and "openrouter.ai" in self.cfg["base_url"]:
             raise LLMError("No LLM API key configured. Add your OpenRouter key in Settings → LLM.")
         safe_messages = [_redact_message(m) for m in messages]
@@ -372,6 +405,10 @@ class LLMClient:
                 "raw_message": msg,
             }
         raise last_err or LLMError("LLM request failed")
+
+    def _via_fallback(self, fb, messages, tools, tool_choice, max_tokens, temperature, response_format, tier="main") -> Dict[str, Any]:
+        client = LLMClient(fb); client.purpose = getattr(self, "purpose", "chat")
+        return client.chat(messages, tools, tool_choice, max_tokens, temperature, response_format, model=None, tier=tier)
 
     # ── Anthropic Messages API (the enterprise path: the org's own key, no training on inputs or outputs) ──
     def _chat_anthropic(self, messages, tools, tool_choice, max_tokens, temperature, response_format, model) -> Dict[str, Any]:

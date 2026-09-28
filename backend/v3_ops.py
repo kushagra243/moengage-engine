@@ -569,7 +569,9 @@ ENGINE_GROUPS: List[Dict[str, Any]] = [
     {"title": "The brain's model", "note": "Basic model for everything; the credit rules above decide when a better one is allowed.", "fields": [
         ("llm_provider", "PROVIDER", "choice:anthropic,openrouter,openai_compatible,claude_cli", ""), ("llm_model", "MAIN MODEL", "text", "anthropic/claude-sonnet-4.5"), ("llm_model_bulk", "HEAVY-LIFTING MODEL", "text", "claude-haiku-4-5-20251001 or auto-free"),
         ("llm_api_key", "MODEL KEY", "secret", "sk-or-…"), ("llm_data_collection", "PROVIDERS MAY KEEP PROMPTS", "choice:deny,allow", ""),
-        ("llm_autoload_skills", "LOAD THE RIGHT SKILLS AUTOMATICALLY", "choice:true,false", "")]},
+        ("llm_autoload_skills", "LOAD THE RIGHT SKILLS AUTOMATICALLY", "choice:true,false", ""),
+        ("llm_fallback_api_key", "OPENROUTER KEY · FALLBACK", "secret", "sk-or-…"), ("llm_fallback_model", "FALLBACK MODEL", "text", "auto-free (free chain, then a cheap paid model)"),
+        ("llm_fallback_on", "USE THE FALLBACK WHEN", "choice:errors,budget,errors,budget,none", "")]},
     {"title": "Daily rhythm", "note": "When the brain does its morning run, and whether background refresh is on.", "fields": [
         ("schedule_enabled", "MORNING RUN", "choice:true,false", ""), ("schedule_time", "MORNING RUN TIME · IST", "text", "09:00"), ("refresh_enabled", "BACKGROUND REFRESH", "choice:true,false", "")]},
 ]

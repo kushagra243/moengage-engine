@@ -106,10 +106,15 @@ def doctor(a):
         d["budget"] = {}; d["slack"] = {}
     from .llm.provider import bulk_models
     d["model"]["heavy_lifting"] = bulk_models(cfg)[0]
+    from .llm.provider import fallback_cfg, fallback_on
+    fb = fallback_cfg(cfg)
+    d["model"]["fallback"] = {"configured": bool(fb), "provider": (fb or {}).get("provider"), "model": (fb or {}).get("model"), "when": sorted(fallback_on())} if fb else {"configured": False}
     d["model"]["data_use"] = {"anthropic": "enterprise API: inputs and outputs are not used for training", "claude_cli": "this machine's Claude Code login", "openrouter": "provider data collection " + get_setting("llm_data_collection", "deny")}.get(cfg["provider"], cfg["provider"])
     from .roles import role as _role
     d["role"] = _role()
+    fbl = d["model"]["fallback"]
     lines = [f"role: {d['role']}" + ("  (builder: no workspace credentials or customer ids are ever stored here)" if d["role"] == "builder" else ""),
+             f"fallback: {'OpenRouter · ' + str(fbl.get('model')) + ' · when ' + ', '.join(fbl.get('when') or []) if fbl.get('configured') else 'none (./cli.py secret llm_fallback_api_key to add an OpenRouter key)'}",
              f"mode: {'practice (mock)' if d['mock_mode'] == 'true' else 'LIVE'}   model: {cfg['provider']} · {cfg['model']} · heavy lifting on {d['model']['heavy_lifting']} · {'ready' if d['model']['configured'] else 'NO KEY'} · {d['model']['data_use']}", ""]
     lines.append("missing answers:" if d["asks"] else "missing answers: none")
     lines += [f"  {x['id']:36} {x['title']}" for x in d["asks"]]

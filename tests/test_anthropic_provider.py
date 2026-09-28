@@ -1,6 +1,8 @@
 """The enterprise path: the Anthropic Messages API as a provider, the cheap model carrying the volume, tools and results translated both ways."""
 import json
 
+import pytest
+
 
 class _R:
     def __init__(self, p, code=200):
@@ -74,3 +76,64 @@ def test_auth_and_overload_are_reported_as_llm_errors(monkeypatch):
     c.session = S(529)
     with pytest.raises(p.LLMError, match="529"):
         c.chat([{"role": "user", "content": "hi"}], model="claude-haiku-4-5-20251001")
+
+
+def _fb_env(monkeypatch, key="sk-or-v1-fallbackkey000000000000000000"):
+    from backend.database import set_setting
+    set_setting("llm_fallback_api_key", key); set_setting("llm_fallback_on", "errors,budget"); set_setting("llm_fallback_model", "auto-free"); set_setting("llm_fallback_provider", "openrouter")
+
+
+def test_openrouter_is_the_fallback_when_the_anthropic_api_fails(monkeypatch):
+    from backend.llm import provider as p
+    from backend.database import set_setting
+    _fb_env(monkeypatch)
+    calls = []
+
+    class S:
+        def post(self, url, headers=None, json=None, timeout=None):
+            calls.append((url, headers, json))
+            if "anthropic" in url:
+                return _R({"error": {"message": "overloaded"}}, 529)
+            return _R({"model": json["model"], "choices": [{"message": {"content": "from the fallback"}, "finish_reason": "stop"}], "usage": {"prompt_tokens": 5, "completion_tokens": 3, "cost": 0}})
+    monkeypatch.setattr(p, "guarded_session", lambda scope: S())
+    monkeypatch.setattr(p.time, "sleep", lambda *a: None)
+    c = p.LLMClient(_cfg()); c.session = S(); c.purpose = "chat"
+    out = c.chat([{"role": "user", "content": "hi"}])
+    assert out["content"] == "from the fallback" and out["fallback_from"] == "anthropic"
+    fb_call = next(x for x in calls if "openrouter" in x[0])
+    assert fb_call[1]["Authorization"].endswith("fallbackkey000000000000000000") and fb_call[2]["model"] == p.FALLBACK_CHEAP
+    assert fb_call[2].get("provider") == {"data_collection": "deny"}, "privacy holds on the fallback too"
+    set_setting("llm_fallback_on", "budget")
+    c2 = p.LLMClient(_cfg()); c2.session = S(); c2.purpose = "chat"
+    with pytest.raises(p.LLMError):
+        c2.chat([{"role": "user", "content": "hi"}])
+    set_setting("llm_fallback_api_key", "")
+    c3 = p.LLMClient(_cfg()); c3.session = S(); c3.purpose = "chat"
+    with pytest.raises(p.LLMError, match="529"):
+        c3.chat([{"role": "user", "content": "hi"}])
+    set_setting("llm_fallback_on", "")
+
+
+def test_spent_credits_move_background_work_to_the_free_chain(monkeypatch):
+    import pytest
+    from backend.llm import provider as p, budget
+    from backend.database import set_setting
+    _fb_env(monkeypatch)
+    monkeypatch.setattr(budget, "spend_today", lambda: {"total": 5.0, "background": 4.0, "calls": 50})
+    set_setting("llm_daily_budget_usd", "1.0")
+    seen = []
+
+    class S:
+        def post(self, url, headers=None, json=None, timeout=None):
+            seen.append((url, json["model"]))
+            assert "anthropic" not in url, "no credits may be spent once the budget is gone"
+            return _R({"model": json["model"], "choices": [{"message": {"content": "ok"}, "finish_reason": "stop"}], "usage": {"prompt_tokens": 1, "completion_tokens": 1, "cost": 0}})
+    monkeypatch.setattr(p, "guarded_session", lambda scope: S())
+    c = p.LLMClient(_cfg()); c.session = S(); c.purpose = "analysis"
+    out = c.chat([{"role": "user", "content": "read the week"}])
+    assert out["fallback_from"] == "budget" and seen[0][1].endswith(":free"), "background work goes to the free chain first"
+    set_setting("llm_fallback_api_key", "")
+    c2 = p.LLMClient(_cfg()); c2.session = S(); c2.purpose = "analysis"
+    with pytest.raises(p.LLMError, match="credit ration"):
+        c2.chat([{"role": "user", "content": "read the week"}])
+    set_setting("llm_daily_budget_usd", ""); set_setting("llm_fallback_on", "")

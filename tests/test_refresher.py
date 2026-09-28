@@ -78,6 +78,8 @@ def test_patch_prices_handles_the_real_snapshot_shape_and_bad_replies(monkeypatc
     assert mover["oi_usd"] == 37000 * 78000 and "price" not in mover and "chg_24h" not in mover, "OI mover rows keep their own fields"
     assert latest["oi_movers"]["pairs_compared"] == 89
 
+    from backend.market import sources
+    monkeypatch.setattr(sources, "_json", lambda *a, **k: None)                          # no fallback either: the venue's own error must surface
     for bad in ("not json", {"meta": {}}, None, [{"universe": []}]):
         monkeypatch.setattr(exchanges, "_hl", lambda body, timeout=15.0, b=bad: b)
         out = cm.patch_prices()
@@ -114,10 +116,38 @@ def test_run_due_is_fair_to_the_tail_and_flaky_minutes_are_not_challenges(monkey
     monkeypatch.setattr(rf, "_load_state", lambda: None)
     job = next(j for j in rf.JOBS if j["name"] == "prices"); real_fn = job["fn"]; job["fn"] = boom
     try:
-        real_run_job("prices"); real_run_job("prices")
-        assert len(challenges.list_open("all", 500)) == before
+        for _ in range(9):
+            real_run_job("prices")
+        assert len(challenges.list_open("all", 500)) == before, "nine minutes of a one-minute job is still weather"
         real_run_job("prices")
         after = challenges.list_open("all", 500)
-        assert len(after) == before + 1 and any("keeps failing" in c["task"] and "3 times in a row" in c["blocked_by"] for c in after)
+        assert len(after) == before + 1 and any("keeps failing" in c["task"] and "10 times in a row" in c["blocked_by"] for c in after)
+        # a machine with no network is not an engine defect: DNS failures never become a challenge
+        rf._fail_streak.clear()
+        def dns(): raise ConnectionError("HTTPSConnectionPool(host='x', port=443): Max retries exceeded (Caused by NameResolutionError(\"Failed to resolve 'x'\"))")
+        job["fn"] = dns
+        for _ in range(12):
+            real_run_job("prices")
+        assert len(challenges.list_open("all", 500)) == before + 1
     finally:
         job["fn"] = real_fn; rf._fail_streak.clear()
+
+
+def test_patch_prices_falls_back_to_the_second_ticker_when_the_venue_is_down(monkeypatch):
+    import json
+    from backend.market import context as cm, exchanges, sources
+    from backend.database import get_db
+    cm._init(); conn = get_db()
+    conn.execute("INSERT INTO market_snapshots (snapshot_json) VALUES (?)", (json.dumps({"crypto_markets": [{"symbol": "BTC", "price": 1.0, "chg_24h": 0.0, "vol_24h_usd": 1.0, "oi_usd": 5.0}], "crypto": {"assets": {"BTC": {"price": 1.0}}}}),))
+    conn.commit(); conn.close()
+    def down(body, timeout=15.0): raise ConnectionError("venue unreachable")
+    monkeypatch.setattr(exchanges, "_hl", down)
+    monkeypatch.setattr(sources, "_json", lambda url, params=None, timeout=15.0, headers=None: [{"symbol": "BTCUSDT", "lastPrice": "65000", "priceChangePercent": "2.5", "quoteVolume": "1000000"}, {"symbol": "BTCBUSD", "lastPrice": "1"}] if "fapi.binance.com" in url else None)
+    r = cm.patch_prices()
+    assert r["ok"] and r["source"].startswith("fallback") and r["venue_error"].startswith("venue") and r["live_symbols"] == 1
+    conn = get_db(); row = json.loads(conn.execute("SELECT snapshot_json FROM market_snapshots ORDER BY id DESC LIMIT 1").fetchone()["snapshot_json"]); conn.close()
+    btc = row["crypto_markets"][0]
+    assert btc["price"] == 65000.0 and btc["chg_24h"] == 2.5 and btc["oi_usd"] == 5.0, "price and 24h move; OI is left as it was, never zeroed"
+    monkeypatch.setattr(sources, "_json", lambda *a, **k: None)
+    r2 = cm.patch_prices()
+    assert not r2["ok"] and "venue" in r2["error"]

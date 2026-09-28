@@ -22,13 +22,14 @@ Jobs (defaults):
 """
 from __future__ import annotations
 import json
+import math
 import threading
 import time
 from datetime import datetime, timezone
 from typing import Any, Callable, Dict, List, Optional
 
 from .database import get_db, get_setting
-from .security import redact
+from .security import audit, redact
 
 _lock = threading.Lock()
 _fail_streak: Dict[str, int] = {}          # consecutive failures per job; reset on success
@@ -239,7 +240,12 @@ def run_job(name: str) -> Dict[str, Any]:
     except Exception as e:
         ok, error = False, redact(str(e))[:300]
         streak = _fail_streak.get(name, 0) + 1; _fail_streak[name] = streak
-        if streak >= 3:                                    # a flaky minute is not a challenge; three failures in a row are
+        offline = any(x in error for x in ("Failed to resolve", "NameResolutionError", "nodename nor servname", "Temporary failure in name resolution", "Network is unreachable"))
+        needed = max(3, math.ceil(10 / max(0.5, interval_min(job))))   # ten minutes of continuous failure, never fewer than three runs
+        if offline:
+            if streak == needed:
+                audit("engine.offline", {"job": name, "streak": streak}, actor="refresher")      # this machine has no network: not a defect in the engine
+        elif streak >= needed:
             try:
                 from . import challenges
                 challenges.log("job_failed", f"background job {name} keeps failing", f"{type(e).__name__}: {error[:200]} ({streak} times in a row)", source="refresher", context={"job": name, "streak": streak})

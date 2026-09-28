@@ -224,28 +224,12 @@ def patch_prices() -> Dict[str, Any]:
     if not r:
         conn.close(); return {"ok": False, "error": "no snapshot yet"}
     ctx = json.loads(r["snapshot_json"])
-    res = _hl({"type": "metaAndAssetCtxs"})
-    if isinstance(res, str):
-        try:
-            res = json.loads(res)
-        except Exception:
-            res = None
-    # the venue answers [meta, assetCtxs]; anything else is a bad reply, not a reason to crash every minute
-    if not (isinstance(res, (list, tuple)) and len(res) >= 2 and isinstance(res[0], dict) and isinstance(res[1], list)):
-        conn.close()
-        return {"ok": False, "error": f"unexpected venue reply shape: {type(res).__name__}"}
-    meta, ctxs = res[0], res[1]
-    live: Dict[str, Dict[str, Any]] = {}
-    for u, a in zip(meta.get("universe") or [], ctxs or []):
-        if not isinstance(u, dict) or not isinstance(a, dict):
-            continue
-        try:
-            px = float(a.get("markPx") or 0); prev = float(a.get("prevDayPx") or 0)
-            if px <= 0:
-                continue
-            live[u["name"]] = {"price": px, "chg_24h": round((px / prev - 1) * 100, 2) if prev else None, "vol_24h_usd": float(a.get("dayNtlVlm") or 0) or None, "oi_usd": (float(a.get("openInterest") or 0) * px) or None, "funding_apr_pct": round(float(a.get("funding") or 0) * 24 * 365 * 100, 1) if a.get("funding") is not None else None}
-        except Exception:
-            continue
+    live, source, venue_error = _live_from_venue()
+    if not live:                                            # venue down or nonsense: the fallback keeps price and 24h moving; OI and funding wait for the venue
+        live, source = _live_from_fallback()
+        if not live:
+            conn.close()
+            return {"ok": False, "error": venue_error or "no live prices from the venue or the fallback"}
     patched = 0
     for key in ("crypto_markets", "equities", "indices", "commodities", "macro", "crypto_movers", "equity_movers", "index_movers", "commodity_movers", "oi_movers"):
         for row in _section_rows(ctx.get(key)):
@@ -269,7 +253,59 @@ def patch_prices() -> Dict[str, Any]:
     if ctx.get("crypto_markets"):
         ctx["crypto_movers"] = _movers(ctx["crypto_markets"])
     ctx["prices_at"] = datetime.now(timezone.utc).isoformat()
-    ctx["prices_source"] = "liquidity venue mark prices (1-min ticker)"
+    ctx["prices_source"] = source
     conn.execute("UPDATE market_snapshots SET snapshot_json=? WHERE id=?", (json.dumps(ctx, default=str), r["id"]))
     conn.commit(); conn.close()
-    return {"ok": True, "patched": patched, "live_symbols": len(live), "prices_at": ctx["prices_at"]}
+    return {"ok": True, "patched": patched, "live_symbols": len(live), "prices_at": ctx["prices_at"], "source": source, **({"venue_error": venue_error} if venue_error else {})}
+
+
+def _live_from_venue():
+    """[meta, assetCtxs] from the liquidity venue → per-symbol price, 24h change, notional, OI, funding. ({}, "", error) when it cannot."""
+    from .exchanges import _hl
+    try:
+        res = _hl({"type": "metaAndAssetCtxs"})
+    except Exception as e:
+        return {}, "", f"venue: {str(e)[:160]}"
+    if isinstance(res, str):
+        try:
+            res = json.loads(res)
+        except Exception:
+            res = None
+    # the venue answers [meta, assetCtxs]; anything else is a bad reply, not a reason to crash every minute
+    if not (isinstance(res, (list, tuple)) and len(res) >= 2 and isinstance(res[0], dict) and isinstance(res[1], list)):
+        return {}, "", f"unexpected venue reply shape: {type(res).__name__}"
+    meta, ctxs = res[0], res[1]
+    live: Dict[str, Dict[str, Any]] = {}
+    for u, a in zip(meta.get("universe") or [], ctxs or []):
+        if not isinstance(u, dict) or not isinstance(a, dict):
+            continue
+        try:
+            px = float(a.get("markPx") or 0); prev = float(a.get("prevDayPx") or 0)
+            if px <= 0:
+                continue
+            live[u["name"]] = {"price": px, "chg_24h": round((px / prev - 1) * 100, 2) if prev else None, "vol_24h_usd": float(a.get("dayNtlVlm") or 0) or None, "oi_usd": (float(a.get("openInterest") or 0) * px) or None, "funding_apr_pct": round(float(a.get("funding") or 0) * 24 * 365 * 100, 1) if a.get("funding") is not None else None}
+        except Exception:
+            continue
+    return live, "liquidity venue mark prices (1-min ticker)", ""
+
+
+def _live_from_fallback():
+    """A second public futures ticker (already on the allowlist) for price, 24h change and notional only; never OI or funding."""
+    from . import sources
+    try:
+        rows = sources._json("https://fapi.binance.com/fapi/v1/ticker/24hr", None, 20.0) or []
+    except Exception:
+        return {}, ""
+    live: Dict[str, Dict[str, Any]] = {}
+    for t in rows if isinstance(rows, list) else []:
+        sym = str(t.get("symbol") or "")
+        if not sym.endswith("USDT"):
+            continue
+        try:
+            px = float(t.get("lastPrice") or 0)
+            if px <= 0:
+                continue
+            live[sym[:-4]] = {"price": px, "chg_24h": round(float(t.get("priceChangePercent") or 0), 2), "vol_24h_usd": float(t.get("quoteVolume") or 0) or None, "oi_usd": None, "funding_apr_pct": None}
+        except Exception:
+            continue
+    return live, "fallback futures ticker (price and 24h only; OI and funding return with the venue)"

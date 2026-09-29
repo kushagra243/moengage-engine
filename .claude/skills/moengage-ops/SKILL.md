@@ -5,6 +5,13 @@ description: How Claude operates MoEngage for CoinDCX through this engine's CLI 
 
 # Operating MoEngage: Claude thinks, the CLI does, a person approves
 
+## If the engine is not working
+```bash
+./cli.py brain pause --why "debugging"   # no model call, no credits, alerts keep running
+./cli.py diagnose --push                # one redacted bundle → GitHub issue [diagnose] <machine>; the builder reads it
+```
+Resume with `./cli.py brain resume` once the builder has shipped the fix and `./cli.py update` has pulled it.
+
 ## The loop (every session starts here)
 ```bash
 ./cli.py doctor --json        # mode, model, missing answers, alerts preflight, telegram — in one read

@@ -462,10 +462,33 @@ def slack(a):
         save_plain({"slack_ask_approval": a.action}); _out(a, {"slack_ask_approval": a.action}, f"slack approvals {a.action}")
 
 
+def diagnose_cmd(a):
+    """Everything the builder needs, no model call: ./cli.py diagnose [--push] [--out file] [--days 2]."""
+    from . import diagnose as dg
+    b = dg.bundle(a.days)
+    if a.out:
+        open(a.out, "w").write(dg.markdown(b) if a.out.endswith(".md") else json.dumps(b, indent=1, default=str)); print(f"wrote {a.out} (redacted; counts, errors and configuration only)")
+    if a.push:
+        r = dg.push(b); print(f"github issue {r.get('action')} #{r.get('issue')}" if r.get("ok") else f"could not push · {r.get('error')} — use --out diagnose.md and send the file")
+    if not a.out and not a.push:
+        _out(a, b, dg.markdown(b))
+
+
+def brain_cmd(a):
+    from . import diagnose as dg
+    if a.action == "pause":
+        _out(a, dg.pause(actor="cli", why=a.why or "operator paused it"), "brain paused · no model call will be made (alerts, refresh jobs and dashboards keep running) · ./cli.py brain resume to continue")
+    elif a.action == "resume":
+        _out(a, dg.resume(actor="cli"), "brain resumed")
+    else:
+        from .llm import budget
+        st = budget.status(); _out(a, st, f"brain {'PAUSED' if dg.paused() else 'running'} · ${st['spent_today_usd']:.2f} of ${st['daily_budget_usd']:.2f} today · {st['state']}")
+
+
 def add_parsers(sp) -> None:
     def J(p):
         p.add_argument("--json", action="store_true", help="machine-readable output"); return p
-    for name in ("today", "asks", "doctor", "answer", "secret", "telegram", "test_users", "test_send", "launch", "decide", "alerts_run", "challenges_cmd", "watch", "slack", "role_cmd", "telemetry_cmd"):
+    for name in ("today", "asks", "doctor", "answer", "secret", "telegram", "test_users", "test_send", "launch", "decide", "alerts_run", "challenges_cmd", "watch", "slack", "role_cmd", "telemetry_cmd", "diagnose_cmd", "brain_cmd"):
         globals()[name] = _booted(globals()[name])
     J(sp.add_parser("today", help="today's decisions, what moved, what was handled")).set_defaults(fn=today)
     J(sp.add_parser("asks", help="every input the engine is missing, each with the command that answers it")).set_defaults(fn=asks)
@@ -489,6 +512,8 @@ def add_parsers(sp) -> None:
     s.add_argument("action", choices=["list", "show", "prompt", "resolve", "building", "wontfix", "reopen", "export", "import", "push", "pull", "log"]); s.add_argument("id", nargs="?", type=int)
     s.add_argument("--status"); s.add_argument("--limit", type=int, default=20); s.add_argument("--out"); s.add_argument("--file"); s.add_argument("--commit"); s.add_argument("--note"); s.add_argument("--task"); s.add_argument("--blocked"); s.add_argument("--tried")
     s.set_defaults(fn=challenges_cmd)
+    s = J(sp.add_parser("diagnose", help="one redacted bundle for the builder, no model call: --push files it as a GitHub issue, --out writes a file")); s.add_argument("--push", action="store_true"); s.add_argument("--out"); s.add_argument("--days", type=int, default=2); s.set_defaults(fn=diagnose_cmd)
+    s = J(sp.add_parser("brain", help="pause | resume | status — pause stops every model call at once so nothing burns credits while you debug")); s.add_argument("action", nargs="?", default="status", choices=["pause", "resume", "status"]); s.add_argument("--why"); s.set_defaults(fn=brain_cmd)
     s = J(sp.add_parser("role", help="operator (holds the workspace) | builder (never holds credentials or customer ids; reads challenges, ships fixes)")); s.add_argument("role", nargs="?", choices=["operator", "builder"]); s.set_defaults(fn=role_cmd)
     s = J(sp.add_parser("telemetry", help="what the operator may share with the builder: counts, latencies, spend; never content")); s.add_argument("--days", type=int, default=7); s.add_argument("--out"); s.set_defaults(fn=telemetry_cmd)
     s = J(sp.add_parser("slack", help="approvals from Slack: status | setup --channel C… --approvers U…,U… | poll | ask <proposal id> | on | off"))

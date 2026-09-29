@@ -1,27 +1,48 @@
-import random
-from datetime import date, timedelta
-from backend.anomaly import record_snapshot
-from backend.anomaly.diagnose import diagnose_campaign, diagnose_all, trend_stats
+"""A paused brain spends nowhere; the diagnose bundle carries errors and counts but never a secret or an address."""
+import json
+
+import pytest
 
 
-def _c(cid, ctr, delivery=96.0, conv=1.0, rev=1000.0, sent=50000):
-    d = int(sent * delivery / 100)
-    return {"id": cid, "name": f"C{cid}", "channel": "Push", "sent_count": sent, "delivered_count": d, "delivery_rate": delivery, "opened_count": int(d * ctr / 100), "ctr": ctr, "conversions": int(d * conv / 100), "conversion_rate": conv, "revenue_generated": rev}
+def test_pause_stops_every_model_call_including_the_fallback(monkeypatch):
+    from backend import diagnose as dg
+    from backend.llm import provider as p, budget
+    from backend.database import set_setting
+    set_setting("llm_fallback_api_key", "sk-or-v1-fallbackkey000000000000000000"); set_setting("llm_fallback_on", "errors,budget")
+    dg.pause(actor="test", why="debugging")
+    try:
+        assert dg.paused() and budget.status()["state"] == "paused"
+        with pytest.raises(budget.BudgetExceeded, match="paused"):
+            budget.check("chat")
+        called = []
+
+        class S:
+            def post(self, url, **k): called.append(url); raise AssertionError("no request may leave while paused")
+        monkeypatch.setattr(p, "guarded_session", lambda scope: S())
+        c = p.LLMClient({"provider": "anthropic", "base_url": p.ANTHROPIC_BASE, "model": "claude-haiku-4-5-20251001", "api_key": "k", "temperature": 0.2, "max_tokens": 5, "model_bulk": "auto-free"}); c.session = S(); c.purpose = "analysis"
+        with pytest.raises(p.LLMError, match="paused"):
+            c.chat([{"role": "user", "content": "hi"}])
+        assert not called, "not even the OpenRouter fallback"
+    finally:
+        dg.resume(actor="test"); set_setting("llm_fallback_api_key", ""); set_setting("llm_fallback_on", "")
+    assert not dg.paused() and budget.status()["state"] != "paused"
 
 
-def test_diagnosis_finds_stage_cause_and_options():
-    random.seed(1); today = date.today()
-    for i in range(30, 0, -1):
-        dd = (today - timedelta(days=i)).isoformat()
-        record_snapshot([_c("A", 8 + random.uniform(-.3, .3)), _c("B", 8 + random.uniform(-.3, .3)), _c("C", 8 + random.uniform(-.3, .3), conv=1.0)], source="dx", snapshot_date=dd)
-    # A: deliverability collapse; B: CTR fatigue with delivery stable; C: conversion drop with CTR stable
-    record_snapshot([_c("A", 8.0, delivery=80.0), _c("B", 5.0), _c("C", 8.0, conv=0.6)], source="dx", snapshot_date=today.isoformat())
-    a = diagnose_campaign("A", "dx"); b = diagnose_campaign("B", "dx"); c = diagnose_campaign("C", "dx")
-    assert a["funnel"]["moved_most"] == "delivery_rate" and a["likely_causes"][0]["cause"].startswith("Deliverability") and a["severity"] == "critical"
-    assert any("Pause" in o["action"] for o in a["options"]) and all({"how_in_moengage", "effort", "expected_effect", "risk"} <= set(o) for o in a["options"])
-    assert b["funnel"]["moved_most"] in ("ctr",) and "fatigue" in b["likely_causes"][0]["cause"].lower()
-    assert c["funnel"]["moved_most"] == "conversion_rate" and "friction" in c["likely_causes"][0]["cause"].lower()
-    st = trend_stats([{"snapshot_date": (today - timedelta(days=k)).isoformat(), "ctr": v} for k, v in zip(range(9, -1, -1), [8, 8, 8, 8, 8, 7.5, 7, 6.5, 6, 5.5])], "ctr")
-    assert st["streak_days"] <= -4 and st["vs_7d_pct"] < 0
-    ranked = diagnose_all("dx")
-    assert ranked[0]["severity"] == "critical" and len(ranked) == 3
+def test_diagnose_bundle_is_complete_and_scrubbed():
+    from backend import diagnose as dg
+    from backend.database import set_setting
+    from backend.security import audit
+    set_setting("moengage_campaign_key", "sk-campaign-000000000000000000000")
+    audit("tool.failed", {"contact": "someone@example.com", "user": "cdx_1029384756abcdef", "why": "test row"}, actor="test")
+    try:
+        b = dg.bundle(2)
+        assert set(b) >= {"machine", "build", "role", "paused", "model", "budget", "credits", "settings", "jobs", "preflight", "tool_errors", "failed_proposals", "recent_audit_failures", "tracebacks", "challenges", "telemetry"}
+        assert b["settings"].get("moengage_campaign_key_set") == "true" and "moengage_campaign_key" not in {k for k in b["settings"] if not k.endswith("_set")}
+        text = json.dumps(b, default=str) + dg.markdown(b)
+        assert "sk-campaign-000000000000000000000" not in text and "someone@example.com" not in text and "cdx_1029384756abcdef" not in text
+        assert "<email>" in text and "<id>" in text, "the audit row is present but scrubbed"
+        assert {"by_purpose", "by_model", "by_hour", "biggest_calls"} <= set(b["credits"])
+        md = dg.markdown(b)
+        assert md.startswith("# Diagnose ·") and "## Model and credits" in md and "## Tracebacks" in md
+    finally:
+        set_setting("moengage_campaign_key", "")

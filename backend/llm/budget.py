@@ -47,6 +47,8 @@ def spend_today() -> Dict[str, float]:
 
 def check(purpose: str) -> None:
     """Raise BudgetExceeded when this purpose may not spend right now."""
+    if str(get_setting("llm_paused", "false")).lower() == "true":
+        raise BudgetExceeded("the brain is paused (./cli.py brain resume to continue); no model call is made while paused" + (f" · reason: {get_setting('llm_paused_why', '')}" if get_setting("llm_paused_why", "") else ""))
     b = daily_budget()
     if b <= 0:
         return                                   # 0 = unmetered (not recommended)
@@ -63,5 +65,5 @@ def status() -> Dict[str, Any]:
     b = daily_budget(); sp = spend_today()
     left = max(0.0, b - sp["total"]) if b else None
     return {"daily_budget_usd": b, "spent_today_usd": round(sp["total"], 4), "background_today_usd": sp["background"], "background_share": background_share(), "calls_today": sp["calls"],
-            "left_usd": round(left, 4) if left is not None else None, "state": "unmetered" if not b else "paused" if sp["total"] >= b * 1.5 else "essential only" if sp["total"] >= b else "ok",
+            "left_usd": round(left, 4) if left is not None else None, "state": "paused" if str(get_setting("llm_paused", "false")).lower() == "true" else "unmetered" if not b else "paused" if sp["total"] >= b * 1.5 else "essential only" if sp["total"] >= b else "ok",
             "premium_purposes": [x.strip() for x in (get_setting("llm_premium_purposes", "") or "").split(",") if x.strip()], "premium_model": get_setting("llm_premium_model", "claude-sonnet-5")}

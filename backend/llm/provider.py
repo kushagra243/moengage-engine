@@ -286,7 +286,7 @@ class LLMClient:
                     _budget_check(purpose)
                 except BudgetExceeded as e:
                     fb = fallback_cfg(self.cfg)
-                    if fb and "budget" in fallback_on():        # credits are spent: the work moves to OpenRouter (free chain first) instead of waiting
+                    if fb and "budget" in fallback_on() and "paused" not in str(e):        # credits are spent: the work moves to OpenRouter (free chain first) instead of waiting; a paused brain spends nowhere
                         log.info("budget spent for %s; using the OpenRouter fallback", purpose)
                         out = self._via_fallback(fb, messages, tools, tool_choice, max_tokens, temperature, response_format, tier="bulk" if purpose not in ("chat", "copy", "review", "code") else "main")
                         out["fallback_from"] = "budget"
